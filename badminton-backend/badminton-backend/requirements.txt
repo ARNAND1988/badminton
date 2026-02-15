@@ -1,0 +1,14 @@
+flask
+gunicorn
+flask_sqlalchemy
+psycopg2-binary
+flask-login
+flask-wtf
+flask-limiter
+flask-talisman
+redis
+passlib
+twilio
+PyJWT
+pytest
+pytest-cov

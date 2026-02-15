@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Verify OTP</title>
+</head>
+<body>
+  <h2>Verify OTP</h2>
+  <form id="verifyForm">
+    <label>Phone:</label><br>
+    <input id="phone" name="phone" /><br>
+    <label>OTP:</label><br>
+    <input id="otp" name="otp" /><br>
+    <button type="submit">Verify</button>
+  </form>
+  <div id="msg"></div>
+  <script>
+    // Prefill from mock localStorage if present
+    (function(){
+      const mockPhone = localStorage.getItem('mock_phone');
+      const mockOtp = localStorage.getItem('mock_otp');
+      if(mockPhone) document.getElementById('phone').value = mockPhone;
+      if(mockOtp) document.getElementById('otp').value = mockOtp;
+    })();
+
+    document.getElementById('verifyForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const phone = document.getElementById('phone').value;
+      const otp = document.getElementById('otp').value;
+      const res = await fetch('/api/auth/verify', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({phone, otp})
+      });
+      const data = await res.json();
+      if(res.ok) {
+        // store token for future requests
+        localStorage.setItem('auth_token', data.token);
+        // clear mock values after successful verify
+        localStorage.removeItem('mock_otp');
+        localStorage.removeItem('mock_phone');
+        document.getElementById('msg').innerText = 'Verified. Fetching profile...';
+        // fetch profile
+        try {
+          const meRes = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + data.token } });
+          const meData = await meRes.json();
+          if(meRes.ok) {
+            const u = meData.user;
+            document.getElementById('msg').innerText = 'Welcome, ' + (u.name || u.phone) + ' — phone: ' + u.phone;
+          } else {
+            document.getElementById('msg').innerText = 'Verified, but failed to load profile: ' + (meData.error || JSON.stringify(meData));
+          }
+        } catch (err) {
+          document.getElementById('msg').innerText = 'Verified, but error fetching profile.';
+        }
+      } else {
+        document.getElementById('msg').innerText = data.error || JSON.stringify(data);
+      }
+    })
+  </script>
+</body>
+</html>

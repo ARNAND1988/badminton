@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Register / Login</title>
+</head>
+<body>
+  <h2>Register / Login via WhatsApp OTP</h2>
+  <form id="sendForm">
+    <label>Phone (E.164, e.g. +1234567890):</label><br>
+    <input id="phone" name="phone" /><br>
+    <label>Name (optional):</label><br>
+    <input id="name" name="name" /><br>
+    <button type="submit">Send OTP</button>
+  </form>
+  <div id="msg"></div>
+  <script>
+    document.getElementById('sendForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const phone = document.getElementById('phone').value;
+      const name = document.getElementById('name').value;
+      const res = await fetch('/api/auth/send-otp', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({phone, name})
+      });
+      const data = await res.json();
+      if(res.ok) {
+        if(data.mock_otp) {
+          // show OTP in dev and save to localStorage so verify page can prefill
+          localStorage.setItem('mock_otp', data.mock_otp);
+          localStorage.setItem('mock_phone', phone);
+          document.getElementById('msg').innerHTML = 'OTP (mock) sent: <strong>' + data.mock_otp + '</strong>. Go to <a href="/verify.html">verify page</a>.';
+        } else {
+          document.getElementById('msg').innerHTML = 'OTP sent. Go to <a href="/verify.html">verify page</a>.';
+        }
+      } else {
+        document.getElementById('msg').innerText = data.error || JSON.stringify(data);
+      }
+    })
+  </script>
+</body>
+</html>

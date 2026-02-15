@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: run-sql-init
+  namespace: nieuwegein-badminton
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: psql
+        image: postgres:15-alpine
+        env:
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-creds
+              key: password
+        - name: PGDATABASE
+          value: "badminton"
+        command: ["sh","-c"]
+        args:
+          - psql -h postgres -U badminton_user -d badminton -f /scripts/init.sql
+        volumeMounts:
+        - name: sql
+          mountPath: /scripts
+      volumes:
+      - name: sql
+        configMap:
+          name: sql-init
+  backoffLimit: 0

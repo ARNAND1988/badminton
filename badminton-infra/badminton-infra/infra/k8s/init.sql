@@ -1,0 +1,7 @@
+-- init.sql: create users table (based on alembic/versions/0001_initial_create_users_table.py)
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  phone VARCHAR(64) NOT NULL UNIQUE,
+  name VARCHAR(128),
+  created_at TIMESTAMP
+);

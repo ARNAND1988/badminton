@@ -451,3 +451,22 @@ def test_list_bookings_repopulates_upcoming_seed_data(client):
     assert len(bookings) == 3
     assert all(booking['status'] == 'confirmed' for booking in bookings)
     assert {booking['court']['name'] for booking in bookings} == {'Court 1', 'Court 2', 'Training Court'}
+
+
+def test_create_app_adds_court_map_link_to_existing_database(tmp_path, monkeypatch):
+    db_path = tmp_path / 'legacy.sqlite'
+    monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')
+
+    from app import create_app, db
+
+    app = create_app()
+    with app.app_context():
+        db.session.execute(db.text('ALTER TABLE courts DROP COLUMN map_link'))
+        db.session.commit()
+        db.session.remove()
+        db.engine.dispose()
+
+    app = create_app()
+    with app.app_context():
+        columns = {column['name'] for column in db.inspect(db.engine).get_columns('courts')}
+        assert 'map_link' in columns

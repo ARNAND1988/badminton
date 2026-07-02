@@ -1,13 +1,19 @@
 <template>
-  <nav class="sticky top-0 z-40 w-full border-b border-emerald-200/60 bg-white/85 px-4 shadow-lg shadow-emerald-950/10 backdrop-blur-xl sm:px-8">
-    <div class="container mx-auto flex h-16 items-center justify-between md:px-4">
-      <router-link to="/availability" class="flex items-center gap-3 text-emerald-600">
-        <img
-          :src="logoUrl"
-          alt="Nieuwegein Badminton"
-          class="h-11 w-11 rounded-full object-cover shadow-md ring-2 ring-emerald-200"
-        >
-        <span class="hidden font-semibold text-emerald-950 sm:inline">Nieuwegein Badminton</span>
+  <nav class="sticky top-0 z-40 w-full border-b border-sky-200/20 bg-slate-950/80 px-3 shadow-2xl shadow-sky-950/30 backdrop-blur-2xl sm:px-8">
+    <div class="container mx-auto flex min-h-16 items-center justify-between gap-3 py-2 md:px-4">
+      <router-link to="/availability" class="group flex min-w-0 items-center gap-3 text-sky-100">
+        <span class="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-950 p-1 shadow-[0_0_30px_rgba(56,189,248,0.35)] ring-1 ring-sky-300/50 transition duration-300 group-hover:scale-105 sm:h-14 sm:w-14">
+          <span class="absolute inset-0 rounded-full bg-gradient-to-br from-sky-400/35 via-transparent to-emerald-300/30 blur-md"></span>
+          <img
+            :src="logoUrl"
+            alt="Nieuwegein Badminton"
+            class="relative h-full w-full rounded-full object-cover"
+          >
+        </span>
+        <span class="min-w-0 leading-tight">
+          <span class="block truncate text-sm font-black uppercase tracking-[0.24em] text-white sm:text-base">Nieuwegein</span>
+          <span class="block truncate text-[0.65rem] font-semibold uppercase tracking-[0.32em] text-sky-200/80 sm:text-xs">Badminton</span>
+        </span>
       </router-link>
 
       <div class="hidden text-gray-500 md:block">
@@ -24,7 +30,7 @@
         <button
           v-if="isLoggedIn"
           type="button"
-          class="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600 text-base font-bold uppercase text-white shadow-sm ring-2 ring-emerald-100 transition hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-200"
+          class="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-sky-300/50 bg-slate-950 text-base font-black uppercase text-white shadow-[0_0_24px_rgba(14,165,233,0.45)] ring-2 ring-sky-400/20 transition hover:scale-105 hover:border-emerald-200 focus:outline-none focus:ring-4 focus:ring-sky-300/40"
           :aria-expanded="isAccountMenuOpen"
           aria-label="Open account menu"
           @click="toggleAccountMenu"
@@ -34,21 +40,23 @@
         <router-link
           v-else
           to="/login"
-          class="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-gray-50 shadow-sm hover:bg-emerald-700"
+          class="group relative inline-flex items-center gap-2 overflow-hidden rounded-2xl border border-sky-300/40 bg-slate-950 px-4 py-2 text-sm font-bold uppercase tracking-[0.18em] text-sky-50 shadow-[0_0_24px_rgba(14,165,233,0.35)] transition duration-300 hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-[0_0_34px_rgba(45,212,191,0.45)]"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M3 3a1 1 0 011 1v12a1 1 0 11-2 0V4a1 1 0 011-1zm7.707 3.293a1 1 0 010 1.414L9.414 9H17a1 1 0 110 2H9.414l1.293 1.293a1 1 0 01-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0z" clip-rule="evenodd" />
+          <span class="absolute inset-0 bg-gradient-to-r from-sky-500/30 via-cyan-300/20 to-emerald-300/30 opacity-0 transition group-hover:opacity-100"></span>
+          <svg xmlns="http://www.w3.org/2000/svg" class="relative h-5 w-5 drop-shadow-[0_0_8px_rgba(125,211,252,0.9)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M12 3.5a4.25 4.25 0 014.25 4.25c0 1.35-.63 2.56-1.61 3.34A7.25 7.25 0 0119.25 18v.75a1.75 1.75 0 01-1.75 1.75h-11a1.75 1.75 0 01-1.75-1.75V18a7.25 7.25 0 014.61-6.91 4.23 4.23 0 01-1.61-3.34A4.25 4.25 0 0112 3.5z" />
+            <path d="M18.5 5.5l.55 1.2 1.2.55-1.2.55-.55 1.2-.55-1.2-1.2-.55 1.2-.55.55-1.2z" fill="currentColor" stroke="none" />
           </svg>
-          <span>Login</span>
+          <span class="relative">Login</span>
         </router-link>
 
         <div
           v-if="isLoggedIn && isAccountMenuOpen"
-          class="absolute right-0 mt-3 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl"
+          class="absolute right-0 mt-3 w-56 rounded-2xl border border-sky-200/30 bg-slate-950/95 p-2 text-sky-50 shadow-2xl shadow-sky-950/40 backdrop-blur-xl"
         >
           <div class="border-b border-slate-100 px-3 py-2">
             <p class="text-xs font-medium uppercase tracking-wide text-slate-400">Signed in as</p>
-            <p class="truncate text-sm font-semibold text-slate-800">{{ userDisplayName }}</p>
+            <p class="truncate text-sm font-semibold text-sky-50">{{ userDisplayName }}</p>
           </div>
           <button
             type="button"
@@ -146,10 +154,10 @@ export default {
     const mobilePageLinks = computed(() => pageLinks.value.slice(0, 3))
 
     function navTextClass(path) {
-      const base = 'block rounded-lg px-4 py-2 text-sm transition hover:bg-emerald-50 hover:text-emerald-700'
+      const base = 'block rounded-xl border border-transparent px-4 py-2 text-sm font-bold transition hover:border-sky-300/40 hover:bg-white/10 hover:text-sky-100'
       return route.path === path
-        ? `${base} bg-emerald-100 text-emerald-800 shadow-sm`
-        : `${base} text-slate-600`
+        ? `${base} border-sky-300/50 bg-sky-400/15 text-white shadow-[0_0_18px_rgba(14,165,233,0.25)]`
+        : `${base} text-sky-100/75`
     }
 
     function mobileNavClass(path) {

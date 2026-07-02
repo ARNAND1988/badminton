@@ -1,3 +1,5 @@
+import { ref } from 'vue'
+
 const SESSION_KEYS = [
   'auth_token',
   'member_phone',
@@ -6,15 +8,22 @@ const SESSION_KEYS = [
   'member_role'
 ]
 
+export const authChangeVersion = ref(0)
+
+function emitAuthChanged() {
+  authChangeVersion.value += 1
+  window.dispatchEvent(new CustomEvent('badminton-auth-changed'))
+}
+
 export function clearAuthSession() {
   SESSION_KEYS.forEach((key) => {
     clearSessionValue(key)
   })
-  window.dispatchEvent(new CustomEvent('badminton-auth-changed'))
+  emitAuthChanged()
 }
 
 export function notifyAuthChanged() {
-  window.dispatchEvent(new CustomEvent('badminton-auth-changed'))
+  emitAuthChanged()
 }
 
 export function getSessionValue(key) {
@@ -32,3 +41,9 @@ export function clearSessionValue(key) {
   localStorage.removeItem(key)
   sessionStorage.removeItem(key)
 }
+
+window.addEventListener('storage', (event) => {
+  if (SESSION_KEYS.includes(event.key)) {
+    emitAuthChanged()
+  }
+})

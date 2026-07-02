@@ -47,9 +47,9 @@
 </template>
 
 <script>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { clearAuthSession, getSessionValue } from '../authSession'
+import { authChangeVersion, clearAuthSession, getSessionValue } from '../authSession'
 import logoUrl from '../assets/nieuwegein-badminton-logo.svg'
 
 export default {
@@ -57,17 +57,13 @@ export default {
   setup() {
     const route = useRoute()
     const router = useRouter()
-    const isLoggedIn = ref(Boolean(getSessionValue('auth_token')))
-
-    function refreshAuthState() {
-      isLoggedIn.value = Boolean(getSessionValue('auth_token'))
-    }
-
-    router.afterEach(() => refreshAuthState())
+    const isLoggedIn = computed(() => {
+      authChangeVersion.value
+      return Boolean(getSessionValue('auth_token'))
+    })
 
     function logout() {
       clearAuthSession()
-      refreshAuthState()
       router.replace('/availability')
     }
 
@@ -77,6 +73,7 @@ export default {
         { label: 'Bookings', to: '/bookings' },
         { label: 'Costs', to: '/costs' },
       ]
+      authChangeVersion.value
       if (isLoggedIn.value && getSessionValue('member_role') === 'admin') {
         links.push({ label: 'Members', to: '/members' })
       }

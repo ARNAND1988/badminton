@@ -498,14 +498,39 @@ def test_completed_bookings_require_login_and_include_past_confirmed_bookings(cl
     anonymous_resp = client.get('/api/bookings?status=completed')
     assert anonymous_resp.status_code == 401
 
-    resp = client.get('/api/bookings?status=completed&page=1&per_page=1', headers={'Authorization': f'Bearer {token}'})
+    resp = client.get('/api/bookings?status=completed&page=1&per_page=100', headers={'Authorization': f'Bearer {token}'})
     assert resp.status_code == 200
     data = resp.get_json()
     assert data['pagination']['page'] == 1
-    assert data['pagination']['per_page'] == 1
+    assert data['pagination']['per_page'] == 100
     assert data['pagination']['total'] >= 1
     assert data['bookings'][0]['status'] == 'completed'
-    assert data['bookings'][0]['booking_date'] == '2020-01-01'
+    assert any(booking['booking_date'] == '2020-01-01' for booking in data['bookings'])
+
+
+def test_completed_bookings_backfill_historical_loaded_data(client, app):
+    with app.app_context():
+        user = User(phone='+31100000555', email='member555@example.com', name='Member 555', role='member')
+        db.session.add(user)
+        db.session.commit()
+        token = jwt.encode(
+            {'user_id': user.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    resp = client.get('/api/bookings?status=completed&page=1&per_page=10000', headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    historical = [
+        booking for booking in data['bookings']
+        if booking['notes'] == 'Historical booking imported from invoiced rental data'
+    ]
+    assert len(historical) == 38
+    assert data['pagination']['total'] >= 38
+    assert all(booking['status'] == 'completed' for booking in historical)
+    assert all(booking['invoice']['status'] == 'settled' for booking in historical)
+    assert {booking['court']['name'] for booking in historical} >= {'Gymzaal de Driemaster', 'Sportzaal De Sluis'}
 
 
 def test_misc_costs_require_login(client):

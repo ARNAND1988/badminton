@@ -227,6 +227,9 @@ WITH historical_bookings (booking_date, start_time, end_time, court_name, cost, 
 )
 INSERT INTO invoices (booking_id, total_amount, split_count, status, created_at)
 SELECT id, cost, 1, 'settled', CURRENT_TIMESTAMP
+FROM inserted_bookings
+UNION ALL
+SELECT id, cost, 1, 'settled', CURRENT_TIMESTAMP
 FROM settled_bookings
 ON CONFLICT (booking_id) DO UPDATE SET
   total_amount = EXCLUDED.total_amount,

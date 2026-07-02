@@ -220,6 +220,108 @@ def _ensure_upcoming_booking_data():
     db.session.commit()
 
 
+def _ensure_historical_booking_data():
+    """Backfill imported historical rental bookings for existing databases.
+
+    The Kubernetes SQL init script only runs for fresh database volumes. Long-lived
+    databases that predate that data still need the historical completed bookings
+    when the Costs page asks for completed booking settlement history.
+    """
+    historical_court_specs = {
+        'Gymzaal de Driemaster': 19.25,
+        'Sportzaal De Sluis': 25.50,
+        'Sportzaal Wijkersloot': 25.50,
+        'Gymzaal de Triangel': 19.25,
+    }
+    courts_by_name = {
+        court.name: court
+        for court in Court.query.filter(Court.name.in_(historical_court_specs.keys())).all()
+    }
+    for name, hourly_rate in historical_court_specs.items():
+        court = courts_by_name.get(name)
+        if not court:
+            court = Court(name=name)
+            db.session.add(court)
+            courts_by_name[name] = court
+        court.location = court.location or name
+        court.description = court.description or 'Historical booking location'
+        court.hourly_rate = court.hourly_rate or hourly_rate
+        court.is_active = True if court.is_active is None else court.is_active
+    db.session.flush()
+
+    historical_bookings = [
+        ('2025-10-19', '17:00', '18:30', 'Gymzaal de Driemaster', 28.88, datetime(2025, 10, 12, 19, 19)),
+        ('2025-10-26', '16:00', '18:00', 'Gymzaal de Driemaster', 38.50, datetime(2025, 10, 19, 18, 11)),
+        ('2025-11-08', '18:00', '20:00', 'Sportzaal De Sluis', 51.00, datetime(2025, 11, 1, 19, 32)),
+        ('2025-11-15', '17:30', '19:30', 'Sportzaal De Sluis', 51.00, datetime(2025, 11, 8, 19, 48)),
+        ('2025-11-23', '16:00', '18:00', 'Sportzaal Wijkersloot', 51.00, datetime(2025, 11, 15, 20, 10)),
+        ('2025-11-29', '17:00', '18:30', 'Sportzaal De Sluis', 38.25, datetime(2025, 11, 24, 20, 48)),
+        ('2025-12-06', '17:00', '19:00', 'Sportzaal Wijkersloot', 51.00, datetime(2025, 11, 30, 22, 7)),
+        ('2025-12-13', '18:00', '19:00', 'Gymzaal de Driemaster', 19.25, datetime(2025, 12, 12, 20, 50)),
+        ('2026-01-03', '17:00', '18:00', 'Gymzaal de Driemaster', 19.25, datetime(2025, 12, 31, 17, 30)),
+        ('2026-01-17', '17:00', '18:30', 'Sportzaal De Sluis', 38.25, datetime(2026, 1, 15, 9, 43)),
+        ('2026-01-24', '16:00', '17:00', 'Sportzaal De Sluis', 25.50, datetime(2026, 1, 22, 16, 28)),
+        ('2026-01-31', '17:30', '19:00', 'Sportzaal De Sluis', 38.25, datetime(2026, 1, 28, 8, 52)),
+        ('2026-02-07', '17:30', '18:30', 'Sportzaal De Sluis', 25.50, datetime(2026, 2, 3, 16, 16)),
+        ('2026-02-07', '19:00', '20:00', 'Sportzaal De Sluis', 25.50, datetime(2026, 2, 3, 16, 18)),
+        ('2026-02-14', '18:00', '19:00', 'Sportzaal De Sluis', 25.50, datetime(2026, 2, 9, 21, 56)),
+        ('2026-02-14', '19:30', '20:30', 'Sportzaal De Sluis', 25.50, datetime(2026, 2, 9, 21, 58)),
+        ('2026-02-17', '21:00', '22:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 2, 15, 18, 54)),
+        ('2026-02-21', '18:00', '19:00', 'Sportzaal De Sluis', 25.50, datetime(2026, 2, 18, 20, 54)),
+        ('2026-02-21', '19:30', '20:30', 'Sportzaal De Sluis', 25.50, datetime(2026, 2, 18, 20, 55)),
+        ('2026-02-27', '21:00', '22:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 2, 24, 16, 21)),
+        ('2026-02-28', '17:30', '18:30', 'Sportzaal De Sluis', 25.50, datetime(2026, 2, 26, 15, 16)),
+        ('2026-03-07', '20:00', '21:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 3, 3, 20, 15)),
+        ('2026-03-15', '16:30', '18:00', 'Gymzaal de Triangel', 28.88, datetime(2026, 3, 10, 9, 4)),
+        ('2026-03-21', '17:00', '18:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 3, 18, 17, 35)),
+        ('2026-03-28', '17:30', '19:00', 'Sportzaal De Sluis', 38.25, datetime(2026, 3, 25, 13, 43)),
+        ('2026-04-11', '18:00', '19:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 4, 9, 10, 15)),
+        ('2026-04-18', '18:30', '19:30', 'Gymzaal de Driemaster', 19.25, datetime(2026, 4, 16, 21, 34)),
+        ('2026-05-03', '18:00', '19:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 5, 2, 14, 23)),
+        ('2026-05-04', '18:00', '19:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 5, 3, 23, 33)),
+        ('2026-05-10', '18:30', '20:00', 'Sportzaal De Sluis', 38.25, datetime(2026, 5, 9, 19, 59)),
+        ('2026-05-16', '18:30', '19:30', 'Gymzaal de Driemaster', 19.25, datetime(2026, 5, 16, 13, 34)),
+        ('2026-06-07', '16:00', '18:00', 'Sportzaal Wijkersloot', 51.00, datetime(2026, 6, 4, 10, 9)),
+        ('2026-06-13', '17:30', '19:00', 'Sportzaal De Sluis', 38.25, datetime(2026, 6, 9, 20, 17)),
+        ('2026-06-19', '18:00', '19:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 6, 19, 17, 33)),
+        ('2026-06-20', '17:00', '18:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 6, 17, 20, 34)),
+        ('2026-06-20', '18:00', '19:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 6, 18, 19, 1)),
+        ('2026-06-26', '20:00', '21:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 6, 26, 9, 23)),
+        ('2026-06-28', '17:00', '18:00', 'Gymzaal de Driemaster', 19.25, datetime(2026, 6, 27, 21, 0)),
+    ]
+
+    for booking_date, start_time, end_time, court_name, cost, created_at in historical_bookings:
+        court = courts_by_name[court_name]
+        booking = Booking.query.filter_by(
+            court_id=court.id,
+            booking_date=booking_date,
+            start_time=start_time,
+            end_time=end_time,
+        ).first()
+        if not booking:
+            booking = Booking(
+                court_id=court.id,
+                booking_date=booking_date,
+                start_time=start_time,
+                end_time=end_time,
+                notes='Historical booking imported from invoiced rental data',
+                created_at=created_at,
+            )
+            db.session.add(booking)
+            db.session.flush()
+        booking.cost = cost
+        booking.status = 'completed'
+        if booking.invoice:
+            invoice = booking.invoice[0]
+        else:
+            invoice = Invoice(booking_id=booking.id)
+            db.session.add(invoice)
+        invoice.total_amount = cost
+        invoice.split_count = 1
+        invoice.status = 'settled'
+    db.session.commit()
+
+
 def _upsert_participant(booking, phone, name=None, status='tentative', is_adhoc=False):
     normalized_phone = (phone or '').strip()
     if not normalized_phone:
@@ -544,8 +646,8 @@ def update_booking(booking_id):
 @bookings_bp.route('/bookings', methods=['GET'])
 def list_bookings():
     _ensure_upcoming_booking_data()
-    today_value = datetime.utcnow().date().strftime('%Y-%m-%d')
     status_filter = (request.args.get('status') or '').strip().lower()
+    today_value = datetime.utcnow().date().strftime('%Y-%m-%d')
     page = _positive_int_arg('page', 1)
     per_page = _positive_int_arg('per_page', 25, maximum=100)
 
@@ -553,6 +655,7 @@ def list_bookings():
         user, error = _require_login()
         if error:
             return error
+        _ensure_historical_booking_data()
         query = Booking.query.filter(
             db.or_(Booking.status == 'completed', Booking.booking_date < today_value)
         ).order_by(Booking.booking_date.desc(), Booking.start_time.desc())

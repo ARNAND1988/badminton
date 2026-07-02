@@ -14,4 +14,6 @@ jobs:
     runs-on: [ self-hosted, pi5 ]
     steps:
       - name: Deploy latest main on Pi
+        env:
+          FORCE_DEPLOY: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: /home/admin/git-repo/badminton/badminton-infra/update-from-main.sh

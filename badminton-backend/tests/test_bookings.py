@@ -391,7 +391,7 @@ def test_member_can_set_family_attendance_for_booking(client, app):
     assert family_participant['status'] == 'attending'
 
 
-def test_misc_costs_admin_crud_and_public_list(client, app):
+def test_misc_costs_admin_crud_and_authenticated_list(client, app):
     with app.app_context():
         admin = User(phone='+31100000008', email='misc-admin@example.com', name='Misc Admin', role='admin')
         db.session.add(admin)
@@ -417,7 +417,7 @@ def test_misc_costs_admin_crud_and_public_list(client, app):
     assert cost['cost_per_person'] == 30.0
     assert cost['purchase_date'] == '2030-04-01'
 
-    public_resp = client.get('/api/misc-costs')
+    public_resp = client.get('/api/misc-costs', headers=headers)
     assert public_resp.status_code == 200
     assert len(public_resp.get_json()['costs']) == 1
 
@@ -470,3 +470,44 @@ def test_create_app_adds_court_map_link_to_existing_database(tmp_path, monkeypat
     with app.app_context():
         columns = {column['name'] for column in db.inspect(db.engine).get_columns('courts')}
         assert 'map_link' in columns
+
+
+def test_completed_bookings_require_login_and_include_past_confirmed_bookings(client, app):
+    from app.models import Booking
+
+    with app.app_context():
+        user = User(phone='+31100000444', email='member444@example.com', name='Member 444', role='member')
+        court = Court(name='History Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([user, court])
+        db.session.commit()
+        db.session.add(Booking(
+            court_id=court.id,
+            booking_date='2020-01-01',
+            start_time='18:00',
+            end_time='19:00',
+            cost=20,
+            status='confirmed',
+        ))
+        db.session.commit()
+        token = jwt.encode(
+            {'user_id': user.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    anonymous_resp = client.get('/api/bookings?status=completed')
+    assert anonymous_resp.status_code == 401
+
+    resp = client.get('/api/bookings?status=completed&page=1&per_page=1', headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['pagination']['page'] == 1
+    assert data['pagination']['per_page'] == 1
+    assert data['pagination']['total'] >= 1
+    assert data['bookings'][0]['status'] == 'completed'
+    assert data['bookings'][0]['booking_date'] == '2020-01-01'
+
+
+def test_misc_costs_require_login(client):
+    resp = client.get('/api/misc-costs')
+    assert resp.status_code == 401

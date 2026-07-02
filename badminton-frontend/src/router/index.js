@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Register from '../components/Register.vue'
 import Dashboard from '../components/Dashboard.vue'
+import { hasAuthSession } from '../authSession'
 
 const routes = [
   {
@@ -36,7 +37,7 @@ const routes = [
     name: 'costs',
     component: Dashboard,
     props: { initialView: 'costs' },
-    meta: { navLabel: 'Misc Costs' }
+    meta: { navLabel: 'Misc Costs', requiresAuth: true }
   },
   {
     path: '/members',
@@ -50,6 +51,13 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to) => {
+  if (to.meta.requiresAuth && !hasAuthSession()) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  return true
 })
 
 export default router

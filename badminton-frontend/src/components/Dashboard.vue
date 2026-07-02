@@ -388,7 +388,7 @@
       <div class="mt-8 space-y-4">
         <div>
           <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
-          <p class="section-copy">Settle completed court costs based on members marked attending.</p>
+          <p class="section-copy">Settle completed court costs based on members marked attending. Completed history is visible after login and loaded a page at a time.</p>
         </div>
 
         <div class="grid gap-4 lg:grid-cols-2">
@@ -435,6 +435,14 @@
               <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
             </div>
           </article>
+        </div>
+
+        <div v-if="completedBookingPagination.pages > 1" class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <span class="text-slate-600">Page {{ completedBookingPagination.page }} of {{ completedBookingPagination.pages }} · {{ completedBookingPagination.total }} completed bookings</span>
+          <div class="flex gap-2">
+            <button class="btn-secondary" :disabled="completedBookingPagination.page <= 1" @click="changeCompletedBookingPage(completedBookingPagination.page - 1)">Previous</button>
+            <button class="btn-secondary" :disabled="completedBookingPagination.page >= completedBookingPagination.pages" @click="changeCompletedBookingPage(completedBookingPagination.page + 1)">Next</button>
+          </div>
         </div>
         <p v-if="!completedBookings.length && !loading" class="text-sm text-slate-600">No completed bookings to settle yet.</p>
       </div>
@@ -557,6 +565,7 @@ export default {
     const adminUsers = ref([])
     const playDays = ref([])
     const miscCosts = ref([])
+    const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
     const loading = ref(false)
     const errorMsg = ref('')
     const editingBookingId = ref(null)
@@ -825,8 +834,16 @@ export default {
       await loadDashboard()
     }
 
-    async function loadBookings() {
-      const bookingsData = await fetchJson('/api/bookings')
+    async function loadBookings(options = {}) {
+      const params = new URLSearchParams()
+      if (options.status) params.set('status', options.status)
+      if (options.page) params.set('page', options.page)
+      if (options.perPage) params.set('per_page', options.perPage)
+      const query = params.toString()
+      const bookingsData = await fetchJson(`/api/bookings${query ? `?${query}` : ''}`)
+      if (options.status === 'completed') {
+        completedBookingPagination.value = bookingsData.pagination || completedBookingPagination.value
+      }
       bookings.value = bookingsData.bookings || []
     }
 
@@ -869,7 +886,7 @@ export default {
 
         if (activeView.value === 'bookings') {
           await Promise.all([
-            loadBookings(),
+            loadBookings({ status: 'upcoming', perPage: 100 }),
             loadPlayAvailability()
           ])
           if (loggedIn) {
@@ -884,9 +901,13 @@ export default {
             await loadFamilyMembers()
           }
         } else if (activeView.value === 'costs') {
+          if (!loggedIn) {
+            router.push('/login')
+            return
+          }
           await Promise.all([
             loadMiscCosts(),
-            loadBookings()
+            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
           ])
         } else if (activeView.value === 'members') {
           if (!loggedIn) {
@@ -904,6 +925,14 @@ export default {
       } finally {
         loading.value = false
       }
+    }
+
+    async function changeCompletedBookingPage(page) {
+      if (page < 1 || (completedBookingPagination.value.pages && page > completedBookingPagination.value.pages)) {
+        return
+      }
+      completedBookingPagination.value = { ...completedBookingPagination.value, page }
+      await loadDashboard()
     }
 
     async function createFamilyMember() {
@@ -1390,6 +1419,7 @@ export default {
       bookings,
       upcomingBookings,
       completedBookings,
+      completedBookingPagination,
       courts,
       familyMembers,
       familyAttendancePeople,
@@ -1434,6 +1464,7 @@ export default {
       addParticipant,
       createCourt,
       createAdminFamilyMember,
+      changeCompletedBookingPage,
       createFamilyMember,
       createInvoice,
       createMiscCost,

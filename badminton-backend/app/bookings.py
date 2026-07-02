@@ -121,6 +121,28 @@ def _admin_user_payload(user):
     return payload
 
 
+def _is_completed_booking(booking, today_value=None):
+    today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
+    return booking.status == 'completed' or booking.booking_date < today_value
+
+
+def _booking_payload(booking, today_value=None):
+    payload = booking.to_dict()
+    if _is_completed_booking(booking, today_value):
+        payload['status'] = 'completed'
+    return payload
+
+
+def _positive_int_arg(name, default, minimum=1, maximum=None):
+    try:
+        value = int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
 
 def _ensure_upcoming_booking_data():
     """Keep the booking page populated after long-lived databases age out seeded rows."""
@@ -522,8 +544,37 @@ def update_booking(booking_id):
 @bookings_bp.route('/bookings', methods=['GET'])
 def list_bookings():
     _ensure_upcoming_booking_data()
-    bookings = Booking.query.order_by(Booking.booking_date.asc(), Booking.start_time.asc()).all()
-    return jsonify({'bookings': [b.to_dict() for b in bookings]})
+    today_value = datetime.utcnow().date().strftime('%Y-%m-%d')
+    status_filter = (request.args.get('status') or '').strip().lower()
+    page = _positive_int_arg('page', 1)
+    per_page = _positive_int_arg('per_page', 25, maximum=100)
+
+    if status_filter == 'completed':
+        user, error = _require_login()
+        if error:
+            return error
+        query = Booking.query.filter(
+            db.or_(Booking.status == 'completed', Booking.booking_date < today_value)
+        ).order_by(Booking.booking_date.desc(), Booking.start_time.desc())
+    elif status_filter == 'upcoming':
+        query = Booking.query.filter(
+            Booking.booking_date >= today_value,
+            Booking.status != 'completed'
+        ).order_by(Booking.booking_date.asc(), Booking.start_time.asc())
+    else:
+        query = Booking.query.order_by(Booking.booking_date.asc(), Booking.start_time.asc())
+
+    total = query.count()
+    bookings = query.offset((page - 1) * per_page).limit(per_page).all()
+    return jsonify({
+        'bookings': [_booking_payload(b, today_value) for b in bookings],
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': (total + per_page - 1) // per_page if total else 0,
+        }
+    })
 
 
 @bookings_bp.route('/bookings/<int:booking_id>/rsvp', methods=['POST'])
@@ -696,6 +747,10 @@ def settle_booking_cost(booking_id):
 
 @bookings_bp.route('/misc-costs', methods=['GET'])
 def list_misc_costs():
+    user, error = _require_login()
+    if error:
+        return error
+
     costs = MiscCost.query.order_by(MiscCost.created_at.desc()).all()
     return jsonify({'costs': [cost.to_dict() for cost in costs]})
 

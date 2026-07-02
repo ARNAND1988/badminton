@@ -71,7 +71,7 @@
                   </div>
                   <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-medium">
                     <span class="rounded bg-indigo-50 px-2 py-1 text-indigo-700">{{ bookingInterest(booking).available_count || 0 }} available</span>
-                    <span class="rounded bg-amber-50 px-2 py-1 text-amber-700">{{ bookingInterest(booking).tentative_count || 0 }} tentative</span>
+                    <span class="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-amber-700"><TentativeIcon class="h-3.5 w-3.5" />{{ bookingInterest(booking).tentative_count || 0 }} tentative</span>
                   </div>
                   <div v-if="planningNames(booking, 'available').length || planningNames(booking, 'tentative').length" class="mt-2 space-y-1 text-xs leading-5 text-slate-600">
                     <div v-if="planningNames(booking, 'available').length">Available: {{ planningNames(booking, 'available').join(', ') }}</div>
@@ -87,7 +87,7 @@
                   </div>
                   <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-medium">
                     <span class="rounded bg-emerald-50 px-2 py-1 text-emerald-700">{{ participantStatusCounts(booking).attending }} yes</span>
-                    <span class="rounded bg-amber-50 px-2 py-1 text-amber-700">{{ participantStatusCounts(booking).tentative }} maybe</span>
+                    <span class="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-amber-700"><TentativeIcon class="h-3.5 w-3.5" />{{ participantStatusCounts(booking).tentative }} maybe</span>
                   </div>
                   <div v-if="participantNamesByStatus(booking, 'attending').length || participantNamesByStatus(booking, 'tentative').length" class="mt-2 space-y-1 text-xs leading-5 text-slate-600">
                     <div v-if="participantNamesByStatus(booking, 'attending').length">Confirmed: {{ participantNamesByStatus(booking, 'attending').join(', ') }}</div>
@@ -295,7 +295,7 @@
 
             <div class="mt-3 grid grid-cols-2 gap-2 text-sm font-semibold">
               <div class="rounded-xl border border-emerald-100 bg-white/80 p-3 text-emerald-700">✅ {{ day.totals.available_count || 0 }} available</div>
-              <div class="rounded-xl border border-amber-100 bg-white/80 p-3 text-amber-700">🤔 {{ day.totals.tentative_count || 0 }} tentative</div>
+              <div class="flex items-center gap-2 rounded-xl border border-amber-100 bg-white/80 p-3 text-amber-700"><TentativeIcon class="h-4 w-4 shrink-0" /> <span>{{ day.totals.tentative_count || 0 }} tentative</span></div>
             </div>
           </div>
 
@@ -527,11 +527,21 @@
 </template>
 
 <script>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAuthSessionVersion, getSessionValue, hasAuthSession, setSessionValue } from '../authSession'
 
+const TentativeIcon = (props) => h('svg', {
+  ...props,
+  viewBox: '0 0 20 20',
+  fill: 'currentColor',
+  'aria-hidden': 'true'
+}, [
+  h('path', { d: 'M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 13.25a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1.27-4.88c-.47.28-.52.42-.52.88a.75.75 0 0 1-1.5 0c0-1.21.58-1.78 1.25-2.17.68-.4 1.1-.7 1.1-1.43 0-.8-.63-1.35-1.55-1.35-.82 0-1.42.43-1.74 1.25a.75.75 0 0 1-1.4-.54c.54-1.4 1.74-2.21 3.14-2.21 1.78 0 3.05 1.16 3.05 2.85 0 1.58-1.04 2.2-1.83 2.67Z' })
+])
+
 export default {
+  components: { TentativeIcon },
   props: {
     initialView: {
       type: String,

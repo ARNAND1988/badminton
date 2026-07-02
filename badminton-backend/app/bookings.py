@@ -121,6 +121,83 @@ def _admin_user_payload(user):
     return payload
 
 
+
+def _ensure_upcoming_booking_data():
+    """Keep the booking page populated after long-lived databases age out seeded rows."""
+    today = datetime.utcnow().date()
+    today_value = today.strftime('%Y-%m-%d')
+    upcoming_exists = Booking.query.filter(
+        Booking.booking_date >= today_value,
+        Booking.status != 'completed'
+    ).first()
+    if upcoming_exists:
+        return
+
+    court_specs = [
+        ('Court 1', 'Nieuwegein Sports Centre', 'Main indoor badminton court near reception', 25.0),
+        ('Court 2', 'Nieuwegein Sports Centre', 'Second indoor court for doubles practice', 22.5),
+        ('Training Court', 'Nieuwegein Sports Centre', 'Smaller court for warmups and junior sessions', 18.0),
+    ]
+    court_names = [spec[0] for spec in court_specs]
+    courts_by_name = {
+        court.name: court
+        for court in Court.query.filter(Court.name.in_(court_names)).all()
+    }
+    for name, location, description, hourly_rate in court_specs:
+        court = courts_by_name.get(name)
+        if not court:
+            court = Court(name=name)
+            db.session.add(court)
+            courts_by_name[name] = court
+        court.location = court.location or location
+        court.description = court.description or description
+        court.hourly_rate = court.hourly_rate or hourly_rate
+        court.is_active = True if court.is_active is None else court.is_active
+    db.session.flush()
+
+    booking_specs = [
+        (
+            'Court 1', today + timedelta(days=1), '19:00', '20:00',
+            25.0, 'Evening doubles practice', ['+31611111111', '+31622222222']
+        ),
+        (
+            'Court 2', today + timedelta(days=3), '10:00', '12:00',
+            45.0, 'Weekend family session', ['+31611111111', '+31633333333']
+        ),
+        (
+            'Training Court', today + timedelta(days=7), '18:30', '19:30',
+            18.0, 'Junior warmup slot', []
+        ),
+    ]
+    for (
+        court_name, date_value, start_time, end_time, cost, notes, participants
+    ) in booking_specs:
+        court = courts_by_name.get(court_name)
+        target_date = date_value.strftime('%Y-%m-%d')
+        existing = Booking.query.filter_by(
+            court_id=court.id,
+            booking_date=target_date,
+            start_time=start_time,
+            end_time=end_time
+        ).first()
+        if existing:
+            continue
+        booking = Booking(
+            court_id=court.id,
+            booking_date=target_date,
+            start_time=start_time,
+            end_time=end_time,
+            cost=cost,
+            notes=notes,
+            status='confirmed'
+        )
+        db.session.add(booking)
+        db.session.flush()
+        for phone in participants:
+            _upsert_participant(booking, phone, status='tentative')
+    db.session.commit()
+
+
 def _upsert_participant(booking, phone, name=None, status='tentative', is_adhoc=False):
     normalized_phone = (phone or '').strip()
     if not normalized_phone:
@@ -444,6 +521,7 @@ def update_booking(booking_id):
 
 @bookings_bp.route('/bookings', methods=['GET'])
 def list_bookings():
+    _ensure_upcoming_booking_data()
     bookings = Booking.query.order_by(Booking.booking_date.asc(), Booking.start_time.asc()).all()
     return jsonify({'bookings': [b.to_dict() for b in bookings]})
 

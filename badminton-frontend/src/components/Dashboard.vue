@@ -171,15 +171,15 @@
           </button>
         </div>
 
-        <div v-if="adminBookingTab === 'bookings'" class="panel-card">
-          <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 class="text-lg font-semibold">{{ editingBookingId ? 'Edit booking' : 'Create booking' }}</h3>
-              <p class="section-copy">Choose an existing court and set the booking details.</p>
+        <div v-if="adminBookingTab === 'bookings'" class="panel-card p-4 sm:p-5">
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <h3 class="text-base font-semibold sm:text-lg">{{ editingBookingId ? 'Edit booking' : 'Create booking' }}</h3>
+              <p class="hidden text-sm text-slate-600 sm:block">Choose a court, schedule, and cost.</p>
             </div>
-            <button v-if="editingBookingId" class="btn-muted sm:self-start" @click="resetBookingForm">Cancel edit</button>
+            <button v-if="editingBookingId" class="btn-muted shrink-0" @click="resetBookingForm">Cancel</button>
           </div>
-          <div class="grid gap-3 sm:grid-cols-2 sm:gap-4">
+          <div class="grid gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
             <div>
               <label class="form-label">🏸 Court</label>
               <select v-model="selectedCourtId" class="form-input">
@@ -210,12 +210,12 @@
                 <option :value="true">Every week on the same day</option>
               </select>
             </div>
-            <div class="md:col-span-2">
+            <div class="sm:col-span-2 lg:col-span-4">
               <label class="form-label">📝 Notes</label>
               <input v-model="bookingNotes" placeholder="Optional booking notes" class="form-input" />
             </div>
           </div>
-          <div v-if="recurringMode && !editingBookingId" class="mt-3 grid gap-3 sm:grid-cols-2 sm:gap-4">
+          <div v-if="recurringMode && !editingBookingId" class="mt-3 grid gap-2 sm:grid-cols-2 sm:gap-3">
             <div>
               <label class="form-label">Repeat every</label>
               <input v-model.number="recurringIntervalWeeks" type="number" min="1" class="form-input" />
@@ -227,7 +227,9 @@
             </div>
           </div>
 
-          <button class="btn-primary mt-4 w-full sm:w-auto" @click="saveBooking">{{ editingBookingId ? 'Update booking' : 'Create booking' }}</button>
+          <div class="mt-3 flex justify-end">
+            <button class="btn-primary w-full sm:w-auto" @click="saveBooking">{{ editingBookingId ? 'Update booking' : 'Create booking' }}</button>
+          </div>
         </div>
 
         <div v-if="adminBookingTab === 'courts'" class="grid gap-6 lg:grid-cols-2">
@@ -411,17 +413,24 @@
         </div>
 
         <div class="grid gap-4 lg:grid-cols-2">
-          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card space-y-4 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
-                <p class="text-sm text-slate-600">
+          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card overflow-hidden p-0">
+            <button
+              type="button"
+              class="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 p-3 text-left transition hover:bg-slate-50 sm:gap-4 sm:p-4"
+              :aria-expanded="isCompletedBookingOpen(booking.id)"
+              @click="toggleCompletedBooking(booking.id)"
+            >
+              <div class="min-w-0">
+                <h4 class="truncate font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
+                <p class="truncate text-xs text-slate-600 sm:text-sm">
                   {{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}
                 </p>
               </div>
-              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
-            </div>
+              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white sm:px-3">€{{ booking.cost || 0 }}</span>
+              <span class="text-slate-400" aria-hidden="true">{{ isCompletedBookingOpen(booking.id) ? '−' : '+' }}</span>
+            </button>
 
+            <div v-if="isCompletedBookingOpen(booking.id)" class="space-y-4 border-t border-slate-100 p-4">
             <div class="grid gap-2 sm:grid-cols-3">
               <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
                 <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Attending</div>
@@ -452,6 +461,7 @@
             <div v-if="isAdmin" class="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
               <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
               <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
+            </div>
             </div>
           </article>
         </div>
@@ -586,6 +596,7 @@ export default {
     const playDays = ref([])
     const miscCosts = ref([])
     const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
+    const openCompletedBookingIds = ref(new Set())
     const loading = ref(false)
     const errorMsg = ref('')
     const editingBookingId = ref(null)
@@ -674,6 +685,17 @@ export default {
     function bookingDateLabel(dateValue) {
       const date = parseBookingDate(dateValue)
       return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    }
+
+    function isCompletedBookingOpen(bookingId) {
+      return openCompletedBookingIds.value.has(bookingId)
+    }
+
+    function toggleCompletedBooking(bookingId) {
+      const nextOpenIds = new Set(openCompletedBookingIds.value)
+      if (nextOpenIds.has(bookingId)) nextOpenIds.delete(bookingId)
+      else nextOpenIds.add(bookingId)
+      openCompletedBookingIds.value = nextOpenIds
     }
 
     function participantStatusCounts(booking) {
@@ -1449,6 +1471,8 @@ export default {
       miscCosts,
       isLoggedIn,
       isAdmin,
+      isCompletedBookingOpen,
+      toggleCompletedBooking,
       loading,
       errorMsg,
       msg,

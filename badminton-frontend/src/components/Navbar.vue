@@ -74,7 +74,7 @@
   </nav>
 
   <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-200/70 bg-white/90 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden" aria-label="Mobile primary navigation">
-    <ul class="mx-auto grid max-w-lg grid-cols-3 gap-1 py-2">
+    <ul class="mx-auto grid max-w-lg gap-1 py-2" :style="mobileNavGridStyle">
       <li v-for="link in mobilePageLinks" :key="link.label">
         <router-link :to="link.to" :class="mobileNavClass(link.to)">
           <component :is="link.icon" class="h-5 w-5" />
@@ -154,6 +154,9 @@ export default {
     })
 
     const mobilePageLinks = computed(() => pageLinks.value.slice(0, 3))
+    const mobileNavGridStyle = computed(() => ({
+      gridTemplateColumns: `repeat(${Math.max(mobilePageLinks.value.length, 1)}, minmax(0, 1fr))`
+    }))
 
     function navTextClass(path) {
       const base = 'block rounded-xl border border-transparent px-4 py-2 text-sm font-bold transition hover:border-sky-300/40 hover:bg-white/10 hover:text-sky-100'
@@ -169,7 +172,7 @@ export default {
         : `${base} text-slate-500 hover:bg-emerald-50 hover:text-emerald-700`
     }
 
-    return { accountMenuRef, isAccountMenuOpen, isLoggedIn, logoUrl, logout, mobileNavClass, mobilePageLinks, navTextClass, pageLinks, toggleAccountMenu, userDisplayName, userInitial }
+    return { accountMenuRef, isAccountMenuOpen, isLoggedIn, logoUrl, logout, mobileNavClass, mobileNavGridStyle, mobilePageLinks, navTextClass, pageLinks, toggleAccountMenu, userDisplayName, userInitial }
   }
 }
 </script>

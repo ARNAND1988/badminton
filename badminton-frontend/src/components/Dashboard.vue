@@ -72,7 +72,6 @@
                   <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-medium">
                     <span class="rounded bg-emerald-50 px-2 py-1 text-emerald-700">{{ participantStatusCounts(booking).attending }} yes</span>
                     <span class="rounded bg-amber-50 px-2 py-1 text-amber-700">{{ participantStatusCounts(booking).tentative }} maybe</span>
-                    <span class="rounded bg-slate-100 px-2 py-1 text-slate-600">{{ participantStatusCounts(booking).not_attending }} no</span>
                   </div>
                   <div v-if="participantNamesByStatus(booking, 'attending').length || participantNamesByStatus(booking, 'tentative').length" class="mt-2 space-y-1 text-xs leading-5 text-slate-600">
                     <div v-if="participantNamesByStatus(booking, 'attending').length">Confirmed: {{ participantNamesByStatus(booking, 'attending').join(', ') }}</div>

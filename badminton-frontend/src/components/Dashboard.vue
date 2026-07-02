@@ -13,13 +13,13 @@
         <div class="flex w-full items-center justify-between p-3">
           <div>
             <h2 class="text-xl font-semibold text-slate-900">Upcoming Bookings</h2>
-            <p class="mt-1 text-sm text-slate-600">{{ bookings.length }} scheduled court sessions</p>
+            <p class="mt-1 text-sm text-slate-600">{{ upcomingBookings.length }} scheduled court sessions</p>
           </div>
         </div>
 
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
           <article
-            v-for="booking in bookings"
+            v-for="booking in upcomingBookings"
             :key="booking.id"
             class="cursor-pointer rounded-md border-2 border-slate-50 bg-white/20 p-6 shadow-sm transition-colors duration-300 hover:border-black"
           >
@@ -148,7 +148,7 @@
             </div>
           </article>
         </div>
-        <p v-if="!bookings.length && !loading" class="p-3 text-sm text-slate-600">No upcoming bookings found.</p>
+        <p v-if="!upcomingBookings.length && !loading" class="p-3 text-sm text-slate-600">No upcoming bookings found.</p>
       </div>
 
       <div v-if="isAdmin" class="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
@@ -285,8 +285,11 @@
                 <div class="text-lg font-bold text-slate-900">{{ day.weekday }}</div>
                 <div class="text-sm text-slate-600">📅 {{ day.date }}</div>
               </div>
-              <div class="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-800 shadow-sm">
-                👥 {{ day.totals.attendee_count }} people
+              <div class="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-800 shadow-sm">
+                <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path d="M7 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm6.5-.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM7 10.5c-2.67 0-5 1.34-5 3v1A1.5 1.5 0 0 0 3.5 16h7A1.5 1.5 0 0 0 12 14.5v-1c0-1.66-2.33-3-5-3Zm6.5-.5c-.48 0-.95.05-1.38.15 1.15.82 1.88 1.98 1.88 3.35v1c0 .54-.14 1.05-.4 1.5h2.9a1.5 1.5 0 0 0 1.5-1.5v-.75c0-1.52-2.1-2.75-4.5-2.75Z" />
+                </svg>
+                <span>{{ day.totals.attendee_count }} people</span>
               </div>
             </div>
 
@@ -581,6 +584,11 @@ export default {
     const hasToken = () => hasAuthSession()
     const isLoggedIn = computed(() => hasAuthSession())
     const activeCourts = computed(() => courts.value.filter((court) => court.is_active !== false))
+    const todayIso = () => new Date().toISOString().slice(0, 10)
+    const upcomingBookings = computed(() => {
+      const today = todayIso()
+      return bookings.value.filter((booking) => booking.booking_date >= today && booking.status !== 'completed')
+    })
     const completedBookings = computed(() => {
       return bookings.value.filter((booking) => booking.status === 'completed')
     })
@@ -1370,6 +1378,7 @@ export default {
       bookingDateLabel,
       bookingDayLabel,
       bookings,
+      upcomingBookings,
       completedBookings,
       courts,
       familyMembers,

@@ -435,3 +435,19 @@ def test_misc_costs_admin_crud_and_public_list(client, app):
 
     delete_resp = client.delete(f"/api/misc-costs/{cost['id']}", headers=headers)
     assert delete_resp.status_code == 200
+
+
+def test_list_bookings_repopulates_upcoming_seed_data(client):
+    from app import db
+    from app.models import Booking
+
+    db.session.query(Booking).delete()
+    db.session.commit()
+
+    resp = client.get('/api/bookings')
+
+    assert resp.status_code == 200
+    bookings = resp.get_json()['bookings']
+    assert len(bookings) == 3
+    assert all(booking['status'] == 'confirmed' for booking in bookings)
+    assert {booking['court']['name'] for booking in bookings} == {'Court 1', 'Court 2', 'Training Court'}

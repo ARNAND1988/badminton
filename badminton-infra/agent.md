@@ -39,6 +39,15 @@ cd badminton-infra
 docker compose -f docker-compose.app.yml -f docker-compose.cloudflare.yml up --build -d
 ```
 
+For remote automation where `.env` is not already on disk, inject the tunnel token through the environment and run:
+
+```bash
+cd badminton-infra
+CLOUDFLARED_TOKEN=replace-with-cloudflare-tunnel-connector-token ./deploy-cloudflare.sh
+```
+
+The helper also accepts `CLOUDFLARE_TUNNEL_TOKEN`, writes the ignored `.env`, and then starts the Compose stack.
+
 The frontend publishes the app on `http://localhost:8080`, and the frontend Nginx proxies `/api/` to the backend service.
 
 Compose services:

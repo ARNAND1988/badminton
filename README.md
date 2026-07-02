@@ -279,6 +279,15 @@ CLOUDFLARED_TOKEN=your-cloudflare-tunnel-token
 
 You can copy `badminton-infra/.env.example` as a starting point. Keep the real `.env` file private; it is ignored by git.
 
+For remote deployments where the ignored `.env` file is not present, expose the token as a secret environment variable and let the deploy helper create `badminton-infra/.env` on the remote machine:
+
+```bash
+cd badminton-infra
+CLOUDFLARED_TOKEN=your-cloudflare-tunnel-token ./deploy-cloudflare.sh
+```
+
+`CLOUDFLARE_TUNNEL_TOKEN` is also accepted as an alias. The helper writes `.env` with private file permissions before starting Docker Compose.
+
 6. Start the Docker app with the Cloudflare tunnel overlay:
 
 ```bash

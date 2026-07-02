@@ -8,6 +8,57 @@ Lightweight badminton booking platform with member login, court bookings, family
 - `badminton-backend/`: Flask, Flask-SQLAlchemy, Alembic, JWT auth, Redis/Twilio hooks, pytest.
 - `badminton-infra/`: Docker Compose, local Postgres/Redis helpers, Nginx, Kubernetes manifests, seed SQL.
 
+## Architecture
+
+```mermaid
+flowchart TD
+  dev[Developer or Codex Cloud] --> pr[GitHub branch or PR]
+  pr --> main[GitHub main branch]
+  main --> ci[CI workflow]
+  main --> piDeploy[Deploy on Raspberry Pi workflow]
+
+  ci --> backendTests[Backend tests]
+  ci --> frontendBuild[Frontend build]
+
+  piDeploy --> runner[Self-hosted GitHub runner on Pi label pi5]
+  runner --> update[badminton-infra/update-from-main.sh]
+  update --> compose[Docker Compose app stack]
+
+  compose --> frontend[badminton-frontend container Nginx + Vue]
+  compose --> backend[badminton-backend container Flask + Gunicorn]
+  compose --> postgres[Postgres container]
+  compose --> redis[Redis container]
+  compose --> tunnel[cloudflared container]
+
+  frontend --> apiProxy[Nginx /api proxy]
+  apiProxy --> backend
+  backend --> postgres
+  backend --> redis
+  tunnel --> frontend
+  users[Users on public domain] --> cloudflare[Cloudflare Tunnel]
+  cloudflare --> tunnel
+
+  main --> imageBuild[Build and Push Docker images workflow]
+  imageBuild --> ghcr[GitHub Container Registry]
+  ghcr --> k8s[Kubernetes manifests optional path]
+```
+
+Primary production flow on the Raspberry Pi:
+
+1. A change is merged or pushed to `main`.
+2. GitHub starts `.github/workflows/pi-deploy.yml`.
+3. The self-hosted runner on the Pi runs `badminton-infra/update-from-main.sh`.
+4. The script pulls `origin/main` when needed and runs `badminton-infra/deploy-cloudflare.sh`.
+5. Docker Compose rebuilds the backend and frontend from `badminton-backend/Dockerfile` and `badminton-frontend/Dockerfile`, then restarts the app stack and Cloudflare tunnel.
+
+Manual deploy test flow:
+
+1. In GitHub, run `Actions` -> `Deploy on Raspberry Pi` -> `Run workflow` on branch `main`.
+2. The workflow sets `FORCE_DEPLOY=1`.
+3. The Pi rebuilds and restarts even when the checkout is already up to date.
+
+The separate Docker image workflow builds and pushes GHCR images for the optional Kubernetes path. The current Pi Compose deployment rebuilds locally from source instead of pulling those GHCR images.
+
 ## Prerequisites
 
 - Python 3.11+ recommended. The current local venv may use Python 3.13 and works for development.

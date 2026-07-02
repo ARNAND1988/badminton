@@ -19,18 +19,18 @@ jobs:
           python-version: '3.11'
 
       - name: Install backend dependencies
-        working-directory: backend
+        working-directory: badminton-backend
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run backend tests
-        working-directory: backend
+        working-directory: badminton-backend
         env:
           AUTH_MOCK: '1'
           FLASK_ENV: 'development'
         run: |
-          pytest -q
+          python -m pytest -q
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -38,15 +38,15 @@ jobs:
           node-version: '18'
 
       - name: Install frontend dependencies
-        working-directory: frontend
+        working-directory: badminton-frontend
         run: npm ci
 
       - name: Build frontend
-        working-directory: frontend
+        working-directory: badminton-frontend
         run: npm run build
 
       - name: Upload frontend build artifact
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: frontend/dist
+          path: badminton-frontend/dist

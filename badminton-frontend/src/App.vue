@@ -1,8 +1,8 @@
 <template>
-  <div class="min-h-screen bg-slate-50 text-slate-800">
+  <div class="badminton-shell min-h-screen text-slate-800">
     <Navbar />
 
-    <main class="mx-auto max-w-6xl px-3 pb-24 pt-4 sm:px-6 sm:py-6 lg:px-8">
+    <main class="relative z-10 mx-auto max-w-6xl px-3 pb-24 pt-4 sm:px-6 sm:py-6 lg:px-8">
       <div :class="contentClass">
         <router-view />
       </div>

@@ -91,3 +91,78 @@
 html, body, #app {
   height: 100%;
 }
+
+@layer base {
+  body {
+    min-height: 100%;
+    background: #022c22;
+  }
+}
+
+@layer components {
+  .badminton-shell {
+    position: relative;
+    isolation: isolate;
+    overflow-x: clip;
+    background:
+      radial-gradient(circle at 12% 12%, rgba(251, 191, 36, 0.28), transparent 24rem),
+      radial-gradient(circle at 82% 6%, rgba(56, 189, 248, 0.2), transparent 22rem),
+      linear-gradient(135deg, #052e2b 0%, #064e3b 42%, #0f172a 100%);
+  }
+
+  .badminton-shell::before {
+    content: '';
+    position: fixed;
+    inset: 4.75rem -8rem auto -8rem;
+    z-index: -2;
+    height: 42rem;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, transparent 49.7%, rgba(236, 253, 245, 0.5) 49.7% 50.3%, transparent 50.3%),
+      linear-gradient(0deg, transparent 49.6%, rgba(236, 253, 245, 0.34) 49.6% 50.4%, transparent 50.4%),
+      repeating-linear-gradient(90deg, rgba(236, 253, 245, 0.18) 0 2px, transparent 2px 8.5rem),
+      repeating-linear-gradient(0deg, rgba(236, 253, 245, 0.13) 0 2px, transparent 2px 7rem),
+      linear-gradient(135deg, rgba(16, 185, 129, 0.48), rgba(20, 83, 45, 0.2));
+    border: 1px solid rgba(187, 247, 208, 0.26);
+    border-radius: 9999px;
+    box-shadow: 0 32px 120px rgba(2, 6, 23, 0.38);
+    opacity: 0.88;
+    transform: rotate(-8deg) skewX(-8deg);
+  }
+
+  .badminton-shell::after {
+    content: '';
+    position: fixed;
+    right: clamp(1rem, 8vw, 9rem);
+    top: 7.25rem;
+    z-index: -1;
+    width: clamp(9rem, 24vw, 20rem);
+    aspect-ratio: 1;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 72% 75%, #f59e0b 0 9%, #fff7ed 9.5% 14%, transparent 14.5%),
+      linear-gradient(42deg, transparent 44%, rgba(15, 23, 42, 0.84) 44% 49%, transparent 49.5%),
+      linear-gradient(42deg, transparent 21%, rgba(255, 255, 255, 0.92) 21% 25%, transparent 25.5%),
+      linear-gradient(58deg, transparent 24%, rgba(224, 242, 254, 0.88) 24% 28%, transparent 28.5%),
+      linear-gradient(72deg, transparent 28%, rgba(255, 255, 255, 0.88) 28% 32%, transparent 32.5%),
+      linear-gradient(88deg, transparent 33%, rgba(219, 234, 254, 0.82) 33% 37%, transparent 37.5%);
+    filter: drop-shadow(0 24px 30px rgba(2, 6, 23, 0.28));
+    opacity: 0.72;
+    transform: rotate(-12deg);
+  }
+
+  .app-panel,
+  .panel-card,
+  .stat-card,
+  .sub-card {
+    @apply border-white/70 bg-white/90 shadow-xl shadow-emerald-950/10 backdrop-blur;
+  }
+
+  .app-nav-link {
+    @apply border-white/60 bg-white/80 shadow-sm backdrop-blur hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800;
+  }
+
+  .app-nav-link-active {
+    @apply border-emerald-500 bg-emerald-100 text-emerald-900;
+  }
+}

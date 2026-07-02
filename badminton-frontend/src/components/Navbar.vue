@@ -1,13 +1,13 @@
 <template>
-  <nav class="sticky top-0 z-40 w-full border-b border-slate-200 bg-white/95 px-4 shadow-sm backdrop-blur sm:px-8">
+  <nav class="sticky top-0 z-40 w-full border-b border-emerald-200/60 bg-white/85 px-4 shadow-lg shadow-emerald-950/10 backdrop-blur-xl sm:px-8">
     <div class="container mx-auto flex h-16 items-center justify-between md:px-4">
-      <router-link to="/availability" class="flex items-center gap-3 text-indigo-500">
+      <router-link to="/availability" class="flex items-center gap-3 text-emerald-600">
         <img
           :src="logoUrl"
           alt="Nieuwegein Badminton"
-          class="h-11 w-11 rounded-full object-cover shadow-sm ring-1 ring-slate-300"
+          class="h-11 w-11 rounded-full object-cover shadow-md ring-2 ring-emerald-200"
         >
-        <span class="hidden font-semibold text-slate-800 sm:inline">Nieuwegein Badminton</span>
+        <span class="hidden font-semibold text-emerald-950 sm:inline">Nieuwegein Badminton</span>
       </router-link>
 
       <div class="hidden text-gray-500 md:block">
@@ -24,7 +24,7 @@
         <button
           v-if="isLoggedIn"
           type="button"
-          class="flex h-11 w-11 items-center justify-center rounded-full bg-indigo-600 text-base font-bold uppercase text-white shadow-sm ring-2 ring-indigo-100 transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-200"
+          class="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600 text-base font-bold uppercase text-white shadow-sm ring-2 ring-emerald-100 transition hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-200"
           :aria-expanded="isAccountMenuOpen"
           aria-label="Open account menu"
           @click="toggleAccountMenu"
@@ -34,7 +34,7 @@
         <router-link
           v-else
           to="/login"
-          class="flex items-center gap-2 rounded-xl bg-indigo-500 px-4 py-2 text-gray-50 hover:bg-indigo-600"
+          class="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-gray-50 shadow-sm hover:bg-emerald-700"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M3 3a1 1 0 011 1v12a1 1 0 11-2 0V4a1 1 0 011-1zm7.707 3.293a1 1 0 010 1.414L9.414 9H17a1 1 0 110 2H9.414l1.293 1.293a1 1 0 01-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0z" clip-rule="evenodd" />
@@ -65,7 +65,7 @@
     </div>
   </nav>
 
-  <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden" aria-label="Mobile primary navigation">
+  <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-200/70 bg-white/90 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden" aria-label="Mobile primary navigation">
     <ul class="mx-auto grid max-w-lg grid-cols-3 gap-1 py-2">
       <li v-for="link in mobilePageLinks" :key="link.label">
         <router-link :to="link.to" :class="mobileNavClass(link.to)">
@@ -146,17 +146,17 @@ export default {
     const mobilePageLinks = computed(() => pageLinks.value.slice(0, 3))
 
     function navTextClass(path) {
-      const base = 'block rounded-lg px-4 py-2 text-sm transition hover:bg-indigo-50 hover:text-indigo-500'
+      const base = 'block rounded-lg px-4 py-2 text-sm transition hover:bg-emerald-50 hover:text-emerald-700'
       return route.path === path
-        ? `${base} bg-indigo-50 text-indigo-600`
+        ? `${base} bg-emerald-100 text-emerald-800 shadow-sm`
         : `${base} text-slate-600`
     }
 
     function mobileNavClass(path) {
       const base = 'flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-semibold transition'
       return route.path === path
-        ? `${base} bg-indigo-50 text-indigo-600`
-        : `${base} text-slate-500 hover:bg-slate-50 hover:text-indigo-500`
+        ? `${base} bg-emerald-100 text-emerald-800 shadow-sm`
+        : `${base} text-slate-500 hover:bg-emerald-50 hover:text-emerald-700`
     }
 
     return { accountMenuRef, isAccountMenuOpen, isLoggedIn, logoUrl, logout, mobileNavClass, mobilePageLinks, navTextClass, pageLinks, toggleAccountMenu, userDisplayName, userInitial }

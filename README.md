@@ -336,14 +336,40 @@ mkdir -p /home/admin/actions-runner
 cd /home/admin/actions-runner
 ```
 
-3. Install the runner as a service:
+3. You can test the runner manually with GitHub's generated command:
 
 ```bash
+./run.sh
+```
+
+This keeps the runner online only while that terminal stays open. To stop the manual runner, press `Ctrl+C` in that terminal.
+
+4. Install the runner as a background service so it survives terminal closes and reboots:
+
+```bash
+cd /home/admin/actions-runner
 sudo ./svc.sh install admin
 sudo ./svc.sh start
 ```
 
-4. Make sure Docker commands work for the runner user:
+Check the runner service:
+
+```bash
+sudo ./svc.sh status
+```
+
+After the service is running, do not start `./run.sh` manually at the same time.
+
+To stop, start, or remove the service later:
+
+```bash
+cd /home/admin/actions-runner
+sudo ./svc.sh stop
+sudo ./svc.sh start
+sudo ./svc.sh uninstall
+```
+
+5. Make sure Docker commands work for the runner user:
 
 ```bash
 sudo usermod -aG docker admin
@@ -351,14 +377,14 @@ sudo usermod -aG docker admin
 
 Log out and back in, or reboot, after changing Docker group membership.
 
-5. Make sure the Pi deployment checkout exists and can pull from GitHub:
+6. Make sure the Pi deployment checkout exists and can pull from GitHub:
 
 ```bash
 cd /home/admin/git-repo/badminton
 git fetch origin main
 ```
 
-6. Make sure `badminton-infra/.env` exists on the Pi and contains the Cloudflare tunnel token:
+7. Make sure `badminton-infra/.env` exists on the Pi and contains the Cloudflare tunnel token:
 
 ```dotenv
 CLOUDFLARED_TOKEN=your-cloudflare-tunnel-token

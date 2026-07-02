@@ -505,7 +505,7 @@
 <script>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { getSessionValue, setSessionValue } from '../authSession'
+import { getAuthSessionVersion, getSessionValue, hasAuthSession, setSessionValue } from '../authSession'
 
 export default {
   props: {
@@ -556,14 +556,15 @@ export default {
     const apiBase = import.meta.env.VITE_API_BASE || ''
 
     const token = () => getSessionValue('auth_token')
-    const hasToken = () => Boolean(token())
-    const isLoggedIn = computed(() => Boolean(token()))
+    const hasToken = () => hasAuthSession()
+    const isLoggedIn = computed(() => hasAuthSession())
     const activeCourts = computed(() => courts.value.filter((court) => court.is_active !== false))
     const completedBookings = computed(() => {
       return bookings.value.filter((booking) => booking.status === 'completed')
     })
     const maxFamilyAttendees = computed(() => familyMembers.value.length + 1)
     const familyAttendancePeople = computed(() => {
+      getAuthSessionVersion()
       const selfName = getSessionValue('member_name') || getSessionValue('member_email') || getSessionValue('member_phone') || 'You'
       return [
         { key: 'self', type: 'self', name: selfName, phone: getSessionValue('member_phone') || '' },

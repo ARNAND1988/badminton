@@ -93,6 +93,7 @@ class Court(db.Model):
     name = db.Column(db.String(64), nullable=False)
     location = db.Column(db.String(255), nullable=True)
     description = db.Column(db.Text, nullable=True)
+    map_link = db.Column(db.String(1024), nullable=True)
     hourly_rate = db.Column(db.Float, default=25.0)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -103,6 +104,7 @@ class Court(db.Model):
             'name': self.name,
             'location': self.location,
             'description': self.description,
+            'map_link': self.map_link,
             'hourly_rate': self.hourly_rate,
             'is_active': self.is_active,
         }

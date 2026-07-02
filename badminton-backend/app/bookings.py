@@ -853,6 +853,7 @@ def create_court():
         name=name,
         location=data.get('location', ''),
         description=data.get('description', ''),
+        map_link=(data.get('map_link') or '').strip() or None,
         hourly_rate=data.get('hourly_rate', 25.0),
         is_active=data.get('is_active', True)
     )
@@ -886,6 +887,7 @@ def update_court(court_id):
     court.name = name
     court.location = (data.get('location') or '').strip()
     court.description = (data.get('description') or '').strip()
+    court.map_link = (data.get('map_link') or '').strip() or None
     court.hourly_rate = float(data.get('hourly_rate', court.hourly_rate) or 0.0)
     if 'is_active' in data:
         court.is_active = bool(data.get('is_active'))

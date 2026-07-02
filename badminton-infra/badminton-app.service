@@ -1,0 +1,16 @@
+[Unit]
+Description=Badminton Docker Compose application
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/admin/git-repo/badminton/badminton-infra
+ExecStart=/usr/bin/docker compose -f docker-compose.app.yml -f docker-compose.cloudflare.yml up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -f docker-compose.app.yml -f docker-compose.cloudflare.yml stop
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

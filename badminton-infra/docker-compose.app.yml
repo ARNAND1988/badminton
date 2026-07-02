@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: badminton
+      POSTGRES_USER: badminton_user
+      POSTGRES_PASSWORD: strongpassword
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_app_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U badminton_user -d badminton"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  badminton-backend:
+    build:
+      context: ../badminton-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://badminton_user:strongpassword@postgres:5432/badminton
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: dev-secret
+      JWT_SECRET: dev-jwt-secret
+      FLASK_ENV: development
+      AUTH_MOCK: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  badminton-frontend:
+    build:
+      context: ../badminton-frontend
+    restart: unless-stopped
+    depends_on:
+      - badminton-backend
+    ports:
+      - "8080:80"
+
+volumes:
+  postgres_app_data:

@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title>Nieuwegein Badminton</title>
+  <desc>Circular Nieuwegein Badminton logo with rackets and shuttle</desc>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="62%">
+      <stop offset="0" stop-color="#17385f"/>
+      <stop offset="1" stop-color="#071525"/>
+    </radialGradient>
+    <linearGradient id="blue" x1="0" x2="1">
+      <stop offset="0" stop-color="#1d4ed8"/>
+      <stop offset="1" stop-color="#60a5fa"/>
+    </linearGradient>
+    <path id="topArc" d="M 54 124 A 74 74 0 0 1 202 124"/>
+    <path id="bottomArc" d="M 202 136 A 74 74 0 0 1 54 136"/>
+  </defs>
+
+  <circle cx="128" cy="128" r="124" fill="#071525"/>
+  <circle cx="128" cy="128" r="116" fill="url(#bg)" stroke="#e5e7eb" stroke-width="4"/>
+  <circle cx="128" cy="128" r="96" fill="none" stroke="#1e40af" stroke-width="7"/>
+  <circle cx="128" cy="128" r="89" fill="none" stroke="#e5e7eb" stroke-width="2"/>
+
+  <g fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-weight="800" letter-spacing="4">
+    <text font-size="22">
+      <textPath href="#topArc" startOffset="50%" text-anchor="middle">NIEUWEGEIN</textPath>
+    </text>
+    <text font-size="22">
+      <textPath href="#bottomArc" startOffset="50%" text-anchor="middle">BADMINTON</textPath>
+    </text>
+  </g>
+
+  <path d="M50 154 C77 116 94 103 121 101" fill="none" stroke="#e5e7eb" stroke-width="8" stroke-linecap="round"/>
+  <path d="M135 102 C161 105 178 118 205 154" fill="none" stroke="#e5e7eb" stroke-width="8" stroke-linecap="round"/>
+
+  <g transform="rotate(-28 95 126)">
+    <ellipse cx="83" cy="94" rx="25" ry="39" fill="none" stroke="url(#blue)" stroke-width="6"/>
+    <ellipse cx="83" cy="94" rx="20" ry="33" fill="none" stroke="#e5e7eb" stroke-width="2"/>
+    <g stroke="#e5e7eb" stroke-width="1.5" opacity=".9">
+      <path d="M66 72 L100 116"/>
+      <path d="M72 64 L105 107"/>
+      <path d="M80 58 L109 96"/>
+      <path d="M90 58 L105 85"/>
+      <path d="M59 89 L101 69"/>
+      <path d="M60 101 L108 79"/>
+      <path d="M65 114 L109 94"/>
+    </g>
+    <path d="M95 130 L116 177" stroke="#60a5fa" stroke-width="7" stroke-linecap="round"/>
+    <path d="M112 172 L122 194" stroke="#e5e7eb" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <g transform="rotate(28 161 126)">
+    <ellipse cx="173" cy="94" rx="25" ry="39" fill="none" stroke="url(#blue)" stroke-width="6"/>
+    <ellipse cx="173" cy="94" rx="20" ry="33" fill="none" stroke="#e5e7eb" stroke-width="2"/>
+    <g stroke="#e5e7eb" stroke-width="1.5" opacity=".9">
+      <path d="M156 72 L190 116"/>
+      <path d="M162 64 L195 107"/>
+      <path d="M170 58 L199 96"/>
+      <path d="M180 58 L195 85"/>
+      <path d="M149 89 L191 69"/>
+      <path d="M150 101 L198 79"/>
+      <path d="M155 114 L199 94"/>
+    </g>
+    <path d="M161 130 L140 177" stroke="#60a5fa" stroke-width="7" stroke-linecap="round"/>
+    <path d="M144 172 L134 194" stroke="#e5e7eb" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <g>
+    <path d="M107 136 L149 136 L141 193 L115 193 Z" fill="#f8fafc" stroke="#071525" stroke-width="3"/>
+    <path d="M112 136 L119 193 M121 136 L124 193 M130 136 L130 193 M139 136 L135 193 M146 136 L141 193" stroke="#071525" stroke-width="2"/>
+    <ellipse cx="128" cy="199" rx="15" ry="10" fill="#e5e7eb" stroke="#071525" stroke-width="3"/>
+  </g>
+</svg>

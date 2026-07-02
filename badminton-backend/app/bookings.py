@@ -1,0 +1,905 @@
+from datetime import datetime, timedelta
+import json
+
+from flask import Blueprint, jsonify, request, current_app
+import jwt
+
+from . import db
+from .models import Booking, BookingParticipant, Court, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User
+
+bookings_bp = Blueprint('bookings', __name__)
+
+
+def _get_current_user():
+    auth_header = request.headers.get('Authorization', '')
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0].lower() != 'bearer':
+        return None
+
+    try:
+        payload = jwt.decode(parts[1], current_app.config.get('JWT_SECRET'), algorithms=['HS256'])
+    except Exception:
+        return None
+
+    user_id = payload.get('user_id')
+    if not user_id:
+        return None
+    return User.query.get(user_id)
+
+
+def _require_login():
+    user = _get_current_user()
+    if not user:
+        return None, (jsonify({'error': 'missing_authorization'}), 401)
+    return user, None
+
+
+def _require_admin():
+    user, error = _require_login()
+    if error:
+        return None, error
+    if user.role != 'admin':
+        return None, (jsonify({'error': 'admin_required'}), 403)
+    return user, None
+
+
+def _next_dates(count=7):
+    today = datetime.utcnow().date()
+    return [today + timedelta(days=index) for index in range(count)]
+
+
+def _next_weekend_dates(count=4):
+    today = datetime.utcnow().date()
+    days_until_saturday = (5 - today.weekday()) % 7
+    first_saturday = today + timedelta(days=days_until_saturday)
+    dates = []
+    current = first_saturday
+    while len(dates) < count:
+        dates.extend([current, current + timedelta(days=1)])
+        current += timedelta(days=7)
+    return dates[:count]
+
+
+def _slot_overlaps(court_id, booking_date, start_time, end_time, exclude_booking_id=None):
+    existing = Booking.query.filter_by(booking_date=booking_date, court_id=court_id).all()
+    for booking in existing:
+        if exclude_booking_id and booking.id == exclude_booking_id:
+            continue
+        if not (end_time <= booking.start_time or start_time >= booking.end_time):
+            return True
+    return False
+
+
+def _valid_participant_status(status):
+    return status in {'attending', 'not_attending', 'tentative'}
+
+
+def _valid_availability_status(status):
+    return status in {'available', 'tentative', 'not_available'}
+
+
+def _availability_attendee_payload(user, attendees, default_status='available'):
+    family_members = {
+        member.id: member for member in FamilyMember.query.filter_by(user_id=user.id).all()
+    }
+    selected = []
+    for attendee in attendees or []:
+        status = attendee.get('status') or default_status
+        if status == 'not_available':
+            continue
+        if not _valid_availability_status(status):
+            raise ValueError('invalid_status')
+        attendee_type = attendee.get('type')
+        if attendee_type == 'self':
+            selected.append({
+                'type': 'self',
+                'status': status,
+                'name': user.name or user.email or user.phone,
+                'phone': user.phone,
+            })
+            continue
+        if attendee_type == 'family':
+            member_id = attendee.get('family_member_id')
+            member = family_members.get(member_id)
+            if not member:
+                raise ValueError('family_member_not_found')
+            selected.append({
+                'type': 'family',
+                'status': status,
+                'family_member_id': member.id,
+                'name': member.name,
+            })
+    return selected
+
+
+def _admin_user_payload(user):
+    payload = user.to_dict()
+    payload['family_members'] = [
+        member.to_dict()
+        for member in sorted(user.family_members, key=lambda item: item.created_at or datetime.min)
+    ]
+    return payload
+
+
+def _upsert_participant(booking, phone, name=None, status='tentative', is_adhoc=False):
+    normalized_phone = (phone or '').strip()
+    if not normalized_phone:
+        raise ValueError('phone required')
+    if not _valid_participant_status(status):
+        raise ValueError('invalid_status')
+
+    participant = BookingParticipant.query.filter_by(
+        booking_id=booking.id,
+        phone=normalized_phone
+    ).first()
+    if not participant:
+        participant = BookingParticipant(booking_id=booking.id, phone=normalized_phone)
+        db.session.add(participant)
+
+    participant.name = (name or participant.name or '').strip() or None
+    participant.status = status
+    participant.is_adhoc = bool(is_adhoc)
+    return participant
+
+
+@bookings_bp.route('/bookings/availability', methods=['GET'])
+def availability():
+    date_value = request.args.get('date')
+    if not date_value:
+        return jsonify({'error': 'date required'}), 400
+
+    courts = Court.query.filter_by(is_active=True).all()
+    slots = []
+    for court in courts:
+        existing = Booking.query.filter_by(booking_date=date_value, court_id=court.id).all()
+        booked_ranges = [(b.start_time, b.end_time) for b in existing]
+        slots.append({
+            'court_id': court.id,
+            'court_name': court.name,
+            'hourly_rate': court.hourly_rate,
+            'booked': booked_ranges,
+            'available': True,
+        })
+    return jsonify({'date': date_value, 'slots': slots})
+
+
+@bookings_bp.route('/family-members', methods=['GET'])
+def list_family_members():
+    user, error = _require_login()
+    if error:
+        return error
+
+    members = FamilyMember.query.filter_by(user_id=user.id).order_by(FamilyMember.created_at.asc()).all()
+    return jsonify({'members': [member.to_dict() for member in members]})
+
+
+@bookings_bp.route('/family-members', methods=['POST'])
+def create_family_member():
+    user, error = _require_login()
+    if error:
+        return error
+
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+
+    member = FamilyMember(
+        user_id=user.id,
+        name=name,
+    )
+    db.session.add(member)
+    db.session.commit()
+    return jsonify(member.to_dict())
+
+
+@bookings_bp.route('/family-members/<int:member_id>', methods=['DELETE'])
+def delete_family_member(member_id):
+    user, error = _require_login()
+    if error:
+        return error
+
+    member = FamilyMember.query.filter_by(id=member_id, user_id=user.id).first_or_404()
+    db.session.delete(member)
+    db.session.commit()
+    return jsonify({'status': 'deleted'})
+
+
+@bookings_bp.route('/play-availability', methods=['GET'])
+def list_play_availability():
+    user = _get_current_user()
+
+    start_date = request.args.get('start_date')
+    days = min(max(int(request.args.get('days', 7) or 7), 1), 14)
+    if start_date:
+        start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        dates = [start + timedelta(days=index) for index in range(days)]
+    else:
+        dates = _next_dates(days)
+
+    date_values = [date_value.strftime('%Y-%m-%d') for date_value in dates]
+    votes = PlayAvailabilityVote.query.filter(
+        PlayAvailabilityVote.play_date.in_(date_values)
+    ).all()
+    user_votes = {vote.play_date: vote for vote in votes if user and vote.user_id == user.id}
+
+    totals = {}
+    for vote in votes:
+        if vote.play_date not in totals:
+            totals[vote.play_date] = {
+                'available_families': 0,
+                'tentative_families': 0,
+                'attendee_count': 0,
+                'available_count': 0,
+                'tentative_count': 0,
+                'available_attendees': [],
+                'tentative_attendees': [],
+            }
+        vote_payload = vote.to_dict()
+        vote_attendees = vote_payload.get('attendee_details') or []
+        available_attendees = [
+            attendee for attendee in vote_attendees
+            if attendee.get('status', 'available') == 'available'
+        ]
+        tentative_attendees = [
+            attendee for attendee in vote_attendees
+            if attendee.get('status') == 'tentative'
+        ]
+        vote_status = vote.status or ('available' if vote.available else 'not_available')
+        if available_attendees:
+            totals[vote.play_date]['available_families'] += 1
+            totals[vote.play_date]['attendee_count'] += len(available_attendees)
+            totals[vote.play_date]['available_count'] += len(available_attendees)
+            totals[vote.play_date]['available_attendees'].extend(available_attendees)
+        elif vote_status == 'available':
+            totals[vote.play_date]['available_families'] += 1
+            totals[vote.play_date]['attendee_count'] += vote.attendee_count or 0
+            totals[vote.play_date]['available_count'] += vote.attendee_count or 0
+        if tentative_attendees:
+            totals[vote.play_date]['tentative_families'] += 1
+            totals[vote.play_date]['tentative_count'] += len(tentative_attendees)
+            totals[vote.play_date]['tentative_attendees'].extend(tentative_attendees)
+        elif vote_status == 'tentative':
+            totals[vote.play_date]['tentative_families'] += 1
+            totals[vote.play_date]['tentative_count'] += vote.attendee_count or 0
+
+    days_payload = []
+    for date_value in date_values:
+        vote = user_votes.get(date_value)
+        days_payload.append({
+            'date': date_value,
+            'weekday': datetime.strptime(date_value, '%Y-%m-%d').strftime('%A'),
+            'vote': vote.to_dict() if vote else None,
+            'totals': totals.get(date_value, {
+                'available_families': 0,
+                'tentative_families': 0,
+                'attendee_count': 0,
+                'available_count': 0,
+                'tentative_count': 0,
+                'available_attendees': [],
+                'tentative_attendees': [],
+            }),
+        })
+
+    return jsonify({'days': days_payload})
+
+
+@bookings_bp.route('/play-availability', methods=['POST'])
+def save_play_availability():
+    user, error = _require_login()
+    if error:
+        return error
+
+    data = request.get_json() or {}
+    play_date = data.get('play_date')
+    if not play_date:
+        return jsonify({'error': 'play_date required'}), 400
+
+    status = data.get('status')
+    if not status:
+        status = 'available' if bool(data.get('available', False)) else 'not_available'
+    if not _valid_availability_status(status):
+        return jsonify({'error': 'invalid_status'}), 400
+
+    try:
+        attendee_details = _availability_attendee_payload(user, data.get('attendees') or [], default_status=status)
+    except ValueError as exc:
+        status_code = 404 if str(exc) == 'family_member_not_found' else 400
+        return jsonify({'error': str(exc)}), status_code
+
+    available_count = len([
+        attendee for attendee in attendee_details
+        if attendee.get('status', 'available') == 'available'
+    ])
+    tentative_count = len([
+        attendee for attendee in attendee_details
+        if attendee.get('status') == 'tentative'
+    ])
+
+    if attendee_details:
+        status = 'available' if available_count else 'tentative' if tentative_count else 'not_available'
+
+    if not attendee_details and status == 'available':
+        attendee_count = int(data.get('attendee_count', 0) or 0)
+        if attendee_count < 0:
+            return jsonify({'error': 'attendee_count must be zero or greater'}), 400
+    else:
+        attendee_count = available_count
+
+    vote = PlayAvailabilityVote.query.filter_by(user_id=user.id, play_date=play_date).first()
+    if not vote:
+        vote = PlayAvailabilityVote(user_id=user.id, play_date=play_date)
+        db.session.add(vote)
+
+    vote.status = status
+    vote.available = available_count > 0 or (status == 'available' and not attendee_details)
+    vote.attendee_count = attendee_count if vote.available else 0
+    vote.attendee_details = json.dumps(attendee_details) if attendee_details else None
+    vote.notes = (data.get('notes') or '').strip() or None
+    db.session.commit()
+
+    return jsonify(vote.to_dict())
+
+
+@bookings_bp.route('/bookings', methods=['POST'])
+def create_booking():
+    user, error = _require_admin()
+    if error:
+        return error
+
+    data = request.get_json() or {}
+    court_id = data.get('court_id')
+    booking_date = data.get('booking_date')
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
+    cost = data.get('cost', 0.0)
+    notes = data.get('notes', '')
+    participants = data.get('participants', []) or []
+    recurring = bool(data.get('recurring', False))
+    recurring_interval_weeks = int(data.get('recurring_interval_weeks', 1) or 1)
+    recurring_count = int(data.get('recurring_count', 1) or 1)
+
+    if not all([court_id, booking_date, start_time, end_time]):
+        return jsonify({'error': 'court_id, booking_date, start_time and end_time are required'}), 400
+
+    court = Court.query.get(court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+
+    def _create_single_booking(target_date):
+        if _slot_overlaps(court_id, target_date, start_time, end_time):
+            raise ValueError('slot_unavailable')
+
+        booking = Booking(
+            court_id=court_id,
+            booking_date=target_date,
+            start_time=start_time,
+            end_time=end_time,
+            cost=float(cost or 0.0),
+            notes=notes,
+            status='confirmed'
+        )
+        db.session.add(booking)
+        db.session.flush()
+
+        for participant_phone in participants:
+            if participant_phone:
+                _upsert_participant(booking, participant_phone, status='tentative')
+
+        return booking
+
+    created_bookings = []
+    try:
+        if recurring:
+            current_date = datetime.strptime(booking_date, '%Y-%m-%d').date()
+            for index in range(recurring_count):
+                booking = _create_single_booking(current_date.strftime('%Y-%m-%d'))
+                created_bookings.append(booking)
+                current_date += timedelta(weeks=recurring_interval_weeks)
+        else:
+            booking = _create_single_booking(booking_date)
+            created_bookings.append(booking)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 409
+
+    db.session.commit()
+    return jsonify(created_bookings[-1].to_dict())
+
+
+@bookings_bp.route('/bookings/<int:booking_id>', methods=['PUT'])
+def update_booking(booking_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    booking = Booking.query.get_or_404(booking_id)
+    data = request.get_json() or {}
+
+    court_id = data.get('court_id', booking.court_id)
+    booking_date = data.get('booking_date', booking.booking_date)
+    start_time = data.get('start_time', booking.start_time)
+    end_time = data.get('end_time', booking.end_time)
+
+    if not all([court_id, booking_date, start_time, end_time]):
+        return jsonify({'error': 'court_id, booking_date, start_time and end_time are required'}), 400
+
+    court = Court.query.get(court_id)
+    if not court:
+        return jsonify({'error': 'court_not_found'}), 404
+
+    if _slot_overlaps(court_id, booking_date, start_time, end_time, exclude_booking_id=booking.id):
+        return jsonify({'error': 'slot_unavailable'}), 409
+
+    booking.court_id = court_id
+    booking.booking_date = booking_date
+    booking.start_time = start_time
+    booking.end_time = end_time
+    booking.cost = float(data.get('cost', booking.cost) or 0.0)
+    booking.notes = data.get('notes', booking.notes)
+    booking.status = data.get('status', booking.status or 'confirmed')
+    db.session.commit()
+
+    return jsonify(booking.to_dict())
+
+
+@bookings_bp.route('/bookings', methods=['GET'])
+def list_bookings():
+    bookings = Booking.query.order_by(Booking.booking_date.asc(), Booking.start_time.asc()).all()
+    return jsonify({'bookings': [b.to_dict() for b in bookings]})
+
+
+@bookings_bp.route('/bookings/<int:booking_id>/rsvp', methods=['POST'])
+def save_booking_rsvp(booking_id):
+    user, error = _require_login()
+    if error:
+        return error
+
+    booking = Booking.query.get_or_404(booking_id)
+    data = request.get_json() or {}
+    status = data.get('status', 'tentative')
+    if not _valid_participant_status(status):
+        return jsonify({'error': 'invalid_status'}), 400
+
+    participant = _upsert_participant(
+        booking,
+        user.phone,
+        name=user.name,
+        status=status,
+        is_adhoc=False
+    )
+    db.session.commit()
+    return jsonify(participant.to_dict())
+
+
+@bookings_bp.route('/bookings/<int:booking_id>/family-attendance', methods=['POST'])
+def save_booking_family_attendance(booking_id):
+    user, error = _require_login()
+    if error:
+        return error
+
+    booking = Booking.query.get_or_404(booking_id)
+    data = request.get_json() or {}
+    attendees = data.get('attendees', []) or []
+    family_members = {
+        member.id: member for member in FamilyMember.query.filter_by(user_id=user.id).all()
+    }
+
+    saved = []
+    for attendee in attendees:
+        attendee_type = attendee.get('type')
+        status = attendee.get('status', 'not_attending')
+        if not _valid_participant_status(status):
+            return jsonify({'error': 'invalid_status'}), 400
+
+        if attendee_type == 'self':
+            saved.append(_upsert_participant(
+                booking,
+                user.phone,
+                name=user.name,
+                status=status,
+                is_adhoc=False
+            ))
+            continue
+
+        if attendee_type == 'family':
+            member_id = attendee.get('family_member_id')
+            member = family_members.get(member_id)
+            if not member:
+                return jsonify({'error': 'family_member_not_found'}), 404
+            saved.append(_upsert_participant(
+                booking,
+                f'family:{member.id}',
+                name=member.name,
+                status=status,
+                is_adhoc=False
+            ))
+
+    db.session.commit()
+    return jsonify({'participants': [participant.to_dict() for participant in saved]})
+
+
+@bookings_bp.route('/bookings/<int:booking_id>/participants', methods=['POST'])
+def add_booking_participant(booking_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    booking = Booking.query.get_or_404(booking_id)
+    data = request.get_json() or {}
+    try:
+        participant = _upsert_participant(
+            booking,
+            data.get('phone'),
+            name=data.get('name'),
+            status=data.get('status', 'attending'),
+            is_adhoc=data.get('is_adhoc', True)
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    db.session.commit()
+    return jsonify(participant.to_dict())
+
+
+@bookings_bp.route('/bookings/<int:booking_id>/participants/<int:participant_id>', methods=['PUT'])
+def update_booking_participant(booking_id, participant_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    Booking.query.get_or_404(booking_id)
+    participant = BookingParticipant.query.filter_by(id=participant_id, booking_id=booking_id).first_or_404()
+    data = request.get_json() or {}
+    status = data.get('status', participant.status)
+    if not _valid_participant_status(status):
+        return jsonify({'error': 'invalid_status'}), 400
+
+    participant.name = (data.get('name', participant.name) or '').strip() or None
+    participant.phone = (data.get('phone', participant.phone) or '').strip()
+    participant.status = status
+    if 'is_adhoc' in data:
+        participant.is_adhoc = bool(data.get('is_adhoc'))
+    db.session.commit()
+    return jsonify(participant.to_dict())
+
+
+@bookings_bp.route('/bookings/<int:booking_id>/participants/<int:participant_id>', methods=['DELETE'])
+def delete_booking_participant(booking_id, participant_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    participant = BookingParticipant.query.filter_by(id=participant_id, booking_id=booking_id).first_or_404()
+    db.session.delete(participant)
+    db.session.commit()
+    return jsonify({'status': 'deleted'})
+
+
+@bookings_bp.route('/bookings/<int:booking_id>/invoice', methods=['POST'])
+def generate_invoice(booking_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    booking = Booking.query.get_or_404(booking_id)
+    invoice = Invoice.query.filter_by(booking_id=booking_id).first()
+    if not invoice:
+        invoice = Invoice(booking_id=booking.id)
+        db.session.add(invoice)
+
+    court = booking.court
+    total_amount = float(booking.cost or court.hourly_rate if court else 0.0)
+    attended_count = len([participant for participant in booking.participants if participant.status == 'attending'])
+    invoice.total_amount = total_amount
+    invoice.split_count = max(1, attended_count or 1)
+    invoice.status = invoice.status if invoice.status == 'settled' else 'generated'
+    db.session.commit()
+    return jsonify(invoice.to_dict())
+
+
+@bookings_bp.route('/bookings/<int:booking_id>/settle', methods=['POST'])
+def settle_booking_cost(booking_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    booking = Booking.query.get_or_404(booking_id)
+    attended_count = len([participant for participant in booking.participants if participant.status == 'attending'])
+    invoice = Invoice.query.filter_by(booking_id=booking.id).first()
+    if not invoice:
+        invoice = Invoice(booking_id=booking.id)
+        db.session.add(invoice)
+    invoice.total_amount = float(booking.cost or 0.0)
+    invoice.split_count = max(1, attended_count or 1)
+    invoice.status = 'settled'
+    db.session.commit()
+    return jsonify(invoice.to_dict())
+
+
+@bookings_bp.route('/misc-costs', methods=['GET'])
+def list_misc_costs():
+    costs = MiscCost.query.order_by(MiscCost.created_at.desc()).all()
+    return jsonify({'costs': [cost.to_dict() for cost in costs]})
+
+
+@bookings_bp.route('/misc-costs', methods=['POST'])
+def create_misc_cost():
+    user, error = _require_admin()
+    if error:
+        return error
+
+    data = request.get_json() or {}
+    title = (data.get('title') or '').strip()
+    if not title:
+        return jsonify({'error': 'title required'}), 400
+
+    cost = MiscCost(
+        title=title,
+        description=(data.get('description') or '').strip() or None,
+        amount=float(data.get('amount', 0) or 0.0),
+        paid_by=(data.get('paid_by') or '').strip() or None,
+        purchase_date=(data.get('purchase_date') or '').strip() or None,
+        split_count=max(1, int(data.get('split_count', 1) or 1)),
+        status=data.get('status', 'open') or 'open',
+    )
+    db.session.add(cost)
+    db.session.commit()
+    return jsonify(cost.to_dict())
+
+
+@bookings_bp.route('/misc-costs/<int:cost_id>', methods=['PUT'])
+def update_misc_cost(cost_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    cost = MiscCost.query.get_or_404(cost_id)
+    data = request.get_json() or {}
+    title = (data.get('title', cost.title) or '').strip()
+    if not title:
+        return jsonify({'error': 'title required'}), 400
+
+    cost.title = title
+    cost.description = (data.get('description', cost.description) or '').strip() or None
+    cost.amount = float(data.get('amount', cost.amount) or 0.0)
+    cost.paid_by = (data.get('paid_by', cost.paid_by) or '').strip() or None
+    cost.purchase_date = (data.get('purchase_date', cost.purchase_date) or '').strip() or None
+    cost.split_count = max(1, int(data.get('split_count', cost.split_count) or 1))
+    cost.status = data.get('status', cost.status) or 'open'
+    db.session.commit()
+    return jsonify(cost.to_dict())
+
+
+@bookings_bp.route('/misc-costs/<int:cost_id>', methods=['DELETE'])
+def delete_misc_cost(cost_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    cost = MiscCost.query.get_or_404(cost_id)
+    db.session.delete(cost)
+    db.session.commit()
+    return jsonify({'status': 'deleted'})
+
+
+@bookings_bp.route('/admin/users', methods=['GET'])
+def admin_users():
+    user, error = _require_admin()
+    if error:
+        return error
+
+    users = User.query.order_by(User.created_at.desc()).all()
+    return jsonify({'users': [_admin_user_payload(item) for item in users]})
+
+
+@bookings_bp.route('/admin/users', methods=['POST'])
+def create_admin_user():
+    admin, error = _require_admin()
+    if error:
+        return error
+
+    data = request.get_json() or {}
+    phone = (data.get('phone') or '').strip()
+    if not phone:
+        return jsonify({'error': 'phone required'}), 400
+    user = User.query.filter_by(phone=phone).first()
+    if not user:
+        role = data.get('role', 'member')
+        if role not in {'member', 'admin'}:
+            return jsonify({'error': 'invalid_role'}), 400
+        user = User(
+            phone=phone,
+            email=data.get('email'),
+            name=data.get('name'),
+            whatsapp_number=data.get('whatsapp_number'),
+            role=role,
+            is_club_member=bool(data.get('is_club_member', False))
+        )
+        db.session.add(user)
+        db.session.commit()
+    return jsonify(_admin_user_payload(user))
+
+
+@bookings_bp.route('/admin/users/<int:user_id>', methods=['PUT'])
+def update_admin_user(user_id):
+    admin, error = _require_admin()
+    if error:
+        return error
+
+    target_user = User.query.get_or_404(user_id)
+    data = request.get_json() or {}
+
+    if 'email' in data:
+        email = (data.get('email') or '').strip().lower() or None
+        if email:
+            existing = User.query.filter(User.email == email, User.id != target_user.id).first()
+            if existing:
+                return jsonify({'error': 'email_already_registered'}), 409
+        target_user.email = email
+
+    if 'phone' in data:
+        phone = (data.get('phone') or '').strip()
+        if not phone:
+            return jsonify({'error': 'phone required'}), 400
+        existing = User.query.filter(User.phone == phone, User.id != target_user.id).first()
+        if existing:
+            return jsonify({'error': 'phone_already_registered'}), 409
+        target_user.phone = phone
+
+    if 'name' in data:
+        target_user.name = (data.get('name') or '').strip() or None
+    if 'whatsapp_number' in data:
+        target_user.whatsapp_number = (data.get('whatsapp_number') or '').strip() or None
+    if 'is_club_member' in data:
+        target_user.is_club_member = bool(data.get('is_club_member'))
+    if 'role' in data:
+        role = data.get('role')
+        if role not in {'member', 'admin'}:
+            return jsonify({'error': 'invalid_role'}), 400
+        target_user.role = role
+
+    db.session.commit()
+    return jsonify(_admin_user_payload(target_user))
+
+
+@bookings_bp.route('/admin/users/<int:user_id>', methods=['DELETE'])
+def delete_admin_user(user_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    target_user = User.query.get_or_404(user_id)
+
+    FamilyMember.query.filter_by(user_id=target_user.id).delete()
+    PlayAvailabilityVote.query.filter_by(user_id=target_user.id).update(
+        {PlayAvailabilityVote.user_id: None},
+        synchronize_session=False
+    )
+    db.session.delete(target_user)
+    db.session.commit()
+
+    return jsonify({'status': 'deleted'})
+
+
+@bookings_bp.route('/admin/family-members/<int:member_id>', methods=['PUT'])
+def update_admin_family_member(member_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    member = FamilyMember.query.get_or_404(member_id)
+    data = request.get_json() or {}
+    if 'name' in data:
+        name = (data.get('name') or '').strip()
+        if not name:
+            return jsonify({'error': 'name required'}), 400
+        member.name = name
+    if 'relationship' in data:
+        member.relationship = (data.get('relationship') or '').strip() or None
+    if 'is_club_member' in data:
+        member.is_club_member = bool(data.get('is_club_member'))
+
+    db.session.commit()
+    return jsonify(member.to_dict())
+
+
+@bookings_bp.route('/admin/family-members', methods=['POST'])
+def create_admin_family_member():
+    user, error = _require_admin()
+    if error:
+        return error
+
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    owner = User.query.get_or_404(user_id)
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+
+    member = FamilyMember(
+        user_id=owner.id,
+        name=name,
+        relationship=(data.get('relationship') or '').strip() or None,
+        is_club_member=bool(data.get('is_club_member', False))
+    )
+    db.session.add(member)
+    db.session.commit()
+    return jsonify(member.to_dict())
+
+
+@bookings_bp.route('/admin/family-members/<int:member_id>', methods=['DELETE'])
+def delete_admin_family_member(member_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    member = FamilyMember.query.get_or_404(member_id)
+    db.session.delete(member)
+    db.session.commit()
+    return jsonify({'status': 'deleted'})
+
+
+@bookings_bp.route('/admin/courts', methods=['POST'])
+def create_court():
+    user, error = _require_admin()
+    if error:
+        return error
+
+    data = request.get_json() or {}
+    name = data.get('name')
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+    court = Court(
+        name=name,
+        location=data.get('location', ''),
+        description=data.get('description', ''),
+        hourly_rate=data.get('hourly_rate', 25.0),
+        is_active=data.get('is_active', True)
+    )
+    db.session.add(court)
+    db.session.commit()
+    return jsonify(court.to_dict())
+
+
+@bookings_bp.route('/admin/courts', methods=['GET'])
+def list_courts():
+    user, error = _require_admin()
+    if error:
+        return error
+
+    courts = Court.query.order_by(Court.name.asc()).all()
+    return jsonify({'courts': [court.to_dict() for court in courts]})
+
+
+@bookings_bp.route('/admin/courts/<int:court_id>', methods=['PUT'])
+def update_court(court_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    court = Court.query.get_or_404(court_id)
+    data = request.get_json() or {}
+    name = (data.get('name') or court.name or '').strip()
+    if not name:
+        return jsonify({'error': 'name required'}), 400
+
+    court.name = name
+    court.location = (data.get('location') or '').strip()
+    court.description = (data.get('description') or '').strip()
+    court.hourly_rate = float(data.get('hourly_rate', court.hourly_rate) or 0.0)
+    if 'is_active' in data:
+        court.is_active = bool(data.get('is_active'))
+    db.session.commit()
+    return jsonify(court.to_dict())
+
+
+@bookings_bp.route('/admin/courts/<int:court_id>', methods=['DELETE'])
+def delete_court(court_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    court = Court.query.get_or_404(court_id)
+    court.is_active = False
+    db.session.commit()
+    return jsonify(court.to_dict())

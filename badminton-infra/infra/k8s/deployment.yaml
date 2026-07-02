@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: badminton-backend
+  namespace: nieuwegein-badminton
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: badminton-backend
+  template:
+    metadata:
+      labels:
+        app: badminton-backend
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/arnand1988/badminton-backend:latest
+          env:
+            - name: DATABASE_URL
+              value: postgresql://badminton_user:strongpassword@postgres:5432/badminton
+            - name: SECRET_KEY
+              value: change-me
+            - name: JWT_SECRET
+              value: change-me
+            - name: FLASK_ENV
+              value: development
+            - name: AUTH_MOCK
+              value: '1'
+          ports:
+            - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: badminton-backend
+  namespace: nieuwegein-badminton
+spec:
+  selector:
+    app: badminton-backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: badminton-frontend
+  namespace: nieuwegein-badminton
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: badminton-frontend
+  template:
+    metadata:
+      labels:
+        app: badminton-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/arnand1988/badminton-frontend:latest
+          ports:
+            - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: badminton-frontend
+  namespace: nieuwegein-badminton
+spec:
+  selector:
+    app: badminton-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: badminton-ingress
+  namespace: nieuwegein-badminton
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  rules:
+    - host: nieuwegeinbadminton.nl
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: badminton-frontend
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - nieuwegeinbadminton.nl
+      secretName: nieuwegeinbadminton-tls

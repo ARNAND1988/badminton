@@ -1,0 +1,17 @@
+name: Deploy on Raspberry Pi
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: pi5-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [ self-hosted, pi5 ]
+    steps:
+      - name: Deploy latest main on Pi
+        run: /home/admin/git-repo/badminton/badminton-infra/update-from-main.sh

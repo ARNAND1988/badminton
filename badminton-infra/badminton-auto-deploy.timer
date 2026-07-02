@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll GitHub for Badminton app changes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=badminton-auto-deploy.service
+
+[Install]
+WantedBy=timers.target

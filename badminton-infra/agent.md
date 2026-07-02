@@ -96,6 +96,39 @@ journalctl -u badminton-app.service -n 100
 docker compose -f docker-compose.app.yml -f docker-compose.cloudflare.yml ps
 ```
 
+## Auto-Deploy From GitHub Main
+
+Preferred push-triggered setup:
+
+- `.github/workflows/pi-deploy.yml` runs on a self-hosted GitHub Actions runner with the custom label `pi5`.
+- The runner should be installed on the Pi, preferably in `/home/admin/actions-runner`.
+- The runner runs `/home/admin/git-repo/badminton/badminton-infra/update-from-main.sh` after each push to `main`.
+- GitHub receives the push webhook; no inbound webhook listener or SSH port is required on the Pi.
+
+Files:
+
+- `update-from-main.sh`: fetches `origin/main`, compares it to local `HEAD`, pulls with `--ff-only` if changed, then runs `deploy-cloudflare.sh`.
+- `badminton-auto-deploy.service`: one-shot systemd unit that runs the update script.
+- `badminton-auto-deploy.timer`: polls every 5 minutes after boot.
+
+Install on the Pi:
+
+```bash
+cd /home/admin/git-repo/badminton/badminton-infra
+sudo cp badminton-auto-deploy.service /etc/systemd/system/
+sudo cp badminton-auto-deploy.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now badminton-auto-deploy.timer
+```
+
+Check it:
+
+```bash
+systemctl list-timers badminton-auto-deploy.timer
+journalctl -u badminton-auto-deploy.service -n 100
+sudo systemctl start badminton-auto-deploy.service
+```
+
 After editing the service file, reinstall it:
 
 ```bash

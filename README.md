@@ -317,6 +317,103 @@ Stop the tunnel and app:
 docker compose -f docker-compose.app.yml -f docker-compose.cloudflare.yml down
 ```
 
+### Auto-Deploy From GitHub Main On Raspberry Pi
+
+The Pi can poll GitHub for new commits on `main` and redeploy only when the remote commit changes.
+
+The preferred push-triggered setup is GitHub Actions with a self-hosted runner on the Pi. GitHub receives the push webhook, then the runner on the Pi executes the deploy script locally. This avoids exposing SSH or a custom webhook listener to the internet.
+
+1. In GitHub, create a self-hosted runner for this repository:
+   - Repository: `Settings` -> `Actions` -> `Runners` -> `New self-hosted runner`
+   - OS: Linux
+   - Architecture: ARM64
+   - Add a custom runner label: `pi5`
+
+2. On the Pi, follow GitHub's runner install commands. Install it somewhere outside the app checkout, for example:
+
+```bash
+mkdir -p /home/admin/actions-runner
+cd /home/admin/actions-runner
+```
+
+3. Install the runner as a service:
+
+```bash
+sudo ./svc.sh install admin
+sudo ./svc.sh start
+```
+
+4. Make sure Docker commands work for the runner user:
+
+```bash
+sudo usermod -aG docker admin
+```
+
+Log out and back in, or reboot, after changing Docker group membership.
+
+5. Make sure the Pi deployment checkout exists and can pull from GitHub:
+
+```bash
+cd /home/admin/git-repo/badminton
+git fetch origin main
+```
+
+6. Make sure `badminton-infra/.env` exists on the Pi and contains the Cloudflare tunnel token:
+
+```dotenv
+CLOUDFLARED_TOKEN=your-cloudflare-tunnel-token
+```
+
+After `.github/workflows/pi-deploy.yml` is merged to `main`, every push to `main` will run this on the Pi:
+
+```bash
+/home/admin/git-repo/badminton/badminton-infra/update-from-main.sh
+```
+
+You can also run it manually from GitHub with `Actions` -> `Deploy on Raspberry Pi` -> `Run workflow`.
+
+Useful checks:
+
+```bash
+sudo systemctl status actions.runner.*
+journalctl -u actions.runner.* -n 100
+```
+
+#### Optional Polling Fallback
+
+If you prefer polling instead of GitHub Actions, install the systemd timer. Make sure the Pi checkout can pull from GitHub:
+
+```bash
+cd /home/admin/git-repo/badminton
+git fetch origin main
+```
+
+Make sure `badminton-infra/.env` exists on the Pi and contains the Cloudflare tunnel token:
+
+```dotenv
+CLOUDFLARED_TOKEN=your-cloudflare-tunnel-token
+```
+
+Install and enable the auto-deploy timer:
+
+```bash
+cd /home/admin/git-repo/badminton/badminton-infra
+sudo cp badminton-auto-deploy.service /etc/systemd/system/
+sudo cp badminton-auto-deploy.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now badminton-auto-deploy.timer
+```
+
+The timer runs every 5 minutes. When `origin/main` has a new commit, it runs `git pull --ff-only origin main` and then `./deploy-cloudflare.sh`, which rebuilds and restarts the Docker Compose app.
+
+Useful checks:
+
+```bash
+systemctl list-timers badminton-auto-deploy.timer
+journalctl -u badminton-auto-deploy.service -n 100
+sudo systemctl start badminton-auto-deploy.service
+```
+
 ### If Hosting On Your Own Server
 
 1. In Cloudflare, add your domain and make sure the domain's authoritative nameservers are Cloudflare.

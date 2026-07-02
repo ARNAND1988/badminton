@@ -1,0 +1,10 @@
+[Unit]
+Description=Update Badminton app from GitHub main and redeploy
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/git-repo/badminton
+ExecStart=/home/admin/git-repo/badminton/badminton-infra/update-from-main.sh

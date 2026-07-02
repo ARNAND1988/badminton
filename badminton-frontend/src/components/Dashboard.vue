@@ -37,12 +37,28 @@
               </div>
             </div>
 
-            <p class="mt-4 text-slate-700">
-              {{ booking.start_time }} - {{ booking.end_time }}
-              <span v-if="booking.court?.location">at {{ booking.court.location }}</span>
-            </p>
+            <div class="mt-4 grid gap-2 text-sm text-slate-700">
+              <p class="flex items-center gap-2">
+                <span aria-hidden="true">⏰</span>
+                <span>{{ booking.start_time }} - {{ booking.end_time }}</span>
+              </p>
+              <p v-if="booking.court?.location" class="flex items-center gap-2">
+                <span aria-hidden="true">📍</span>
+                <span>{{ booking.court.location }}</span>
+                <a
+                  v-if="booking.court?.map_link"
+                  :href="booking.court.map_link"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100"
+                  @click.stop
+                >
+                  🗺️ Open map
+                </a>
+              </p>
+            </div>
             <p class="mt-2 min-h-[2.5rem] text-sm leading-5 text-slate-600">
-              {{ booking.notes || booking.court?.description || 'No notes added for this booking.' }}
+              📝 {{ booking.notes || booking.court?.description || 'No notes added for this booking.' }}
             </p>
 
             <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -146,37 +162,37 @@
           </div>
           <div class="grid gap-3 sm:grid-cols-2 sm:gap-4">
             <div>
-              <label class="form-label">Court</label>
+              <label class="form-label">🏸 Court</label>
               <select v-model="selectedCourtId" class="form-input">
                 <option value="">Select a court</option>
                 <option v-for="court in activeCourts" :key="court.id" :value="court.id">{{ court.name }} · {{ court.location || 'No location' }}</option>
               </select>
             </div>
             <div>
-              <label class="form-label">Date</label>
+              <label class="form-label">📅 Date</label>
               <input v-model="bookingDate" type="date" class="form-input" />
             </div>
             <div>
-              <label class="form-label">Start time</label>
+              <label class="form-label">⏰ Start time</label>
               <input v-model="startTime" type="time" class="form-input" />
             </div>
             <div>
-              <label class="form-label">End time</label>
+              <label class="form-label">⏱️ End time</label>
               <input v-model="endTime" type="time" class="form-input" />
             </div>
             <div>
-              <label class="form-label">Cost</label>
+              <label class="form-label">💶 Cost</label>
               <input v-model="bookingCost" type="number" min="0" step="0.01" placeholder="Cost" class="form-input" />
             </div>
             <div v-if="!editingBookingId">
-              <label class="form-label">Recurring</label>
+              <label class="form-label">🔁 Recurring</label>
               <select v-model="recurringMode" class="form-input">
                 <option :value="false">One-off</option>
                 <option :value="true">Every week on the same day</option>
               </select>
             </div>
             <div class="md:col-span-2">
-              <label class="form-label">Notes</label>
+              <label class="form-label">📝 Notes</label>
               <input v-model="bookingNotes" placeholder="Optional booking notes" class="form-input" />
             </div>
           </div>
@@ -200,8 +216,9 @@
             <h3 class="mb-3 text-lg font-semibold">Add court</h3>
             <div class="space-y-3">
               <input v-model="newCourtName" placeholder="Court name" class="form-input" />
-              <input v-model="newCourtLocation" placeholder="Location" class="form-input" />
-              <input v-model="newCourtDescription" placeholder="Description" class="form-input" />
+              <input v-model="newCourtLocation" placeholder="📍 Location" class="form-input" />
+              <input v-model="newCourtMapLink" placeholder="🗺️ Google Maps link" class="form-input" />
+              <input v-model="newCourtDescription" placeholder="📝 Description" class="form-input" />
               <input v-model="newCourtRate" type="number" min="0" step="0.01" placeholder="Hourly rate" class="form-input" />
               <button class="btn-dark w-full" @click="createCourt">Add court</button>
             </div>
@@ -213,8 +230,9 @@
               <article v-for="court in courts" :key="court.id" class="sub-card space-y-3">
                 <div class="grid gap-2">
                   <input v-model="court.name" class="form-input" />
-                  <input v-model="court.location" class="form-input" placeholder="Location" />
-                  <input v-model="court.description" class="form-input" placeholder="Description" />
+                  <input v-model="court.location" class="form-input" placeholder="📍 Location" />
+                  <input v-model="court.map_link" class="form-input" placeholder="🗺️ Google Maps link" />
+                  <input v-model="court.description" class="form-input" placeholder="📝 Description" />
                   <input v-model.number="court.hourly_rate" type="number" min="0" step="0.01" class="form-input" />
                 </div>
                 <div class="grid grid-cols-2 gap-2">
@@ -259,23 +277,26 @@
         </div>
       </div>
 
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <article v-for="day in playDays" :key="day.date" class="sub-card p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <div class="font-semibold text-slate-900">{{ day.weekday }}</div>
-              <div class="text-sm text-slate-600">{{ day.date }}</div>
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <article v-for="day in playDays" :key="day.date" class="sub-card overflow-hidden p-0">
+          <div class="bg-gradient-to-br from-emerald-50 to-sky-50 p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-lg font-bold text-slate-900">{{ day.weekday }}</div>
+                <div class="text-sm text-slate-600">📅 {{ day.date }}</div>
+              </div>
+              <div class="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-800 shadow-sm">
+                👥 {{ day.totals.attendee_count }} people
+              </div>
             </div>
-            <div class="rounded bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
-              {{ day.totals.attendee_count }} people
+
+            <div class="mt-3 grid grid-cols-2 gap-2 text-sm font-semibold">
+              <div class="rounded-xl border border-emerald-100 bg-white/80 p-3 text-emerald-700">✅ {{ day.totals.available_count || 0 }} available</div>
+              <div class="rounded-xl border border-amber-100 bg-white/80 p-3 text-amber-700">🤔 {{ day.totals.tentative_count || 0 }} tentative</div>
             </div>
           </div>
 
-          <div class="mt-3 rounded border bg-slate-50 p-2 text-sm text-slate-700">
-            {{ day.totals.available_count || 0 }} available · {{ day.totals.tentative_count || 0 }} tentative
-          </div>
-
-          <div v-if="isLoggedIn" class="mt-4 space-y-3">
+          <div v-if="isLoggedIn" class="space-y-3 p-4">
             <div>
               <label class="mb-1 block text-sm font-medium">Availability by member</label>
               <div class="space-y-2 rounded border bg-white p-3">
@@ -538,6 +559,7 @@ export default {
     const newCourtName = ref('')
     const newCourtLocation = ref('')
     const newCourtDescription = ref('')
+    const newCourtMapLink = ref('')
     const newCourtRate = ref('25')
     const newFamilyName = ref('')
     const newParticipantName = ref({})
@@ -1108,6 +1130,7 @@ export default {
             name: newCourtName.value,
             location: newCourtLocation.value,
             description: newCourtDescription.value,
+            map_link: newCourtMapLink.value,
             hourly_rate: parseFloat(newCourtRate.value || 25)
           })
         })
@@ -1115,6 +1138,7 @@ export default {
         newCourtName.value = ''
         newCourtLocation.value = ''
         newCourtDescription.value = ''
+        newCourtMapLink.value = ''
         newCourtRate.value = '25'
         await loadCourts()
         selectedCourtId.value = data.id
@@ -1132,6 +1156,7 @@ export default {
             name: court.name,
             location: court.location,
             description: court.description,
+            map_link: court.map_link,
             hourly_rate: court.hourly_rate,
             is_active: court.is_active
           })
@@ -1371,6 +1396,7 @@ export default {
       newCourtName,
       newCourtLocation,
       newCourtDescription,
+      newCourtMapLink,
       newCourtRate,
       newFamilyName,
       newAdminFamilyName,

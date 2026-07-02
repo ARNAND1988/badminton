@@ -40,6 +40,7 @@ def test_booking_availability_and_invoice(client, app):
     booking_data = create_resp.get_json()
     assert booking_data['status'] == 'confirmed'
     assert booking_data['court']['id'] == court.id
+    assert 'map_link' in booking_data['court']
 
     invoice_resp = client.post(f"/api/bookings/{booking_data['id']}/invoice", headers=headers)
     assert invoice_resp.status_code == 200
@@ -141,12 +142,14 @@ def test_admin_can_update_and_soft_delete_court(client, app):
         'name': 'Court Updated',
         'location': 'Main hall',
         'description': 'Freshly lined',
+        'map_link': 'https://maps.google.com/?q=Main+hall',
         'hourly_rate': 28,
     }, headers=headers)
     assert update_resp.status_code == 200
     update_data = update_resp.get_json()
     assert update_data['name'] == 'Court Updated'
     assert update_data['location'] == 'Main hall'
+    assert update_data['map_link'] == 'https://maps.google.com/?q=Main+hall'
     assert update_data['hourly_rate'] == 28
 
     delete_resp = client.delete(f'/api/admin/courts/{court_id}', headers=headers)

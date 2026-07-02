@@ -151,8 +151,27 @@
         <p v-if="!upcomingBookings.length && !loading" class="p-3 text-sm text-slate-600">No upcoming bookings found.</p>
       </div>
 
-      <div v-if="isAdmin" class="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
-        <div class="panel-card">
+      <div v-if="isAdmin" class="space-y-4">
+        <div class="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+          <button
+            type="button"
+            class="rounded-md px-4 py-2 text-sm font-semibold transition"
+            :class="adminBookingTab === 'bookings' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
+            @click="adminBookingTab = 'bookings'"
+          >
+            Manage bookings
+          </button>
+          <button
+            type="button"
+            class="rounded-md px-4 py-2 text-sm font-semibold transition"
+            :class="adminBookingTab === 'courts' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
+            @click="adminBookingTab = 'courts'"
+          >
+            Manage courts
+          </button>
+        </div>
+
+        <div v-if="adminBookingTab === 'bookings'" class="panel-card">
           <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 class="text-lg font-semibold">{{ editingBookingId ? 'Edit booking' : 'Create booking' }}</h3>
@@ -211,7 +230,7 @@
           <button class="btn-primary mt-4 w-full sm:w-auto" @click="saveBooking">{{ editingBookingId ? 'Update booking' : 'Create booking' }}</button>
         </div>
 
-        <div class="space-y-6">
+        <div v-if="adminBookingTab === 'courts'" class="grid gap-6 lg:grid-cols-2">
           <div class="panel-card">
             <h3 class="mb-3 text-lg font-semibold">Add court</h3>
             <div class="space-y-3">
@@ -560,6 +579,7 @@ export default {
     const router = useRouter()
     const activeView = ref(props.initialView)
     const bookings = ref([])
+    const completedBookingHistory = ref([])
     const courts = ref([])
     const familyMembers = ref([])
     const adminUsers = ref([])
@@ -578,6 +598,7 @@ export default {
     const recurringMode = ref(false)
     const recurringIntervalWeeks = ref(1)
     const recurringCount = ref(1)
+    const adminBookingTab = ref('bookings')
     const newCourtName = ref('')
     const newCourtLocation = ref('')
     const newCourtDescription = ref('')
@@ -608,9 +629,7 @@ export default {
       const today = todayIso()
       return bookings.value.filter((booking) => booking.booking_date >= today && booking.status !== 'completed')
     })
-    const completedBookings = computed(() => {
-      return bookings.value.filter((booking) => booking.status === 'completed')
-    })
+    const completedBookings = computed(() => completedBookingHistory.value)
     const maxFamilyAttendees = computed(() => familyMembers.value.length + 1)
     const familyAttendancePeople = computed(() => {
       getAuthSessionVersion()
@@ -843,8 +862,10 @@ export default {
       const bookingsData = await fetchJson(`/api/bookings${query ? `?${query}` : ''}`)
       if (options.status === 'completed') {
         completedBookingPagination.value = bookingsData.pagination || completedBookingPagination.value
+        completedBookingHistory.value = bookingsData.bookings || []
+      } else {
+        bookings.value = bookingsData.bookings || []
       }
-      bookings.value = bookingsData.bookings || []
     }
 
     async function loadCourts() {
@@ -1057,7 +1078,7 @@ export default {
           })
         })
         msg.value = recurringMode.value ? 'Recurring booking created successfully.' : 'Booking created successfully.'
-        await loadBookings()
+        await loadBookings({ status: 'upcoming', perPage: 100 })
         resetBookingForm()
       } catch (err) {
         msg.value = err.message
@@ -1084,7 +1105,7 @@ export default {
           })
         })
         msg.value = 'Booking updated successfully.'
-        await loadBookings()
+        await loadBookings({ status: 'upcoming', perPage: 100 })
         resetBookingForm()
       } catch (err) {
         msg.value = err.message
@@ -1095,6 +1116,7 @@ export default {
       try {
         const data = await fetchJson(`/api/bookings/${bookingId}/invoice`, { method: 'POST' })
         msg.value = `Invoice generated: €${data.total_amount}`
+        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1108,7 +1130,7 @@ export default {
           body: JSON.stringify({ status })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings()
+        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1128,7 +1150,7 @@ export default {
           })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings()
+        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1148,7 +1170,7 @@ export default {
         newParticipantPhone.value[booking.id] = ''
         newParticipantStatus.value[booking.id] = 'attending'
         msg.value = 'Participant added.'
-        await loadBookings()
+        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1162,7 +1184,7 @@ export default {
           body: JSON.stringify(participant)
         })
         msg.value = 'Participant updated.'
-        await loadBookings()
+        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1220,7 +1242,7 @@ export default {
         await fetchJson(`/api/admin/courts/${court.id}`, { method: 'DELETE' })
         msg.value = `Deleted court ${court.name}.`
         await loadCourts()
-        await loadBookings()
+        await loadBookings({ status: 'upcoming', perPage: 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1281,7 +1303,7 @@ export default {
       try {
         await fetchJson(`/api/bookings/${booking.id}/settle`, { method: 'POST' })
         msg.value = 'Booking cost settled.'
-        await loadBookings()
+        await loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
       } catch (err) {
         msg.value = err.message
       }
@@ -1434,6 +1456,7 @@ export default {
       playDays,
       maxFamilyAttendees,
       bookingDate,
+      adminBookingTab,
       startTime,
       endTime,
       bookingCost,

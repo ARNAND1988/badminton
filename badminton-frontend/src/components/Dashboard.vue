@@ -151,8 +151,27 @@
         <p v-if="!upcomingBookings.length && !loading" class="p-3 text-sm text-slate-600">No upcoming bookings found.</p>
       </div>
 
-      <div v-if="isAdmin" class="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
-        <div class="panel-card">
+      <div v-if="isAdmin" class="space-y-4">
+        <div class="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          <button
+            type="button"
+            class="rounded-lg px-4 py-2 text-sm font-bold transition"
+            :class="bookingAdminTab === 'bookings' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'"
+            @click="bookingAdminTab = 'bookings'"
+          >
+            Manage bookings
+          </button>
+          <button
+            type="button"
+            class="rounded-lg px-4 py-2 text-sm font-bold transition"
+            :class="bookingAdminTab === 'courts' ? 'bg-slate-900 text-white shadow' : 'text-slate-600 hover:bg-slate-100'"
+            @click="bookingAdminTab = 'courts'"
+          >
+            Manage courts
+          </button>
+        </div>
+
+        <div v-if="bookingAdminTab === 'bookings'" class="panel-card">
           <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 class="text-lg font-semibold">{{ editingBookingId ? 'Edit booking' : 'Create booking' }}</h3>
@@ -211,7 +230,7 @@
           <button class="btn-primary mt-4 w-full sm:w-auto" @click="saveBooking">{{ editingBookingId ? 'Update booking' : 'Create booking' }}</button>
         </div>
 
-        <div class="space-y-6">
+        <div v-if="bookingAdminTab === 'courts'" class="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
           <div class="panel-card">
             <h3 class="mb-3 text-lg font-semibold">Add court</h3>
             <div class="space-y-3">
@@ -388,7 +407,7 @@
       <div class="mt-8 space-y-4">
         <div>
           <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
-          <p class="section-copy">Settle completed court costs based on members marked attending.</p>
+          <p class="section-copy">Settle completed court costs based on members marked attending. Completed history is visible after login and loaded a page at a time.</p>
         </div>
 
         <div class="grid gap-4 lg:grid-cols-2">
@@ -435,6 +454,14 @@
               <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
             </div>
           </article>
+        </div>
+
+        <div v-if="completedBookingPagination.pages > 1" class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <span class="text-slate-600">Page {{ completedBookingPagination.page }} of {{ completedBookingPagination.pages }} · {{ completedBookingPagination.total }} completed bookings</span>
+          <div class="flex gap-2">
+            <button class="btn-secondary" :disabled="completedBookingPagination.page <= 1" @click="changeCompletedBookingPage(completedBookingPagination.page - 1)">Previous</button>
+            <button class="btn-secondary" :disabled="completedBookingPagination.page >= completedBookingPagination.pages" @click="changeCompletedBookingPage(completedBookingPagination.page + 1)">Next</button>
+          </div>
         </div>
         <p v-if="!completedBookings.length && !loading" class="text-sm text-slate-600">No completed bookings to settle yet.</p>
       </div>
@@ -557,6 +584,8 @@ export default {
     const adminUsers = ref([])
     const playDays = ref([])
     const miscCosts = ref([])
+    const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
+    const bookingAdminTab = ref('bookings')
     const loading = ref(false)
     const errorMsg = ref('')
     const editingBookingId = ref(null)
@@ -825,8 +854,24 @@ export default {
       await loadDashboard()
     }
 
-    async function loadBookings() {
-      const bookingsData = await fetchJson('/api/bookings')
+    async function loadActiveBookings() {
+      if (activeView.value === 'costs') {
+        await loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
+      } else {
+        await loadBookings({ status: 'upcoming', perPage: 100 })
+      }
+    }
+
+    async function loadBookings(options = {}) {
+      const params = new URLSearchParams()
+      if (options.status) params.set('status', options.status)
+      if (options.page) params.set('page', options.page)
+      if (options.perPage) params.set('per_page', options.perPage)
+      const query = params.toString()
+      const bookingsData = await fetchJson(`/api/bookings${query ? `?${query}` : ''}`)
+      if (options.status === 'completed') {
+        completedBookingPagination.value = bookingsData.pagination || completedBookingPagination.value
+      }
       bookings.value = bookingsData.bookings || []
     }
 
@@ -869,7 +914,7 @@ export default {
 
         if (activeView.value === 'bookings') {
           await Promise.all([
-            loadBookings(),
+            loadBookings({ status: 'upcoming', perPage: 100 }),
             loadPlayAvailability()
           ])
           if (loggedIn) {
@@ -884,9 +929,13 @@ export default {
             await loadFamilyMembers()
           }
         } else if (activeView.value === 'costs') {
+          if (!loggedIn) {
+            router.push('/login')
+            return
+          }
           await Promise.all([
             loadMiscCosts(),
-            loadBookings()
+            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
           ])
         } else if (activeView.value === 'members') {
           if (!loggedIn) {
@@ -904,6 +953,14 @@ export default {
       } finally {
         loading.value = false
       }
+    }
+
+    async function changeCompletedBookingPage(page) {
+      if (page < 1 || (completedBookingPagination.value.pages && page > completedBookingPagination.value.pages)) {
+        return
+      }
+      completedBookingPagination.value = { ...completedBookingPagination.value, page }
+      await loadDashboard()
     }
 
     async function createFamilyMember() {
@@ -984,6 +1041,7 @@ export default {
     }
 
     function startEditBooking(booking) {
+      bookingAdminTab.value = 'bookings'
       editingBookingId.value = booking.id
       selectedCourtId.value = booking.court?.id || ''
       bookingDate.value = booking.booking_date
@@ -1028,7 +1086,7 @@ export default {
           })
         })
         msg.value = recurringMode.value ? 'Recurring booking created successfully.' : 'Booking created successfully.'
-        await loadBookings()
+        await loadActiveBookings()
         resetBookingForm()
       } catch (err) {
         msg.value = err.message
@@ -1055,7 +1113,7 @@ export default {
           })
         })
         msg.value = 'Booking updated successfully.'
-        await loadBookings()
+        await loadActiveBookings()
         resetBookingForm()
       } catch (err) {
         msg.value = err.message
@@ -1079,7 +1137,7 @@ export default {
           body: JSON.stringify({ status })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings()
+        await loadActiveBookings()
       } catch (err) {
         msg.value = err.message
       }
@@ -1099,7 +1157,7 @@ export default {
           })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings()
+        await loadActiveBookings()
       } catch (err) {
         msg.value = err.message
       }
@@ -1119,7 +1177,7 @@ export default {
         newParticipantPhone.value[booking.id] = ''
         newParticipantStatus.value[booking.id] = 'attending'
         msg.value = 'Participant added.'
-        await loadBookings()
+        await loadActiveBookings()
       } catch (err) {
         msg.value = err.message
       }
@@ -1133,7 +1191,7 @@ export default {
           body: JSON.stringify(participant)
         })
         msg.value = 'Participant updated.'
-        await loadBookings()
+        await loadActiveBookings()
       } catch (err) {
         msg.value = err.message
       }
@@ -1191,7 +1249,7 @@ export default {
         await fetchJson(`/api/admin/courts/${court.id}`, { method: 'DELETE' })
         msg.value = `Deleted court ${court.name}.`
         await loadCourts()
-        await loadBookings()
+        await loadActiveBookings()
       } catch (err) {
         msg.value = err.message
       }
@@ -1252,7 +1310,7 @@ export default {
       try {
         await fetchJson(`/api/bookings/${booking.id}/settle`, { method: 'POST' })
         msg.value = 'Booking cost settled.'
-        await loadBookings()
+        await loadActiveBookings()
       } catch (err) {
         msg.value = err.message
       }
@@ -1384,12 +1442,14 @@ export default {
       activeView,
       activeCourts,
       adminUsers,
+      bookingAdminTab,
       bookingInterest,
       bookingDateLabel,
       bookingDayLabel,
       bookings,
       upcomingBookings,
       completedBookings,
+      completedBookingPagination,
       courts,
       familyMembers,
       familyAttendancePeople,
@@ -1434,6 +1494,7 @@ export default {
       addParticipant,
       createCourt,
       createAdminFamilyMember,
+      changeCompletedBookingPage,
       createFamilyMember,
       createInvoice,
       createMiscCost,

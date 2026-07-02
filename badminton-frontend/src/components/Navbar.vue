@@ -142,9 +142,11 @@ export default {
       const links = [
         { label: 'Play Availability', mobileLabel: 'Play', to: '/availability', icon: ShuttleIcon },
         { label: 'Bookings', mobileLabel: 'Booking', to: '/bookings', icon: CalendarIcon },
-        { label: 'Costs', mobileLabel: 'Cost', to: '/costs', icon: CostIcon },
       ]
       getAuthSessionVersion()
+      if (isLoggedIn.value) {
+        links.push({ label: 'Costs', mobileLabel: 'Cost', to: '/costs', icon: CostIcon })
+      }
       if (isLoggedIn.value && getSessionValue('member_role') === 'admin') {
         links.push({ label: 'Members', mobileLabel: 'Members', to: '/members', icon: ShuttleIcon })
       }

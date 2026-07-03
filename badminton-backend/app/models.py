@@ -127,7 +127,7 @@ class Booking(db.Model):
     court = db.relationship('Court', backref='bookings', lazy=True)
 
     def to_dict(self):
-        attended = [participant for participant in self.participants if participant.status == 'attending']
+        attended = [participant for participant in self.participants if participant.status in {'attending', 'participated'}]
         split_count = len(attended)
         cost_per_person = round(float(self.cost or 0.0) / split_count, 2) if split_count else 0.0
         return {
@@ -168,7 +168,7 @@ class BookingParticipant(db.Model):
             'name': self.name,
             'status': self.status,
             'is_adhoc': self.is_adhoc,
-            'cost_share': cost_share if self.status == 'attending' else 0.0,
+            'cost_share': cost_share if self.status in {'attending', 'participated'} else 0.0,
         }
 
 

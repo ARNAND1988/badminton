@@ -99,8 +99,40 @@ def _slot_overlaps(court_id, booking_date, start_time, end_time, exclude_booking
 
 
 def _valid_participant_status(status):
-    return status in {'attending', 'not_attending', 'tentative'}
+    return status in {'attending', 'participated', 'not_attending', 'tentative'}
 
+
+def _is_cost_split_status(status):
+    return status in {'attending', 'participated'}
+
+
+def _normalize_person_name(value):
+    normalized = ''.join(ch for ch in (value or '').lower() if ch.isalnum() or ch.isspace())
+    return ' '.join(normalized.split())
+
+
+def _names_match(left, right):
+    left = _normalize_person_name(left)
+    right = _normalize_person_name(right)
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    left_parts = left.split()
+    right_parts = right.split()
+    return bool(left_parts and right_parts and left_parts[0] == right_parts[0] and (left.startswith(right + ' ') or right.startswith(left + ' ')))
+
+
+
+
+def _sync_booking_invoice(booking):
+    invoice = Invoice.query.filter_by(booking_id=booking.id).first()
+    if not invoice:
+        return None
+    attended_count = len([participant for participant in booking.participants if _is_cost_split_status(participant.status)])
+    invoice.total_amount = float(booking.cost or 0.0)
+    invoice.split_count = max(1, attended_count or 1)
+    return invoice
 
 def _valid_availability_status(status):
     return status in {'available', 'tentative', 'not_available'}
@@ -178,13 +210,41 @@ def _monthly_invoice_summary(user, month_value):
         .all()
     )
     for booking in bookings:
-        attending = [participant for participant in booking.participants if participant.status == 'attending']
+        attending = [participant for participant in booking.participants if _is_cost_split_status(participant.status)]
         matching = [participant for participant in attending if participant.phone in participant_keys]
+        if not matching:
+            known_names = [label for label in participant_labels.values() if label]
+            matching = [
+                participant for participant in attending
+                if any(_names_match(participant.name or participant.phone, label) for label in known_names)
+            ]
         if not matching:
             continue
         split_count = max(1, len(attending) or 1)
-        per_person = round(float(booking.cost or 0.0) / split_count, 2)
-        amount = round(per_person * len(matching), 2)
+        raw_total_cents = int(round(float(booking.cost or 0.0) * 100))
+        base_cents, remainder_cents = divmod(raw_total_cents, split_count)
+        per_person = round(base_cents / 100, 2)
+        matching_ids = set()
+        matching_amount = 0.0
+        matching_participants = []
+        known_names = [label for label in participant_labels.values() if label]
+        for index, participant in enumerate(attending):
+            if participant not in matching:
+                continue
+            participant_label = participant.name or participant.phone or 'Player'
+            matched_key = participant.phone if participant.phone in participant_keys else None
+            if not matched_key:
+                for label in known_names:
+                    if _names_match(participant_label, label):
+                        matched_key = f'name:{_normalize_person_name(label)}'
+                        break
+            matched_key = matched_key or f'participant:{participant.id}'
+            if matched_key in matching_ids:
+                continue
+            matching_ids.add(matched_key)
+            matching_amount = round(matching_amount + round((base_cents + (1 if index < remainder_cents else 0)) / 100, 2), 2)
+            matching_participants.append(participant)
+        amount = matching_amount
         booking_total += amount
         booking_items.append({
             'booking_id': booking.id,
@@ -192,11 +252,11 @@ def _monthly_invoice_summary(user, month_value):
             'court': booking.court.name if booking.court else None,
             'start_time': booking.start_time,
             'end_time': booking.end_time,
-            'attendee_count': len(matching),
+            'attendee_count': len(matching_participants),
             'total_people_played': split_count,
             'total_cost': round(float(booking.cost or 0.0), 2),
             'cost_per_person': per_person,
-            'participants': [participant_labels.get(participant.phone, participant.name or participant.phone or 'Player') for participant in matching],
+            'participants': [participant_labels.get(participant.phone, participant.name or participant.phone or 'Player') for participant in matching_participants],
             'amount': amount,
             'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
         })
@@ -889,6 +949,7 @@ def update_booking(booking_id):
     booking.notes = data.get('notes', booking.notes)
     requested_status = data.get('status', booking.status or 'confirmed')
     booking.status = _booking_status_for_date(booking.booking_date, requested_status, end_time=booking.end_time)
+    _sync_booking_invoice(booking)
     db.session.commit()
 
     return jsonify(booking.to_dict())
@@ -995,6 +1056,7 @@ def save_booking_rsvp(booking_id):
         status=status,
         is_adhoc=False
     )
+    _sync_booking_invoice(booking)
     db.session.commit()
     return jsonify(participant.to_dict())
 
@@ -1045,6 +1107,7 @@ def save_booking_family_attendance(booking_id):
                 is_adhoc=False
             ))
 
+    _sync_booking_invoice(booking)
     db.session.commit()
     return jsonify({'participants': [participant.to_dict() for participant in saved]})
 
@@ -1071,6 +1134,7 @@ def add_booking_participant(booking_id):
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
 
+    _sync_booking_invoice(booking)
     db.session.commit()
     return jsonify(participant.to_dict())
 
@@ -1096,6 +1160,7 @@ def update_booking_participant(booking_id, participant_id):
     participant.status = status
     if 'is_adhoc' in data:
         participant.is_adhoc = bool(data.get('is_adhoc'))
+    _sync_booking_invoice(booking)
     db.session.commit()
     return jsonify(participant.to_dict())
 
@@ -1112,6 +1177,8 @@ def delete_booking_participant(booking_id, participant_id):
         return archived_error
     participant = BookingParticipant.query.filter_by(id=participant_id, booking_id=booking_id).first_or_404()
     db.session.delete(participant)
+    db.session.flush()
+    _sync_booking_invoice(booking)
     db.session.commit()
     return jsonify({'status': 'deleted'})
 
@@ -1133,7 +1200,7 @@ def generate_invoice(booking_id):
 
     court = booking.court
     total_amount = float(booking.cost or court.hourly_rate if court else 0.0)
-    attended_count = len([participant for participant in booking.participants if participant.status == 'attending'])
+    attended_count = len([participant for participant in booking.participants if _is_cost_split_status(participant.status)])
     invoice.total_amount = total_amount
     invoice.split_count = max(1, attended_count or 1)
     invoice.status = invoice.status if invoice.status == 'settled' else 'generated'
@@ -1151,7 +1218,7 @@ def settle_booking_cost(booking_id):
     archived_error = _archived_booking_response(booking)
     if archived_error:
         return archived_error
-    attended_count = len([participant for participant in booking.participants if participant.status == 'attending'])
+    attended_count = len([participant for participant in booking.participants if _is_cost_split_status(participant.status)])
     invoice = Invoice.query.filter_by(booking_id=booking.id).first()
     if not invoice:
         invoice = Invoice(booking_id=booking.id)
@@ -1259,21 +1326,132 @@ def admin_monthly_invoices():
         return error
 
     month_value = request.args.get('month') or datetime.utcnow().strftime('%Y-%m')
-    start_date, _ = _month_bounds(month_value)
+    start_date, end_date = _month_bounds(month_value)
     if not start_date:
         return jsonify({'error': 'month must use YYYY-MM'}), 400
+
     users = User.query.order_by(User.name.asc(), User.email.asc(), User.phone.asc()).all()
-    summaries = [_monthly_invoice_summary(item, month_value) for item in users]
+    subjects = []
+    by_key = {}
+
+    def add_subject(subject_id, display_name, user_obj=None, participant_keys=None, aliases=None):
+        subject = {
+            'id': subject_id,
+            'display_name': display_name,
+            'user': user_obj.to_dict() if user_obj else {
+                'id': subject_id,
+                'phone': subject_id,
+                'email': None,
+                'whatsapp_number': None,
+                'name': display_name,
+                'role': 'member',
+                'is_club_member': False,
+                'created_at': None,
+            },
+            'participant_keys': set(participant_keys or []),
+            'aliases': [alias for alias in (aliases or []) if alias],
+            'booking_items': [],
+            'misc_items': [],
+            'booking_total': 0.0,
+            'misc_total': 0.0,
+            'total': 0.0,
+        }
+        subjects.append(subject)
+        for key in subject['participant_keys']:
+            by_key[key] = subject
+        return subject
+
+    for item in users:
+        display_name = item.name or item.email or item.phone
+        add_subject(f'user:{item.id}', display_name, item, [item.phone], [item.name, item.email, item.phone])
+        for family_member in sorted(item.family_members, key=lambda fm: fm.created_at or datetime.min):
+            add_subject(
+                f'family:{family_member.id}',
+                family_member.name,
+                None,
+                [f'family:{family_member.id}'],
+                [family_member.name],
+            )
+
+    def subject_for_participant(participant):
+        if participant.phone in by_key:
+            return by_key[participant.phone]
+        label = participant.name or participant.phone or 'Player'
+        for subject in subjects:
+            if any(_names_match(label, alias) for alias in subject['aliases']):
+                return subject
+        key = f'adhoc:{_normalize_person_name(label) or participant.id}'
+        subject = by_key.get(key)
+        if not subject:
+            subject = add_subject(key, label, None, [key], [label])
+        return subject
+
+    _mark_past_bookings_completed()
+    bookings = (
+        Booking.query
+        .filter(
+            Booking.booking_date >= start_date,
+            Booking.booking_date < end_date,
+            Booking.status == 'completed',
+        )
+        .order_by(Booking.booking_date.asc(), Booking.start_time.asc())
+        .all()
+    )
+    seen_booking_subjects = set()
+    for booking in bookings:
+        attending = [participant for participant in booking.participants if _is_cost_split_status(participant.status)]
+        split_count = max(1, len(attending) or 1)
+        raw_total_cents = int(round(float(booking.cost or 0.0) * 100))
+        base_cents, remainder_cents = divmod(raw_total_cents, split_count)
+        per_person = round(base_cents / 100, 2)
+        for index, participant in enumerate(attending):
+            participant_amount = round((base_cents + (1 if index < remainder_cents else 0)) / 100, 2)
+            subject = subject_for_participant(participant)
+            item_key = (booking.id, subject['id'])
+            if item_key in seen_booking_subjects:
+                continue
+            seen_booking_subjects.add(item_key)
+            subject['booking_total'] = round(subject['booking_total'] + participant_amount, 2)
+            subject['booking_items'].append({
+                'booking_id': booking.id,
+                'date': booking.booking_date,
+                'court': booking.court.name if booking.court else None,
+                'start_time': booking.start_time,
+                'end_time': booking.end_time,
+                'attendee_count': 1,
+                'total_people_played': split_count,
+                'total_cost': round(float(booking.cost or 0.0), 2),
+                'cost_per_person': per_person,
+                'participants': [subject['display_name']],
+                'amount': participant_amount,
+                'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
+            })
+
+    # Shared misc costs remain split across registered users only.
+    user_summaries = {summary['user']['id']: summary for summary in [_monthly_invoice_summary(item, month_value) for item in users]}
+    for subject in subjects:
+        user_id = subject['user'].get('id') if isinstance(subject['user'].get('id'), int) else None
+        if user_id in user_summaries:
+            summary = user_summaries[user_id]
+            subject['misc_items'] = summary['misc_items']
+            subject['misc_total'] = summary['misc_total']
+        subject['total'] = round(subject['booking_total'] + subject['misc_total'], 2)
+        subject['booking_total'] = round(subject['booking_total'], 2)
+
+    visible = [subject for subject in subjects if subject['booking_items'] or subject['misc_items'] or subject['user'].get('id')]
+    for subject in visible:
+        subject.pop('participant_keys', None)
+        subject.pop('aliases', None)
+        subject.pop('display_name', None)
     return jsonify({
         'month': month_value,
-        'invoices': summaries,
+        'invoices': visible,
         'totals': {
-            'booking_total': round(sum(item['booking_total'] for item in summaries), 2),
-            'misc_total': round(sum(item['misc_total'] for item in summaries), 2),
-            'total': round(sum(item['total'] for item in summaries), 2),
+            'booking_total': round(sum(item['booking_total'] for item in visible), 2),
+            'misc_total': round(sum(item['misc_total'] for item in visible), 2),
+            'total': round(sum(item['total'] for item in visible), 2),
         }
     })
-
 
 @bookings_bp.route('/admin/users', methods=['GET'])
 def admin_users():

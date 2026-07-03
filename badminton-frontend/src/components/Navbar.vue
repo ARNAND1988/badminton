@@ -148,12 +148,13 @@ export default {
         links.push({ label: 'Costs', mobileLabel: 'Cost', to: '/costs', icon: CostIcon })
       }
       if (isLoggedIn.value && getSessionValue('member_role') === 'admin') {
+        links.push({ label: 'Notifications', mobileLabel: 'Notify', to: '/notifications', icon: CostIcon })
         links.push({ label: 'Members', mobileLabel: 'Members', to: '/members', icon: ShuttleIcon })
       }
       return links
     })
 
-    const mobilePageLinks = computed(() => pageLinks.value.slice(0, 3))
+    const mobilePageLinks = computed(() => pageLinks.value.slice(0, 4))
     const mobileNavGridStyle = computed(() => ({
       gridTemplateColumns: `repeat(${Math.max(mobilePageLinks.value.length, 1)}, minmax(0, 1fr))`
     }))

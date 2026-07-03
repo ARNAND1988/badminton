@@ -12,3 +12,4 @@ twilio
 PyJWT
 pytest
 pytest-cov
+requests==2.32.3

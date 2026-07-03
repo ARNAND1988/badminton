@@ -40,6 +40,13 @@ const routes = [
     meta: { navLabel: 'Misc Costs', requiresAuth: true }
   },
   {
+    path: '/notifications',
+    name: 'notifications',
+    component: Dashboard,
+    props: { initialView: 'notifications' },
+    meta: { navLabel: 'Notifications', requiresAuth: true }
+  },
+  {
     path: '/members',
     name: 'members',
     component: Dashboard,

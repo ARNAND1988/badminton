@@ -919,7 +919,14 @@ def list_bookings():
             query = Booking.query.filter(
                 completed_filter,
                 Booking.booking_date >= _archive_cutoff_date()
-            ).order_by(Booking.booking_date.desc(), Booking.start_time.desc())
+            )
+            month_value = (request.args.get('month') or '').strip()
+            if month_value:
+                month_start, month_end = _month_bounds(month_value)
+                if not month_start:
+                    return jsonify({'error': 'month must use YYYY-MM'}), 400
+                query = query.filter(Booking.booking_date >= month_start, Booking.booking_date < month_end)
+            query = query.order_by(Booking.booking_date.desc(), Booking.start_time.desc())
     elif status_filter == 'upcoming':
         query = Booking.query.filter(
             Booking.booking_date >= today_value,

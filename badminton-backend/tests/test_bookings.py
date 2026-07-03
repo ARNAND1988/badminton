@@ -186,6 +186,92 @@ def test_booking_create_triggers_whatsapp_notification_with_court_name(client, a
         assert 'Real Notification Court' in log.message
 
 
+def test_due_booking_reminder_sends_once_when_enabled(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent_messages = []
+
+    def fake_send(message, recipient=None):
+        sent_messages.append({'message': message, 'recipient': recipient})
+        return 'sent', 'ok'
+
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', fake_send)
+
+    reminder_now = datetime(2026, 7, 3, 17, 0)
+    with app.app_context():
+        court = Court(name='Reminder Court', hourly_rate=20.0, is_active=True)
+        db.session.add(court)
+        db.session.commit()
+        booking = Booking(
+            court_id=court.id,
+            booking_date='2026-07-03',
+            start_time='18:00',
+            end_time='19:00',
+            cost=20,
+            status='confirmed',
+        )
+        db.session.add(booking)
+        db.session.add(WhatsAppNotificationSetting(
+            event_key='booking_reminder',
+            title='Booking reminder',
+            description='Reminder',
+            template='Reminder for {{court}} at {{start_time}}',
+            is_enabled=False,
+            send_to_group=True,
+            group_id='group-1',
+        ))
+        db.session.commit()
+        booking_id = booking.id
+
+        assert bookings_module._send_due_booking_reminders(now=reminder_now) == []
+        assert sent_messages == []
+
+        setting = WhatsAppNotificationSetting.query.filter_by(event_key='booking_reminder').first()
+        setting.is_enabled = True
+        db.session.commit()
+
+        logs = bookings_module._send_due_booking_reminders(now=reminder_now)
+        assert len(logs) == 1
+        assert sent_messages == [{'message': 'Reminder for Reminder Court at 18:00', 'recipient': 'group-1'}]
+        assert f'booking_reminder:{booking_id}:2026-07-03:18:00' in logs[0].response
+
+        assert bookings_module._send_due_booking_reminders(now=reminder_now) == []
+        assert len(sent_messages) == 1
+
+
+def test_due_booking_reminder_respects_send_to_group_flag(app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent_messages = []
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', lambda message, recipient=None: sent_messages.append(message) or ('sent', 'ok'))
+
+    with app.app_context():
+        court = Court(name='Silent Reminder Court', hourly_rate=20.0, is_active=True)
+        db.session.add(court)
+        db.session.commit()
+        db.session.add(Booking(
+            court_id=court.id,
+            booking_date='2026-07-03',
+            start_time='18:00',
+            end_time='19:00',
+            cost=20,
+            status='confirmed',
+        ))
+        db.session.add(WhatsAppNotificationSetting(
+            event_key='booking_reminder',
+            title='Booking reminder',
+            description='Reminder',
+            template='Reminder for {{court}}',
+            is_enabled=True,
+            send_to_group=False,
+            group_id='group-1',
+        ))
+        db.session.commit()
+
+        assert bookings_module._send_due_booking_reminders(now=datetime(2026, 7, 3, 17, 30)) == []
+        assert sent_messages == []
+
+
 def test_freeze_periods_skip_play_availability_days_and_are_admin_managed(client, app):
     with app.app_context():
         admin = User(phone='+31100000920', email='freeze-admin@example.com', name='Freeze Admin', role='admin')
@@ -650,7 +736,7 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
 
         booking = Booking(
             court_id=court.id,
-            booking_date='2030-05-12',
+            booking_date='2026-05-12',
             start_time='19:00',
             end_time='20:00',
             cost=60,
@@ -662,7 +748,7 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
             BookingParticipant(booking_id=booking.id, phone=member.phone, name='Invoice Member', status='attending'),
             BookingParticipant(booking_id=booking.id, phone=admin.phone, name='Invoice Admin', status='attending'),
             Invoice(booking_id=booking.id, total_amount=60, split_count=2, status='generated'),
-            MiscCost(title='May shuttles', amount=30, purchase_date='2030-05-02', split_count=3, status='open'),
+            MiscCost(title='May shuttles', amount=30, purchase_date='2026-05-02', split_count=3, status='open'),
         ])
         db.session.commit()
 
@@ -677,7 +763,7 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
             algorithm='HS256',
         )
 
-    member_resp = client.get('/api/invoices/monthly?month=2030-05', headers={'Authorization': f'Bearer {member_token}'})
+    member_resp = client.get('/api/invoices/monthly?month=2026-05', headers={'Authorization': f'Bearer {member_token}'})
     assert member_resp.status_code == 200
     member_invoice = member_resp.get_json()
     assert member_invoice['booking_total'] == 30.0
@@ -685,10 +771,10 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
     assert member_invoice['total'] == 40.0
     assert member_invoice['booking_items'][0]['invoice_status'] == 'generated'
 
-    admin_resp = client.get('/api/admin/invoices/monthly?month=2030-05', headers={'Authorization': f'Bearer {admin_token}'})
+    admin_resp = client.get('/api/admin/invoices/monthly?month=2026-05', headers={'Authorization': f'Bearer {admin_token}'})
     assert admin_resp.status_code == 200
     admin_data = admin_resp.get_json()
-    assert admin_data['month'] == '2030-05'
+    assert admin_data['month'] == '2026-05'
     assert any(invoice['user']['email'] == 'invoice-member@example.com' and invoice['total'] == 40.0 for invoice in admin_data['invoices'])
 
 
@@ -727,6 +813,43 @@ def test_list_bookings_repopulates_upcoming_seed_data(client):
     assert len(bookings) == 3
     assert all(booking['status'] == 'confirmed' for booking in bookings)
     assert {booking['court']['name'] for booking in bookings} == {'Court 1', 'Court 2', 'Training Court'}
+
+
+def test_yesterday_booking_moves_from_upcoming_to_completed(client, app):
+    with app.app_context():
+        user = User(phone='+31100000777', email='member777@example.com', name='Member 777', role='member')
+        court = Court(name='Yesterday Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([user, court])
+        db.session.commit()
+        yesterday = (datetime.utcnow() - timedelta(days=1)).date().strftime('%Y-%m-%d')
+        booking = Booking(
+            court_id=court.id,
+            booking_date=yesterday,
+            start_time='18:00',
+            end_time='19:00',
+            cost=20,
+            status='confirmed',
+        )
+        db.session.add(booking)
+        db.session.commit()
+        booking_id = booking.id
+        token = jwt.encode(
+            {'user_id': user.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    upcoming_resp = client.get('/api/bookings?status=upcoming&page=1&per_page=100')
+    assert upcoming_resp.status_code == 200
+    assert all(item['id'] != booking_id for item in upcoming_resp.get_json()['bookings'])
+
+    completed_resp = client.get('/api/bookings?status=completed&page=1&per_page=100', headers={'Authorization': f'Bearer {token}'})
+    assert completed_resp.status_code == 200
+    completed_bookings = completed_resp.get_json()['bookings']
+    assert any(item['id'] == booking_id and item['status'] == 'completed' for item in completed_bookings)
+
+    with app.app_context():
+        assert Booking.query.get(booking_id).status == 'completed'
 
 
 def test_create_app_adds_court_map_link_to_existing_database(tmp_path, monkeypatch):

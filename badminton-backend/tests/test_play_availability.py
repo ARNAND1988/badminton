@@ -86,6 +86,26 @@ def test_family_members_and_play_availability_vote(client, app):
     assert len(list_resp.get_json()['members']) == 1
 
 
+def test_play_availability_defaults_to_today_and_clamps_past_start_date(client):
+    today = datetime.utcnow().date()
+    yesterday = (today - timedelta(days=1)).strftime('%Y-%m-%d')
+    today_value = today.strftime('%Y-%m-%d')
+
+    default_resp = client.get('/api/play-availability?days=7')
+    assert default_resp.status_code == 200
+    default_days = default_resp.get_json()['days']
+    assert len(default_days) == 7
+    assert default_days[0]['date'] == today_value
+    assert yesterday not in [day['date'] for day in default_days]
+
+    clamped_resp = client.get(f'/api/play-availability?start_date={yesterday}&days=7')
+    assert clamped_resp.status_code == 200
+    clamped_days = clamped_resp.get_json()['days']
+    assert len(clamped_days) == 7
+    assert clamped_days[0]['date'] == today_value
+    assert yesterday not in [day['date'] for day in clamped_days]
+
+
 def test_play_availability_public_totals_without_login(client, app):
     with app.app_context():
         user = User(phone='+31100000004', email='public@example.com', name='Public User', role='member')

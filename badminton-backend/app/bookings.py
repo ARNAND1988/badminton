@@ -159,12 +159,22 @@ def _monthly_invoice_summary(user, month_value):
     if not start_date:
         return None
 
+    _mark_past_bookings_completed()
+
     participant_keys = _participant_keys_for_user(user)
+    participant_labels = {user.phone: user.name or user.email or user.phone}
+    for member in user.family_members:
+        participant_labels[f'family:{member.id}'] = member.name
     booking_items = []
     booking_total = 0.0
     bookings = (
         Booking.query
-        .filter(Booking.booking_date >= start_date, Booking.booking_date < end_date)
+        .filter(
+            Booking.booking_date >= start_date,
+            Booking.booking_date < end_date,
+            Booking.booking_date < datetime.utcnow().strftime('%Y-%m-%d'),
+            Booking.status == 'completed',
+        )
         .order_by(Booking.booking_date.asc(), Booking.start_time.asc())
         .all()
     )
@@ -184,7 +194,10 @@ def _monthly_invoice_summary(user, month_value):
             'start_time': booking.start_time,
             'end_time': booking.end_time,
             'attendee_count': len(matching),
+            'total_people_played': split_count,
+            'total_cost': round(float(booking.cost or 0.0), 2),
             'cost_per_person': per_person,
+            'participants': [participant_labels.get(participant.phone, participant.name or participant.phone or 'Player') for participant in matching],
             'amount': amount,
             'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
         })
@@ -265,9 +278,25 @@ def _admin_user_payload(user):
     return payload
 
 
+def _booking_status_for_date(booking_date, status='confirmed', today_value=None):
+    today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
+    return 'completed' if booking_date and booking_date < today_value else (status or 'confirmed')
+
+
 def _is_completed_booking(booking, today_value=None):
     today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
     return booking.status == 'completed' or booking.booking_date < today_value
+
+
+def _mark_past_bookings_completed(today_value=None):
+    today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
+    updated = Booking.query.filter(
+        Booking.booking_date < today_value,
+        Booking.status != 'completed'
+    ).update({'status': 'completed'}, synchronize_session=False)
+    if updated:
+        db.session.commit()
+    return updated
 
 
 def _archive_cutoff_date(today=None):
@@ -379,7 +408,7 @@ def _ensure_upcoming_booking_data():
             end_time=end_time,
             cost=cost,
             notes=notes,
-            status='confirmed'
+            status=_booking_status_for_date(target_date, 'confirmed')
         )
         db.session.add(booking)
         db.session.flush()
@@ -581,13 +610,16 @@ def list_play_availability():
 
     start_date = request.args.get('start_date')
     days = min(max(int(request.args.get('days', 7) or 7), 1), 14)
+    today = datetime.utcnow().date()
     if start_date:
         start = _parse_iso_date(start_date)
         if not start:
             return jsonify({'error': 'invalid_start_date'}), 400
+        if start < today:
+            start = today
         dates = _next_playable_dates(days, start=start)
     else:
-        dates = _next_playable_dates(days)
+        dates = _next_playable_dates(days, start=today)
 
     date_values = [date_value.strftime('%Y-%m-%d') for date_value in dates]
     votes = PlayAvailabilityVote.query.filter(
@@ -756,7 +788,7 @@ def create_booking():
             end_time=end_time,
             cost=booking_cost,
             notes=notes,
-            status='confirmed'
+            status=_booking_status_for_date(target_date, 'confirmed')
         )
         db.session.add(booking)
         db.session.flush()
@@ -838,7 +870,8 @@ def update_booking(booking_id):
     booking.end_time = end_time
     booking.cost = float(data.get('cost', booking.cost) or 0.0) if data.get('manual_cost') else calculated_cost
     booking.notes = data.get('notes', booking.notes)
-    booking.status = data.get('status', booking.status or 'confirmed')
+    requested_status = data.get('status', booking.status or 'confirmed')
+    booking.status = _booking_status_for_date(booking.booking_date, requested_status)
     db.session.commit()
 
     return jsonify(booking.to_dict())
@@ -864,7 +897,9 @@ def delete_booking(booking_id):
 
 @bookings_bp.route('/bookings', methods=['GET'])
 def list_bookings():
+    _send_due_booking_reminders()
     _ensure_upcoming_booking_data()
+    _mark_past_bookings_completed()
     status_filter = (request.args.get('status') or '').strip().lower()
     today_value = datetime.utcnow().date().strftime('%Y-%m-%d')
     page = _positive_int_arg('page', 1)
@@ -1521,8 +1556,8 @@ WHATSAPP_NOTIFICATION_DEFAULTS = [
     {
         'event_key': 'booking_reminder',
         'title': 'Booking reminder',
-        'description': 'Reminder text admins can send before a session.',
-        'template': '⏰ Reminder: badminton at {{start_time}} today on {{court}}. Please update your attendance in the app.',
+        'description': 'Automatically remind the WhatsApp group one hour before a booking starts today.',
+        'template': '⏰ Reminder: badminton starts at {{start_time}} today on {{court}}. Please update your attendance in the app.',
     },
     {
         'event_key': 'availability_summary',
@@ -1591,12 +1626,19 @@ def _send_whatsapp_bot_message(message, recipient=None):
         return 'failed', str(exc)
 
 
-def _send_whatsapp_event(event_key, context):
+def _send_whatsapp_event(event_key, context, dedupe_key=None):
     from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
     _ensure_whatsapp_notification_settings()
     setting = WhatsAppNotificationSetting.query.filter_by(event_key=event_key).first()
-    if not setting or not setting.is_enabled:
+    if not setting or not setting.is_enabled or not setting.send_to_group:
         return None
+    if dedupe_key:
+        existing_log = WhatsAppNotificationLog.query.filter(
+            WhatsAppNotificationLog.event_key == event_key,
+            WhatsAppNotificationLog.response.contains(dedupe_key)
+        ).first()
+        if existing_log:
+            return None
 
     message = _render_template(setting.template, context)
     recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id(event_key)
@@ -1607,12 +1649,34 @@ def _send_whatsapp_event(event_key, context):
         recipient=recipient,
         message=message,
         status=status,
-        response=response_text,
+        response=f'{response_text}\n{dedupe_key}' if dedupe_key else response_text,
     )
     db.session.add(log)
     db.session.commit()
     return log
 
+
+
+def _send_due_booking_reminders(now=None):
+    now = now or datetime.utcnow()
+    today_value = now.date().strftime('%Y-%m-%d')
+    bookings = Booking.query.filter(
+        Booking.booking_date == today_value,
+        Booking.status != 'completed'
+    ).order_by(Booking.start_time.asc()).all()
+    sent_logs = []
+    for booking in bookings:
+        start_minutes = _time_to_minutes(booking.start_time)
+        if start_minutes is None:
+            continue
+        start_at = datetime.combine(now.date(), datetime.min.time()) + timedelta(minutes=start_minutes)
+        seconds_until_start = (start_at - now).total_seconds()
+        if 0 < seconds_until_start <= 3600:
+            dedupe_key = f'booking_reminder:{booking.id}:{booking.booking_date}:{booking.start_time}'
+            log = _send_whatsapp_event('booking_reminder', _booking_notification_context(booking), dedupe_key=dedupe_key)
+            if log:
+                sent_logs.append(log)
+    return sent_logs
 
 def _booking_notification_context(booking):
     court = booking.court or Court.query.get(booking.court_id)
@@ -1653,6 +1717,15 @@ def _list_whatsapp_bot_groups():
         return None, (jsonify({'error': 'whatsapp_bot_error', 'message': response.text[:1000]}), response.status_code)
     return response.json(), None
 
+
+
+@bookings_bp.route('/admin/booking-reminders/run', methods=['POST'])
+def run_booking_reminders():
+    user, error = _require_admin()
+    if error:
+        return error
+    logs = _send_due_booking_reminders()
+    return jsonify({'sent': len(logs), 'logs': [log.to_dict() for log in logs]})
 
 @bookings_bp.route('/admin/whatsapp-notifications', methods=['GET'])
 def list_whatsapp_notifications():

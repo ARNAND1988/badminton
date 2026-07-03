@@ -25,6 +25,7 @@
           </li>
           <li v-if="adminLinks.length" class="relative">
             <button type="button" :class="adminMenuButtonClass" @click.stop="toggleAdminMenu">
+              <AdminIcon class="h-4 w-4" />
               Admin
               <span aria-hidden="true">▾</span>
             </button>

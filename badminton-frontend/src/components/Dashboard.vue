@@ -123,6 +123,72 @@
         </div>
         <p v-if="!upcomingBookings.length && !loading" class="p-3 text-sm text-slate-600">No upcoming bookings found.</p>
       </div>
+
+      <div v-if="isLoggedIn" class="mt-8 space-y-4">
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">My completed bookings</h3>
+          <p class="section-copy">Completed bookings you or your family attended. Cost details are available only after login.</p>
+        </div>
+
+        <div class="grid gap-4 lg:grid-cols-2">
+          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card overflow-hidden p-0">
+            <button
+              type="button"
+              class="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 p-3 text-left transition hover:bg-slate-50 sm:gap-4 sm:p-4"
+              :aria-expanded="isCompletedBookingOpen(booking.id)"
+              @click="toggleCompletedBooking(booking.id)"
+            >
+              <div class="min-w-0">
+                <h4 class="truncate font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
+                <p class="truncate text-xs text-slate-600 sm:text-sm">
+                  {{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}
+                </p>
+              </div>
+              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white sm:px-3">€{{ booking.cost || 0 }}</span>
+              <span class="text-slate-400" aria-hidden="true">{{ isCompletedBookingOpen(booking.id) ? '−' : '+' }}</span>
+            </button>
+
+            <div v-if="isCompletedBookingOpen(booking.id)" class="space-y-4 border-t border-slate-100 p-4">
+            <div class="grid gap-2 sm:grid-cols-3">
+              <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
+                <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Attending</div>
+                <div class="mt-1 text-xl font-bold text-emerald-900">{{ booking.cost_split.attended_count }}</div>
+              </div>
+              <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
+                <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Each</div>
+                <div class="mt-1 text-xl font-bold text-indigo-900">€{{ booking.cost_split.cost_per_person }}</div>
+              </div>
+              <div class="rounded border border-slate-200 bg-slate-50 p-3">
+                <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</div>
+                <div class="mt-1 text-sm font-semibold capitalize text-slate-900">{{ booking.invoice?.status || 'Not started' }}</div>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <div
+                v-for="participant in booking.participants.filter((item) => ['attending', 'participated'].includes(item.status))"
+                :key="participant.id"
+                class="flex items-center justify-between rounded border bg-white px-3 py-2 text-sm"
+              >
+                <span class="font-medium text-slate-800">{{ participantName(participant) }}</span>
+                <span class="text-slate-500">Attending</span>
+              </div>
+              <p v-if="!booking.cost_split.attended_count" class="text-sm text-slate-600">No attending players recorded.</p>
+            </div>
+
+            </div>
+          </article>
+        </div>
+
+        <div v-if="completedBookingPagination.pages > 1" class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <span class="text-slate-600">Page {{ completedBookingPagination.page }} of {{ completedBookingPagination.pages }} · {{ completedBookingPagination.total }} completed bookings</span>
+          <div class="flex gap-2">
+            <button class="btn-secondary" :disabled="completedBookingPagination.page <= 1" @click="changeCompletedBookingPage(completedBookingPagination.page - 1)">Previous</button>
+            <button class="btn-secondary" :disabled="completedBookingPagination.page >= completedBookingPagination.pages" @click="changeCompletedBookingPage(completedBookingPagination.page + 1)">Next</button>
+          </div>
+        </div>
+        <p v-if="!completedBookings.length && !loading" class="text-sm text-slate-600">No completed bookings to settle yet.</p>
+      </div>
     </section>
 
     <section v-if="activeView === 'admin-bookings'" class="space-y-6">
@@ -437,8 +503,8 @@
           <div v-if="invoiceDetailTab === 'booking'" class="space-y-2 text-sm">
             <h4 class="font-semibold text-slate-900">Booking cost details</h4>
             <div v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="flex flex-col justify-between gap-1 rounded bg-indigo-50 px-3 py-2 sm:flex-row">
-              <span>{{ item.date }} · {{ item.court }} · {{ item.start_time }}-{{ item.end_time }}</span>
-              <span class="font-semibold">{{ item.total_people_played }} players · €{{ item.total_cost }} booking total · €{{ item.cost_per_person }} each · €{{ item.amount }}</span>
+              <span>{{ item.date }} · {{ item.court }} · {{ item.start_time }}-{{ item.end_time }} · {{ item.total_people_played }} players</span>
+              <span class="font-semibold">Your share €{{ item.amount }}</span>
             </div>
             <p v-if="!monthlyInvoice.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
           </div>
@@ -473,71 +539,7 @@
         </article>
       </div>
 
-      <div class="mt-8 space-y-4">
-        <div>
-          <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
-          <p class="section-copy">Settle completed court costs based on members marked attending. Current July-June cost-year history is visible after login and loaded a page at a time.</p>
-        </div>
 
-        <div v-if="completedBookingTab === 'completed'" class="grid gap-4 lg:grid-cols-2">
-          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card overflow-hidden p-0">
-            <button
-              type="button"
-              class="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 p-3 text-left transition hover:bg-slate-50 sm:gap-4 sm:p-4"
-              :aria-expanded="isCompletedBookingOpen(booking.id)"
-              @click="toggleCompletedBooking(booking.id)"
-            >
-              <div class="min-w-0">
-                <h4 class="truncate font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
-                <p class="truncate text-xs text-slate-600 sm:text-sm">
-                  {{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}
-                </p>
-              </div>
-              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white sm:px-3">€{{ booking.cost || 0 }}</span>
-              <span class="text-slate-400" aria-hidden="true">{{ isCompletedBookingOpen(booking.id) ? '−' : '+' }}</span>
-            </button>
-
-            <div v-if="isCompletedBookingOpen(booking.id)" class="space-y-4 border-t border-slate-100 p-4">
-            <div class="grid gap-2 sm:grid-cols-3">
-              <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
-                <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Attending</div>
-                <div class="mt-1 text-xl font-bold text-emerald-900">{{ booking.cost_split.attended_count }}</div>
-              </div>
-              <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
-                <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Each</div>
-                <div class="mt-1 text-xl font-bold text-indigo-900">€{{ booking.cost_split.cost_per_person }}</div>
-              </div>
-              <div class="rounded border border-slate-200 bg-slate-50 p-3">
-                <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</div>
-                <div class="mt-1 text-sm font-semibold capitalize text-slate-900">{{ booking.invoice?.status || 'Not started' }}</div>
-              </div>
-            </div>
-
-            <div class="space-y-2">
-              <div
-                v-for="participant in booking.participants.filter((item) => ['attending', 'participated'].includes(item.status))"
-                :key="participant.id"
-                class="flex items-center justify-between rounded border bg-white px-3 py-2 text-sm"
-              >
-                <span class="font-medium text-slate-800">{{ participantName(participant) }}</span>
-                <span class="text-slate-500">Attending</span>
-              </div>
-              <p v-if="!booking.cost_split.attended_count" class="text-sm text-slate-600">No attending players recorded.</p>
-            </div>
-
-            </div>
-          </article>
-        </div>
-
-        <div v-if="completedBookingPagination.pages > 1" class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <span class="text-slate-600">Page {{ completedBookingPagination.page }} of {{ completedBookingPagination.pages }} · {{ completedBookingPagination.total }} completed bookings</span>
-          <div class="flex gap-2">
-            <button class="btn-secondary" :disabled="completedBookingPagination.page <= 1" @click="changeCompletedBookingPage(completedBookingPagination.page - 1)">Previous</button>
-            <button class="btn-secondary" :disabled="completedBookingPagination.page >= completedBookingPagination.pages" @click="changeCompletedBookingPage(completedBookingPagination.page + 1)">Next</button>
-          </div>
-        </div>
-        <p v-if="!completedBookings.length && !loading" class="text-sm text-slate-600">No completed bookings to settle yet.</p>
-      </div>
     </section>
 
     <section v-if="activeView === 'admin-costs'" class="space-y-6">
@@ -603,7 +605,7 @@
                 <h4 class="font-semibold text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }} · €{{ invoice.booking_total }}</h4>
                 <div v-for="item in invoice.booking_items" :key="`${invoice.id || invoice.user.id}-${item.booking_id}`" class="mt-2 flex flex-col justify-between gap-1 rounded bg-white px-3 py-2 sm:flex-row">
                   <span>{{ item.date }} · {{ item.court }} · {{ item.start_time }}-{{ item.end_time }} · {{ item.participants?.join(', ') }}</span>
-                  <span class="font-semibold">{{ item.total_people_played }} players · €{{ item.cost_per_person }} each · €{{ item.amount }}</span>
+                  <span class="font-semibold">{{ item.total_people_played }} players · member share €{{ item.amount }}</span>
                 </div>
                 <p v-if="!invoice.booking_items?.length" class="mt-2 text-slate-600">No booking costs for this member.</p>
               </div>
@@ -683,7 +685,7 @@
             </div>
             <div class="mt-3 space-y-3 border-t border-slate-100 pt-3">
               <h5 class="text-sm font-semibold text-slate-900">Attendance</h5>
-              <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1fr_1fr_auto]">
+              <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1fr_1fr_auto_auto]">
                 <input v-model="participant.name" class="form-input" placeholder="Name" />
                 <select v-model="participant.status" class="form-input">
                   <option value="attending">Attending</option>
@@ -692,6 +694,7 @@
                   <option value="tentative">Tentative</option>
                 </select>
                 <button class="btn-secondary" @click.stop="updateParticipant(booking, participant)">Save</button>
+                <button class="btn-muted" @click.stop="deleteParticipant(booking, participant)">Remove</button>
               </div>
               <div class="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
                 <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="Ad hoc name" />
@@ -1423,6 +1426,7 @@ export default {
           ])
           if (loggedIn) {
             await loadFamilyMembers()
+            await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
           }
           if (loggedIn && isAdmin.value) {
             await loadCourts()
@@ -1773,6 +1777,20 @@ export default {
           body: JSON.stringify(participant)
         })
         msg.value = 'Participant updated.'
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+      } catch (err) {
+        msg.value = err.message
+      }
+    }
+
+    async function deleteParticipant(booking, participant) {
+      const label = participantName(participant)
+      if (!window.confirm(`Remove ${label} from this booking?`)) {
+        return
+      }
+      try {
+        await fetchJson(`/api/bookings/${booking.id}/participants/${participant.id}`, { method: 'DELETE' })
+        msg.value = 'Participant removed.'
         await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
@@ -2163,6 +2181,7 @@ export default {
       deleteBooking,
       deleteFamilyMember,
       deleteMiscCost,
+      deleteParticipant,
       loadMonthlyInvoice,
       loadAdminMonthlyInvoices,
       loadPlayAvailability,

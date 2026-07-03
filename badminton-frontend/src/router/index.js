@@ -31,7 +31,7 @@ const routes = [
     name: 'availability',
     component: Dashboard,
     props: { initialView: 'availability' },
-    meta: { navLabel: 'Play Availability' }
+    meta: { navLabel: 'Availability' }
   },
   {
     path: '/costs',

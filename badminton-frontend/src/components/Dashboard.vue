@@ -277,7 +277,7 @@
       <div class="panel-card">
         <div class="mb-4">
           <h3 class="text-lg font-semibold">No-play freeze periods</h3>
-          <p class="section-copy">Dates in these ranges are skipped on the play availability calendar.</p>
+          <p class="section-copy">Dates in these ranges are skipped on the availability calendar.</p>
         </div>
 
         <form class="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_1.4fr_auto]" @submit.prevent="createFreezePeriod">
@@ -312,7 +312,7 @@
 
     <section v-if="activeView === 'availability'" class="space-y-6">
       <div>
-        <h2 class="section-title">Play Availability</h2>
+        <h2 class="section-title">Availability</h2>
         <p class="section-copy mt-1">Next 7 days are always visible. Log in to cast or update your family vote.</p>
       </div>
 
@@ -450,7 +450,7 @@
       <div class="mt-8 space-y-4">
         <div>
           <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
-          <p class="section-copy">Settle completed court costs based on members marked attending. Completed history is visible after login and loaded a page at a time.</p>
+          <p class="section-copy">Settle completed court costs based on members marked attending. Current July-June cost-year history is visible after login and loaded a page at a time.</p>
         </div>
 
         <div v-if="completedBookingTab === 'completed'" class="grid gap-4 lg:grid-cols-2">
@@ -521,6 +521,50 @@
       </div>
 
       <div class="panel-card">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Monthly cost per person</h3>
+            <p class="section-copy">Review each member's booking, shared-cost, and total amount for the selected month.</p>
+          </div>
+          <label class="block sm:w-48">
+            <span class="form-label">Month</span>
+            <input v-model="monthlyInvoiceMonth" type="month" class="form-input" @change="loadAdminMonthlyInvoices" />
+          </label>
+        </div>
+        <div v-if="adminMonthlyInvoices" class="mt-4 space-y-4">
+          <div class="grid gap-3 sm:grid-cols-3">
+            <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
+              <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Booking total</div>
+              <div class="mt-1 text-2xl font-bold text-indigo-900">€{{ adminMonthlyInvoices.totals.booking_total }}</div>
+            </div>
+            <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
+              <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Shared costs</div>
+              <div class="mt-1 text-2xl font-bold text-emerald-900">€{{ adminMonthlyInvoices.totals.misc_total }}</div>
+            </div>
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Grand total</div>
+              <div class="mt-1 text-2xl font-bold text-slate-900">€{{ adminMonthlyInvoices.totals.total }}</div>
+            </div>
+          </div>
+          <div class="overflow-x-auto rounded border border-slate-200 bg-white">
+            <table class="min-w-full divide-y divide-slate-200 text-sm">
+              <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr><th class="px-3 py-2">Member</th><th class="px-3 py-2">Bookings</th><th class="px-3 py-2">Shared costs</th><th class="px-3 py-2">Total</th></tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="invoice in adminMonthlyInvoices.invoices" :key="invoice.user.id">
+                  <td class="px-3 py-2 font-medium text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }}</td>
+                  <td class="px-3 py-2">€{{ invoice.booking_total }}</td>
+                  <td class="px-3 py-2">€{{ invoice.misc_total }}</td>
+                  <td class="px-3 py-2 font-semibold text-slate-900">€{{ invoice.total }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-card">
         <h3 class="mb-3 text-lg font-semibold">Add shared cost</h3>
         <div class="grid gap-3 md:grid-cols-2">
           <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
@@ -563,7 +607,7 @@
       <div class="mt-8 space-y-4">
         <div>
           <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
-          <p class="section-copy">Generate or settle booking invoices based on attending members. Completed bookings stay editable for attendance updates; older bookings through the previous month are in Archive.</p>
+          <p class="section-copy">Generate or settle booking invoices based on attending members. Completed bookings stay editable for attendance updates; bookings from previous July-June cost years are in Archive.</p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button class="btn-secondary" :class="completedBookingTab === 'completed' ? 'bg-emerald-100 text-emerald-800' : ''" @click="completedBookingTab = 'completed'">Recent completed</button>
             <button class="btn-secondary" :class="completedBookingTab === 'archive' ? 'bg-emerald-100 text-emerald-800' : ''" @click="completedBookingTab = 'archive'">Archive</button>
@@ -815,6 +859,7 @@ export default {
     const playDays = ref([])
     const miscCosts = ref([])
     const monthlyInvoice = ref(null)
+    const adminMonthlyInvoices = ref(null)
     const monthlyInvoiceMonth = ref(new Date().toISOString().slice(0, 7))
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
@@ -1184,6 +1229,11 @@ export default {
       monthlyInvoice.value = data
     }
 
+    async function loadAdminMonthlyInvoices() {
+      const data = await fetchJson(`/api/admin/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
+      adminMonthlyInvoices.value = data
+    }
+
     async function loadAdminUsers() {
       const data = await fetchJson('/api/admin/users')
       adminUsers.value = data.users || []
@@ -1289,6 +1339,7 @@ export default {
           }
           await Promise.all([
             loadMiscCosts(),
+            loadAdminMonthlyInvoices(),
             loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
           ])
@@ -1903,6 +1954,7 @@ export default {
       availabilityPeople,
       miscCosts,
       monthlyInvoice,
+      adminMonthlyInvoices,
       monthlyInvoiceMonth,
       whatsappSettings,
       whatsappLogs,
@@ -1968,6 +2020,7 @@ export default {
       deleteFamilyMember,
       deleteMiscCost,
       loadMonthlyInvoice,
+      loadAdminMonthlyInvoices,
       loadPlayAvailability,
       loadFreezePeriods,
       loadWhatsAppNotifications,

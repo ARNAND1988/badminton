@@ -270,14 +270,27 @@ def _is_completed_booking(booking, today_value=None):
     return booking.status == 'completed' or booking.booking_date < today_value
 
 
-def _archive_cutoff_date():
-    """Bookings before the current month are archived.
+def _archive_cutoff_date(today=None):
+    """Return the July 1 start date for the active cost year.
 
-    From July 2026 onward this keeps this month's completed bookings in the
-    active settlement list while moving bookings through June 2026 to archive.
+    The club cost year runs from July through June. Data before the active
+    July 1 boundary is archive-only, so uploaded data through June 2026 is
+    archived starting July 2026 and each following July starts a new active
+    year.
     """
-    today = datetime.utcnow().date()
-    return today.replace(day=1).strftime('%Y-%m-%d')
+    today = today or datetime.utcnow().date()
+    fiscal_year = today.year if today.month >= 7 else today.year - 1
+    return datetime(fiscal_year, 7, 1).date().strftime('%Y-%m-%d')
+
+
+def _is_archived_record(date_value):
+    return bool(date_value) and date_value < _archive_cutoff_date()
+
+
+def _archived_booking_response(booking):
+    if _is_archived_record(booking.booking_date):
+        return jsonify({'error': 'booking_archived'}), 409
+    return None
 
 
 def _booking_payload(booking, today_value=None):
@@ -794,6 +807,9 @@ def update_booking(booking_id):
         return error
 
     booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     data = request.get_json() or {}
 
     court_id = data.get('court_id', booking.court_id)
@@ -835,6 +851,9 @@ def delete_booking(booking_id):
         return error
 
     booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     _send_whatsapp_event('booking_cancelled', _booking_notification_context(booking))
     Invoice.query.filter_by(booking_id=booking.id).delete()
     BookingParticipant.query.filter_by(booking_id=booking.id).delete()
@@ -895,6 +914,9 @@ def save_booking_rsvp(booking_id):
         return error
 
     booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     data = request.get_json() or {}
     status = data.get('status', 'tentative')
     if not _valid_participant_status(status):
@@ -918,6 +940,9 @@ def save_booking_family_attendance(booking_id):
         return error
 
     booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     data = request.get_json() or {}
     attendees = data.get('attendees', []) or []
     family_members = {
@@ -965,6 +990,9 @@ def add_booking_participant(booking_id):
         return error
 
     booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     data = request.get_json() or {}
     try:
         participant = _upsert_participant(
@@ -987,7 +1015,10 @@ def update_booking_participant(booking_id, participant_id):
     if error:
         return error
 
-    Booking.query.get_or_404(booking_id)
+    booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     participant = BookingParticipant.query.filter_by(id=participant_id, booking_id=booking_id).first_or_404()
     data = request.get_json() or {}
     status = data.get('status', participant.status)
@@ -1009,6 +1040,10 @@ def delete_booking_participant(booking_id, participant_id):
     if error:
         return error
 
+    booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     participant = BookingParticipant.query.filter_by(id=participant_id, booking_id=booking_id).first_or_404()
     db.session.delete(participant)
     db.session.commit()
@@ -1022,6 +1057,9 @@ def generate_invoice(booking_id):
         return error
 
     booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     invoice = Invoice.query.filter_by(booking_id=booking_id).first()
     if not invoice:
         invoice = Invoice(booking_id=booking.id)
@@ -1044,6 +1082,9 @@ def settle_booking_cost(booking_id):
         return error
 
     booking = Booking.query.get_or_404(booking_id)
+    archived_error = _archived_booking_response(booking)
+    if archived_error:
+        return archived_error
     attended_count = len([participant for participant in booking.participants if participant.status == 'attending'])
     invoice = Invoice.query.filter_by(booking_id=booking.id).first()
     if not invoice:
@@ -1062,8 +1103,14 @@ def list_misc_costs():
     if error:
         return error
 
-    costs = MiscCost.query.order_by(MiscCost.created_at.desc()).all()
-    return jsonify({'costs': [cost.to_dict() for cost in costs]})
+    status_filter = (request.args.get('status') or 'active').strip().lower()
+    query = MiscCost.query
+    if status_filter == 'archive':
+        query = query.filter(MiscCost.purchase_date < _archive_cutoff_date())
+    elif status_filter != 'all':
+        query = query.filter(db.or_(MiscCost.purchase_date.is_(None), MiscCost.purchase_date >= _archive_cutoff_date()))
+    costs = query.order_by(MiscCost.purchase_date.desc(), MiscCost.created_at.desc()).all()
+    return jsonify({'costs': [cost.to_dict() for cost in costs], 'archive_cutoff_date': _archive_cutoff_date()})
 
 
 @bookings_bp.route('/misc-costs', methods=['POST'])
@@ -1151,7 +1198,15 @@ def admin_monthly_invoices():
         return jsonify({'error': 'month must use YYYY-MM'}), 400
     users = User.query.order_by(User.name.asc(), User.email.asc(), User.phone.asc()).all()
     summaries = [_monthly_invoice_summary(item, month_value) for item in users]
-    return jsonify({'month': month_value, 'invoices': summaries})
+    return jsonify({
+        'month': month_value,
+        'invoices': summaries,
+        'totals': {
+            'booking_total': round(sum(item['booking_total'] for item in summaries), 2),
+            'misc_total': round(sum(item['misc_total'] for item in summaries), 2),
+            'total': round(sum(item['total'] for item in summaries), 2),
+        }
+    })
 
 
 @bookings_bp.route('/admin/users', methods=['GET'])

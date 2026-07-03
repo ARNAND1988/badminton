@@ -897,6 +897,7 @@ def delete_booking(booking_id):
 
 @bookings_bp.route('/bookings', methods=['GET'])
 def list_bookings():
+    _send_due_booking_reminders()
     _ensure_upcoming_booking_data()
     _mark_past_bookings_completed()
     status_filter = (request.args.get('status') or '').strip().lower()
@@ -1555,8 +1556,8 @@ WHATSAPP_NOTIFICATION_DEFAULTS = [
     {
         'event_key': 'booking_reminder',
         'title': 'Booking reminder',
-        'description': 'Reminder text admins can send before a session.',
-        'template': '⏰ Reminder: badminton at {{start_time}} today on {{court}}. Please update your attendance in the app.',
+        'description': 'Automatically remind the WhatsApp group one hour before a booking starts today.',
+        'template': '⏰ Reminder: badminton starts at {{start_time}} today on {{court}}. Please update your attendance in the app.',
     },
     {
         'event_key': 'availability_summary',
@@ -1625,12 +1626,19 @@ def _send_whatsapp_bot_message(message, recipient=None):
         return 'failed', str(exc)
 
 
-def _send_whatsapp_event(event_key, context):
+def _send_whatsapp_event(event_key, context, dedupe_key=None):
     from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
     _ensure_whatsapp_notification_settings()
     setting = WhatsAppNotificationSetting.query.filter_by(event_key=event_key).first()
-    if not setting or not setting.is_enabled:
+    if not setting or not setting.is_enabled or not setting.send_to_group:
         return None
+    if dedupe_key:
+        existing_log = WhatsAppNotificationLog.query.filter(
+            WhatsAppNotificationLog.event_key == event_key,
+            WhatsAppNotificationLog.response.contains(dedupe_key)
+        ).first()
+        if existing_log:
+            return None
 
     message = _render_template(setting.template, context)
     recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id(event_key)
@@ -1641,12 +1649,34 @@ def _send_whatsapp_event(event_key, context):
         recipient=recipient,
         message=message,
         status=status,
-        response=response_text,
+        response=f'{response_text}\n{dedupe_key}' if dedupe_key else response_text,
     )
     db.session.add(log)
     db.session.commit()
     return log
 
+
+
+def _send_due_booking_reminders(now=None):
+    now = now or datetime.utcnow()
+    today_value = now.date().strftime('%Y-%m-%d')
+    bookings = Booking.query.filter(
+        Booking.booking_date == today_value,
+        Booking.status != 'completed'
+    ).order_by(Booking.start_time.asc()).all()
+    sent_logs = []
+    for booking in bookings:
+        start_minutes = _time_to_minutes(booking.start_time)
+        if start_minutes is None:
+            continue
+        start_at = datetime.combine(now.date(), datetime.min.time()) + timedelta(minutes=start_minutes)
+        seconds_until_start = (start_at - now).total_seconds()
+        if 0 < seconds_until_start <= 3600:
+            dedupe_key = f'booking_reminder:{booking.id}:{booking.booking_date}:{booking.start_time}'
+            log = _send_whatsapp_event('booking_reminder', _booking_notification_context(booking), dedupe_key=dedupe_key)
+            if log:
+                sent_logs.append(log)
+    return sent_logs
 
 def _booking_notification_context(booking):
     court = booking.court or Court.query.get(booking.court_id)
@@ -1687,6 +1717,15 @@ def _list_whatsapp_bot_groups():
         return None, (jsonify({'error': 'whatsapp_bot_error', 'message': response.text[:1000]}), response.status_code)
     return response.json(), None
 
+
+
+@bookings_bp.route('/admin/booking-reminders/run', methods=['POST'])
+def run_booking_reminders():
+    user, error = _require_admin()
+    if error:
+        return error
+    logs = _send_due_booking_reminders()
+    return jsonify({'sent': len(logs), 'logs': [log.to_dict() for log in logs]})
 
 @bookings_bp.route('/admin/whatsapp-notifications', methods=['GET'])
 def list_whatsapp_notifications():

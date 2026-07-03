@@ -186,6 +186,92 @@ def test_booking_create_triggers_whatsapp_notification_with_court_name(client, a
         assert 'Real Notification Court' in log.message
 
 
+def test_due_booking_reminder_sends_once_when_enabled(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent_messages = []
+
+    def fake_send(message, recipient=None):
+        sent_messages.append({'message': message, 'recipient': recipient})
+        return 'sent', 'ok'
+
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', fake_send)
+
+    reminder_now = datetime(2026, 7, 3, 17, 0)
+    with app.app_context():
+        court = Court(name='Reminder Court', hourly_rate=20.0, is_active=True)
+        db.session.add(court)
+        db.session.commit()
+        booking = Booking(
+            court_id=court.id,
+            booking_date='2026-07-03',
+            start_time='18:00',
+            end_time='19:00',
+            cost=20,
+            status='confirmed',
+        )
+        db.session.add(booking)
+        db.session.add(WhatsAppNotificationSetting(
+            event_key='booking_reminder',
+            title='Booking reminder',
+            description='Reminder',
+            template='Reminder for {{court}} at {{start_time}}',
+            is_enabled=False,
+            send_to_group=True,
+            group_id='group-1',
+        ))
+        db.session.commit()
+        booking_id = booking.id
+
+        assert bookings_module._send_due_booking_reminders(now=reminder_now) == []
+        assert sent_messages == []
+
+        setting = WhatsAppNotificationSetting.query.filter_by(event_key='booking_reminder').first()
+        setting.is_enabled = True
+        db.session.commit()
+
+        logs = bookings_module._send_due_booking_reminders(now=reminder_now)
+        assert len(logs) == 1
+        assert sent_messages == [{'message': 'Reminder for Reminder Court at 18:00', 'recipient': 'group-1'}]
+        assert f'booking_reminder:{booking_id}:2026-07-03:18:00' in logs[0].response
+
+        assert bookings_module._send_due_booking_reminders(now=reminder_now) == []
+        assert len(sent_messages) == 1
+
+
+def test_due_booking_reminder_respects_send_to_group_flag(app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent_messages = []
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', lambda message, recipient=None: sent_messages.append(message) or ('sent', 'ok'))
+
+    with app.app_context():
+        court = Court(name='Silent Reminder Court', hourly_rate=20.0, is_active=True)
+        db.session.add(court)
+        db.session.commit()
+        db.session.add(Booking(
+            court_id=court.id,
+            booking_date='2026-07-03',
+            start_time='18:00',
+            end_time='19:00',
+            cost=20,
+            status='confirmed',
+        ))
+        db.session.add(WhatsAppNotificationSetting(
+            event_key='booking_reminder',
+            title='Booking reminder',
+            description='Reminder',
+            template='Reminder for {{court}}',
+            is_enabled=True,
+            send_to_group=False,
+            group_id='group-1',
+        ))
+        db.session.commit()
+
+        assert bookings_module._send_due_booking_reminders(now=datetime(2026, 7, 3, 17, 30)) == []
+        assert sent_messages == []
+
+
 def test_freeze_periods_skip_play_availability_days_and_are_admin_managed(client, app):
     with app.app_context():
         admin = User(phone='+31100000920', email='freeze-admin@example.com', name='Freeze Admin', role='admin')

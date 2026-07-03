@@ -729,6 +729,43 @@ def test_list_bookings_repopulates_upcoming_seed_data(client):
     assert {booking['court']['name'] for booking in bookings} == {'Court 1', 'Court 2', 'Training Court'}
 
 
+def test_yesterday_booking_moves_from_upcoming_to_completed(client, app):
+    with app.app_context():
+        user = User(phone='+31100000777', email='member777@example.com', name='Member 777', role='member')
+        court = Court(name='Yesterday Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([user, court])
+        db.session.commit()
+        yesterday = (datetime.utcnow() - timedelta(days=1)).date().strftime('%Y-%m-%d')
+        booking = Booking(
+            court_id=court.id,
+            booking_date=yesterday,
+            start_time='18:00',
+            end_time='19:00',
+            cost=20,
+            status='confirmed',
+        )
+        db.session.add(booking)
+        db.session.commit()
+        booking_id = booking.id
+        token = jwt.encode(
+            {'user_id': user.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    upcoming_resp = client.get('/api/bookings?status=upcoming&page=1&per_page=100')
+    assert upcoming_resp.status_code == 200
+    assert all(item['id'] != booking_id for item in upcoming_resp.get_json()['bookings'])
+
+    completed_resp = client.get('/api/bookings?status=completed&page=1&per_page=100', headers={'Authorization': f'Bearer {token}'})
+    assert completed_resp.status_code == 200
+    completed_bookings = completed_resp.get_json()['bookings']
+    assert any(item['id'] == booking_id and item['status'] == 'completed' for item in completed_bookings)
+
+    with app.app_context():
+        assert Booking.query.get(booking_id).status == 'completed'
+
+
 def test_create_app_adds_court_map_link_to_existing_database(tmp_path, monkeypatch):
     db_path = tmp_path / 'legacy.sqlite'
     monkeypatch.setenv('DATABASE_URL', f'sqlite:///{db_path}')

@@ -159,6 +159,8 @@ def _monthly_invoice_summary(user, month_value):
     if not start_date:
         return None
 
+    _mark_past_bookings_completed()
+
     participant_keys = _participant_keys_for_user(user)
     participant_labels = {user.phone: user.name or user.email or user.phone}
     for member in user.family_members:
@@ -276,9 +278,25 @@ def _admin_user_payload(user):
     return payload
 
 
+def _booking_status_for_date(booking_date, status='confirmed', today_value=None):
+    today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
+    return 'completed' if booking_date and booking_date < today_value else (status or 'confirmed')
+
+
 def _is_completed_booking(booking, today_value=None):
     today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
     return booking.status == 'completed' or booking.booking_date < today_value
+
+
+def _mark_past_bookings_completed(today_value=None):
+    today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
+    updated = Booking.query.filter(
+        Booking.booking_date < today_value,
+        Booking.status != 'completed'
+    ).update({'status': 'completed'}, synchronize_session=False)
+    if updated:
+        db.session.commit()
+    return updated
 
 
 def _archive_cutoff_date(today=None):
@@ -390,7 +408,7 @@ def _ensure_upcoming_booking_data():
             end_time=end_time,
             cost=cost,
             notes=notes,
-            status='confirmed'
+            status=_booking_status_for_date(target_date, 'confirmed')
         )
         db.session.add(booking)
         db.session.flush()
@@ -767,7 +785,7 @@ def create_booking():
             end_time=end_time,
             cost=booking_cost,
             notes=notes,
-            status='confirmed'
+            status=_booking_status_for_date(target_date, 'confirmed')
         )
         db.session.add(booking)
         db.session.flush()
@@ -849,7 +867,8 @@ def update_booking(booking_id):
     booking.end_time = end_time
     booking.cost = float(data.get('cost', booking.cost) or 0.0) if data.get('manual_cost') else calculated_cost
     booking.notes = data.get('notes', booking.notes)
-    booking.status = data.get('status', booking.status or 'confirmed')
+    requested_status = data.get('status', booking.status or 'confirmed')
+    booking.status = _booking_status_for_date(booking.booking_date, requested_status)
     db.session.commit()
 
     return jsonify(booking.to_dict())
@@ -876,6 +895,7 @@ def delete_booking(booking_id):
 @bookings_bp.route('/bookings', methods=['GET'])
 def list_bookings():
     _ensure_upcoming_booking_data()
+    _mark_past_bookings_completed()
     status_filter = (request.args.get('status') or '').strip().lower()
     today_value = datetime.utcnow().date().strftime('%Y-%m-%d')
     page = _positive_int_arg('page', 1)

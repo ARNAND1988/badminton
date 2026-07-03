@@ -593,6 +593,33 @@
               </tbody>
             </table>
           </div>
+
+          <div class="rounded border border-slate-200 bg-white p-3">
+            <div class="mb-3 flex flex-wrap gap-2">
+              <button class="btn-secondary" :class="invoiceDetailTab === 'booking' ? 'bg-indigo-100 text-indigo-800' : ''" @click="invoiceDetailTab = 'booking'">Booking cost details</button>
+              <button class="btn-secondary" :class="invoiceDetailTab === 'misc' ? 'bg-emerald-100 text-emerald-800' : ''" @click="invoiceDetailTab = 'misc'">Misc cost details</button>
+            </div>
+            <div v-if="invoiceDetailTab === 'booking'" class="space-y-2 text-sm">
+              <div v-for="invoice in adminMonthlyInvoices.invoices" :key="`booking-${invoice.user.id}`" class="rounded bg-indigo-50 p-3">
+                <h4 class="font-semibold text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }} · €{{ invoice.booking_total }}</h4>
+                <div v-for="item in invoice.booking_items" :key="`${invoice.user.id}-${item.booking_id}`" class="mt-2 flex flex-col justify-between gap-1 rounded bg-white px-3 py-2 sm:flex-row">
+                  <span>{{ item.date }} · {{ item.court }} · {{ item.start_time }}-{{ item.end_time }} · {{ item.participants?.join(', ') }}</span>
+                  <span class="font-semibold">{{ item.total_people_played }} players · €{{ item.cost_per_person }} each · €{{ item.amount }}</span>
+                </div>
+                <p v-if="!invoice.booking_items?.length" class="mt-2 text-slate-600">No booking costs for this member.</p>
+              </div>
+            </div>
+            <div v-if="invoiceDetailTab === 'misc'" class="space-y-2 text-sm">
+              <div v-for="invoice in adminMonthlyInvoices.invoices" :key="`misc-${invoice.user.id}`" class="rounded bg-emerald-50 p-3">
+                <h4 class="font-semibold text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }} · €{{ invoice.misc_total }}</h4>
+                <div v-for="item in invoice.misc_items" :key="`${invoice.user.id}-${item.cost_id}`" class="mt-2 flex flex-col justify-between gap-1 rounded bg-white px-3 py-2 sm:flex-row">
+                  <span>{{ item.purchase_date || 'No purchase date' }} · {{ item.title }} · {{ item.status }}</span>
+                  <span class="font-semibold">Split by {{ item.split_count }} members · €{{ item.amount }}</span>
+                </div>
+                <p v-if="!invoice.misc_items?.length" class="mt-2 text-slate-600">No misc costs for this member.</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1290,6 +1317,7 @@ export default {
       if (options.status) params.set('status', options.status)
       if (options.page) params.set('page', options.page)
       if (options.perPage) params.set('per_page', options.perPage)
+      if (options.month) params.set('month', options.month)
       const query = params.toString()
       const bookingsData = await fetchJson(`/api/bookings${query ? `?${query}` : ''}`)
       if (options.status === 'completed') {
@@ -1335,11 +1363,15 @@ export default {
     async function loadMonthlyInvoice() {
       const data = await fetchJson(`/api/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
       monthlyInvoice.value = data
+      completedBookingPagination.value = { ...completedBookingPagination.value, page: 1 }
+      await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
     }
 
     async function loadAdminMonthlyInvoices() {
       const data = await fetchJson(`/api/admin/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
       adminMonthlyInvoices.value = data
+      completedBookingPagination.value = { ...completedBookingPagination.value, page: 1 }
+      await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
     }
 
     async function loadAdminUsers() {
@@ -1406,7 +1438,7 @@ export default {
           await Promise.all([
             loadMiscCosts(),
             loadMonthlyInvoice(),
-            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
+            loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
           ])
         } else if (activeView.value === 'admin-bookings') {
@@ -1448,7 +1480,7 @@ export default {
           await Promise.all([
             loadMiscCosts(),
             loadAdminMonthlyInvoices(),
-            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
+            loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
           ])
         } else if (activeView.value === 'notifications') {
@@ -1673,7 +1705,7 @@ export default {
       try {
         const data = await fetchJson(`/api/bookings/${bookingId}/invoice`, { method: 'POST' })
         msg.value = `Invoice generated: €${data.total_amount}`
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1687,7 +1719,7 @@ export default {
           body: JSON.stringify({ status })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1707,7 +1739,7 @@ export default {
           })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1727,7 +1759,7 @@ export default {
         newParticipantPhone.value[booking.id] = ''
         newParticipantStatus.value[booking.id] = 'attending'
         msg.value = 'Participant added.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1741,7 +1773,7 @@ export default {
           body: JSON.stringify(participant)
         })
         msg.value = 'Participant updated.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1912,7 +1944,7 @@ export default {
       try {
         await fetchJson(`/api/bookings/${booking.id}/settle`, { method: 'POST' })
         msg.value = 'Booking cost settled.'
-        await loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
+        await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
       } catch (err) {
         msg.value = err.message
       }

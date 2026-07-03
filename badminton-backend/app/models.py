@@ -217,3 +217,55 @@ class MiscCost(db.Model):
             'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class WhatsAppNotificationSetting(db.Model):
+    __tablename__ = 'whatsapp_notification_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    event_key = db.Column(db.String(64), unique=True, nullable=False)
+    title = db.Column(db.String(128), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    template = db.Column(db.Text, nullable=False)
+    is_enabled = db.Column(db.Boolean, default=False)
+    send_to_group = db.Column(db.Boolean, default=True)
+    group_id = db.Column(db.String(255), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'event_key': self.event_key,
+            'title': self.title,
+            'description': self.description,
+            'template': self.template,
+            'is_enabled': self.is_enabled,
+            'send_to_group': self.send_to_group,
+            'group_id': self.group_id,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class WhatsAppNotificationLog(db.Model):
+    __tablename__ = 'whatsapp_notification_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    setting_id = db.Column(db.Integer, db.ForeignKey('whatsapp_notification_settings.id'), nullable=True)
+    event_key = db.Column(db.String(64), nullable=False)
+    recipient = db.Column(db.String(255), nullable=True)
+    message = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(32), default='queued')
+    response = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    setting = db.relationship('WhatsAppNotificationSetting', backref='logs', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'setting_id': self.setting_id,
+            'event_key': self.event_key,
+            'recipient': self.recipient,
+            'message': self.message,
+            'status': self.status,
+            'response': self.response,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

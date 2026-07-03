@@ -1141,3 +1141,135 @@ def delete_court(court_id):
     court.is_active = False
     db.session.commit()
     return jsonify(court.to_dict())
+
+WHATSAPP_NOTIFICATION_DEFAULTS = [
+    {
+        'event_key': 'booking_created',
+        'title': 'New booking created',
+        'description': 'Notify the WhatsApp group when an admin creates a court booking.',
+        'template': '🏸 New badminton booking\nCourt: {{court}}\nDate: {{date}}\nTime: {{start_time}}-{{end_time}}\nNotes: {{notes}}',
+    },
+    {
+        'event_key': 'booking_reminder',
+        'title': 'Booking reminder',
+        'description': 'Reminder text admins can send before a session.',
+        'template': '⏰ Reminder: badminton at {{start_time}} today on {{court}}. Please update your attendance in the app.',
+    },
+    {
+        'event_key': 'availability_summary',
+        'title': 'Availability summary',
+        'description': 'Share current availability totals for a play date.',
+        'template': '📋 Availability for {{date}}\nAvailable: {{available_count}}\nTentative: {{tentative_count}}\nOpen the app to update your status.',
+    },
+    {
+        'event_key': 'cost_settled',
+        'title': 'Cost settled',
+        'description': 'Tell the group when a court or shared cost has been settled.',
+        'template': '💶 Cost update: {{title}} is {{status}}. Amount: €{{amount}}.',
+    },
+]
+
+
+def _ensure_whatsapp_notification_settings():
+    from .models import WhatsAppNotificationSetting
+    existing = {item.event_key: item for item in WhatsAppNotificationSetting.query.all()}
+    changed = False
+    for spec in WHATSAPP_NOTIFICATION_DEFAULTS:
+        if spec['event_key'] in existing:
+            continue
+        db.session.add(WhatsAppNotificationSetting(**spec, is_enabled=False, send_to_group=True))
+        changed = True
+    if changed:
+        db.session.commit()
+
+
+def _render_template(template, context):
+    rendered = template or ''
+    for key, value in (context or {}).items():
+        rendered = rendered.replace('{{' + key + '}}', str(value if value is not None else ''))
+    return rendered
+
+
+def _send_whatsapp_bot_message(message, recipient=None):
+    import os
+    import requests
+    bot_url = os.environ.get('WHATSAPP_BOT_URL')
+    if not bot_url:
+        return 'skipped', 'WHATSAPP_BOT_URL is not configured'
+    try:
+        response = requests.post(
+            f"{bot_url.rstrip('/')}/send",
+            json={'message': message, 'recipient': recipient},
+            timeout=5,
+        )
+        return ('sent' if response.ok else 'failed'), response.text[:1000]
+    except Exception as exc:
+        return 'failed', str(exc)
+
+
+@bookings_bp.route('/admin/whatsapp-notifications', methods=['GET'])
+def list_whatsapp_notifications():
+    user, error = _require_admin()
+    if error:
+        return error
+    from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
+    _ensure_whatsapp_notification_settings()
+    settings = WhatsAppNotificationSetting.query.order_by(WhatsAppNotificationSetting.title.asc()).all()
+    logs = WhatsAppNotificationLog.query.order_by(WhatsAppNotificationLog.created_at.desc()).limit(10).all()
+    return jsonify({'settings': [item.to_dict() for item in settings], 'logs': [item.to_dict() for item in logs]})
+
+
+@bookings_bp.route('/admin/whatsapp-notifications/<int:setting_id>', methods=['PUT'])
+def update_whatsapp_notification(setting_id):
+    user, error = _require_admin()
+    if error:
+        return error
+    from .models import WhatsAppNotificationSetting
+    setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
+    data = request.get_json() or {}
+    if 'title' in data:
+        setting.title = (data.get('title') or '').strip() or setting.title
+    if 'description' in data:
+        setting.description = (data.get('description') or '').strip() or None
+    if 'template' in data:
+        template = (data.get('template') or '').strip()
+        if not template:
+            return jsonify({'error': 'template required'}), 400
+        setting.template = template
+    if 'is_enabled' in data:
+        setting.is_enabled = bool(data.get('is_enabled'))
+    if 'send_to_group' in data:
+        setting.send_to_group = bool(data.get('send_to_group'))
+    if 'group_id' in data:
+        setting.group_id = (data.get('group_id') or '').strip() or None
+    db.session.commit()
+    return jsonify(setting.to_dict())
+
+
+@bookings_bp.route('/admin/whatsapp-notifications/<int:setting_id>/test', methods=['POST'])
+def test_whatsapp_notification(setting_id):
+    user, error = _require_admin()
+    if error:
+        return error
+    from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
+    setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
+    data = request.get_json() or {}
+    sample_context = {
+        'court': data.get('court', 'Court 1'),
+        'date': data.get('date', datetime.utcnow().date().strftime('%Y-%m-%d')),
+        'start_time': data.get('start_time', '19:00'),
+        'end_time': data.get('end_time', '20:00'),
+        'notes': data.get('notes', 'Friendly doubles session'),
+        'available_count': data.get('available_count', 8),
+        'tentative_count': data.get('tentative_count', 2),
+        'title': data.get('title', setting.title),
+        'status': data.get('status', 'settled'),
+        'amount': data.get('amount', '25.00'),
+    }
+    message = _render_template(setting.template, sample_context)
+    recipient = (data.get('recipient') or setting.group_id or '').strip() or None
+    status, response_text = _send_whatsapp_bot_message(message, recipient)
+    log = WhatsAppNotificationLog(setting_id=setting.id, event_key=setting.event_key, recipient=recipient, message=message, status=status, response=response_text)
+    db.session.add(log)
+    db.session.commit()
+    return jsonify({'message': message, 'log': log.to_dict()})

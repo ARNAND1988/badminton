@@ -65,7 +65,7 @@ def create_app():
     with app.app_context():
         db.create_all()
         from sqlalchemy import inspect
-        from app.models import User
+        from app.models import User, WhatsAppNotificationSetting
         inspector = inspect(db.engine)
         user_columns = {col['name'] for col in inspector.get_columns('users')}
         if 'email' not in user_columns:

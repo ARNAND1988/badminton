@@ -38,6 +38,7 @@ services:
       JWT_SECRET: dev-jwt-secret
       FLASK_ENV: development
       AUTH_MOCK: "1"
+      WHATSAPP_BOT_URL: http://whatsapp-bot:3000
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,6 +46,18 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+
+  whatsapp-bot:
+    build:
+      context: ../whatsapp-bot
+    restart: unless-stopped
+    environment:
+      WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
+      WHATSAPP_SESSION_PATH: /data/session
+    volumes:
+      - whatsapp_bot_data:/data
+    ports:
+      - "3000:3000"
 
   badminton-frontend:
     build:
@@ -57,3 +70,4 @@ services:
 
 volumes:
   postgres_app_data:
+  whatsapp_bot_data:

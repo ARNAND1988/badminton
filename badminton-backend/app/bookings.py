@@ -213,6 +213,16 @@ def _is_completed_booking(booking, today_value=None):
     return booking.status == 'completed' or booking.booking_date < today_value
 
 
+def _archive_cutoff_date():
+    """Bookings before the current month are archived.
+
+    From July 2026 onward this keeps this month's completed bookings in the
+    active settlement list while moving bookings through June 2026 to archive.
+    """
+    today = datetime.utcnow().date()
+    return today.replace(day=1).strftime('%Y-%m-%d')
+
+
 def _booking_payload(booking, today_value=None):
     payload = booking.to_dict()
     if _is_completed_booking(booking, today_value):
@@ -752,14 +762,22 @@ def list_bookings():
     page = _positive_int_arg('page', 1)
     per_page = _positive_int_arg('per_page', 25, maximum=100)
 
-    if status_filter == 'completed':
+    if status_filter in {'completed', 'archive'}:
         user, error = _require_login()
         if error:
             return error
         _ensure_historical_booking_data()
-        query = Booking.query.filter(
-            db.or_(Booking.status == 'completed', Booking.booking_date < today_value)
-        ).order_by(Booking.booking_date.desc(), Booking.start_time.desc())
+        completed_filter = db.or_(Booking.status == 'completed', Booking.booking_date < today_value)
+        if status_filter == 'archive':
+            query = Booking.query.filter(
+                completed_filter,
+                Booking.booking_date < _archive_cutoff_date()
+            ).order_by(Booking.booking_date.desc(), Booking.start_time.desc())
+        else:
+            query = Booking.query.filter(
+                completed_filter,
+                Booking.booking_date >= _archive_cutoff_date()
+            ).order_by(Booking.booking_date.desc(), Booking.start_time.desc())
     elif status_filter == 'upcoming':
         query = Booking.query.filter(
             Booking.booking_date >= today_value,

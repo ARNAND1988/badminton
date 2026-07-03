@@ -415,7 +415,7 @@
           <p class="section-copy">Settle completed court costs based on members marked attending. Completed history is visible after login and loaded a page at a time.</p>
         </div>
 
-        <div class="grid gap-4 lg:grid-cols-2">
+        <div v-if="completedBookingTab === 'completed'" class="grid gap-4 lg:grid-cols-2">
           <article v-for="booking in completedBookings" :key="booking.id" class="sub-card overflow-hidden p-0">
             <button
               type="button"
@@ -525,9 +525,13 @@
       <div class="mt-8 space-y-4">
         <div>
           <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
-          <p class="section-copy">Generate or settle booking invoices based on attending members.</p>
+          <p class="section-copy">Generate or settle booking invoices based on attending members. Completed bookings stay editable for attendance updates; older bookings through the previous month are in Archive.</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button class="btn-secondary" :class="completedBookingTab === 'completed' ? 'bg-emerald-100 text-emerald-800' : ''" @click="completedBookingTab = 'completed'">Recent completed</button>
+            <button class="btn-secondary" :class="completedBookingTab === 'archive' ? 'bg-emerald-100 text-emerald-800' : ''" @click="completedBookingTab = 'archive'">Archive</button>
+          </div>
         </div>
-        <div class="grid gap-4 lg:grid-cols-2">
+        <div v-if="completedBookingTab === 'completed'" class="grid gap-4 lg:grid-cols-2">
           <article v-for="booking in completedBookings" :key="booking.id" class="sub-card p-4">
             <div class="flex items-start justify-between gap-3">
               <div>
@@ -537,11 +541,52 @@
               </div>
               <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
             </div>
+            <div class="mt-3 space-y-3 border-t border-slate-100 pt-3">
+              <h5 class="text-sm font-semibold text-slate-900">Attendance</h5>
+              <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1fr_1fr_auto]">
+                <input v-model="participant.name" class="form-input" placeholder="Name" />
+                <select v-model="participant.status" class="form-input">
+                  <option value="attending">Attending</option>
+                  <option value="not_attending">Not attending</option>
+                  <option value="tentative">Tentative</option>
+                </select>
+                <button class="btn-secondary" @click.stop="updateParticipant(booking, participant)">Save</button>
+              </div>
+              <div class="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="Ad hoc name" />
+                <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" />
+                <select v-model="newParticipantStatus[booking.id]" class="form-input">
+                  <option value="attending">Attending</option>
+                  <option value="not_attending">Not attending</option>
+                  <option value="tentative">Tentative</option>
+                </select>
+                <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
+              </div>
+            </div>
             <div class="mt-3 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
               <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
               <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
             </div>
           </article>
+        </div>
+        <div v-if="completedBookingTab === 'archive'" class="grid gap-4 lg:grid-cols-2">
+          <article v-for="booking in archivedBookings" :key="booking.id" class="sub-card p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
+                <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ booking.invoice?.status || 'Not started' }}</p>
+              </div>
+              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
+            </div>
+          </article>
+        </div>
+        <div v-if="completedBookingTab === 'archive' && archivedBookingPagination.pages > 1" class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <span class="text-slate-600">Page {{ archivedBookingPagination.page }} of {{ archivedBookingPagination.pages }} · {{ archivedBookingPagination.total }} archived bookings</span>
+          <div class="flex gap-2">
+            <button class="btn-secondary" :disabled="archivedBookingPagination.page <= 1" @click="changeArchivedBookingPage(archivedBookingPagination.page - 1)">Previous</button>
+            <button class="btn-secondary" :disabled="archivedBookingPagination.page >= archivedBookingPagination.pages" @click="changeArchivedBookingPage(archivedBookingPagination.page + 1)">Next</button>
+          </div>
         </div>
       </div>
     </section>
@@ -724,6 +769,7 @@ export default {
     const activeView = ref(props.initialView)
     const bookings = ref([])
     const completedBookingHistory = ref([])
+    const archivedBookingHistory = ref([])
     const courts = ref([])
     const familyMembers = ref([])
     const adminUsers = ref([])
@@ -734,6 +780,7 @@ export default {
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
     const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
+    const archivedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
     const openCompletedBookingIds = ref(new Set())
     const loading = ref(false)
     const errorMsg = ref('')
@@ -748,6 +795,7 @@ export default {
     const recurringIntervalWeeks = ref(1)
     const recurringCount = ref(1)
     const adminBookingTab = ref('bookings')
+    const completedBookingTab = ref('completed')
     const newCourtName = ref('')
     const newCourtLocation = ref('')
     const newCourtDescription = ref('')
@@ -779,6 +827,7 @@ export default {
       return bookings.value.filter((booking) => booking.booking_date >= today && booking.status !== 'completed')
     })
     const completedBookings = computed(() => completedBookingHistory.value)
+    const archivedBookings = computed(() => archivedBookingHistory.value)
     const maxFamilyAttendees = computed(() => familyMembers.value.length + 1)
     const familyAttendancePeople = computed(() => {
       getAuthSessionVersion()
@@ -1027,6 +1076,9 @@ export default {
       if (options.status === 'completed') {
         completedBookingPagination.value = bookingsData.pagination || completedBookingPagination.value
         completedBookingHistory.value = bookingsData.bookings || []
+      } else if (options.status === 'archive') {
+        archivedBookingPagination.value = bookingsData.pagination || archivedBookingPagination.value
+        archivedBookingHistory.value = bookingsData.bookings || []
       } else {
         bookings.value = bookingsData.bookings || []
       }
@@ -1124,7 +1176,8 @@ export default {
           await Promise.all([
             loadMiscCosts(),
             loadMonthlyInvoice(),
-            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
+            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
+            loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
           ])
         } else if (activeView.value === 'admin-bookings') {
           if (!loggedIn) {
@@ -1161,7 +1214,8 @@ export default {
           }
           await Promise.all([
             loadMiscCosts(),
-            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
+            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
+            loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
           ])
         } else if (activeView.value === 'notifications') {
           if (!loggedIn) {
@@ -1189,6 +1243,14 @@ export default {
       } finally {
         loading.value = false
       }
+    }
+
+    async function changeArchivedBookingPage(page) {
+      if (page < 1 || (archivedBookingPagination.value.pages && page > archivedBookingPagination.value.pages)) {
+        return
+      }
+      archivedBookingPagination.value = { ...archivedBookingPagination.value, page }
+      await loadDashboard()
     }
 
     async function changeCompletedBookingPage(page) {
@@ -1702,7 +1764,10 @@ export default {
       bookings,
       upcomingBookings,
       completedBookings,
+      archivedBookings,
       completedBookingPagination,
+      archivedBookingPagination,
+      completedBookingTab,
       courts,
       familyMembers,
       familyAttendancePeople,
@@ -1754,6 +1819,7 @@ export default {
       addParticipant,
       createCourt,
       createAdminFamilyMember,
+      changeArchivedBookingPage,
       changeCompletedBookingPage,
       createFamilyMember,
       createInvoice,

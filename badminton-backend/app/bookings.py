@@ -277,20 +277,38 @@ def _admin_user_payload(user):
     return payload
 
 
-def _booking_status_for_date(booking_date, status='confirmed', today_value=None):
-    today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
-    return 'completed' if booking_date and booking_date < today_value else (status or 'confirmed')
+def _current_booking_cutoff_values(now=None):
+    now = now or datetime.utcnow()
+    return now.date().strftime('%Y-%m-%d'), now.strftime('%H:%M')
 
 
-def _is_completed_booking(booking, today_value=None):
-    today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
-    return booking.status == 'completed' or booking.booking_date < today_value
+def _booking_has_ended(booking_date, end_time=None, today_value=None, current_time=None):
+    today_value, current_time = (today_value, current_time) if today_value and current_time else _current_booking_cutoff_values()
+    if not booking_date:
+        return False
+    if booking_date < today_value:
+        return True
+    return booking_date == today_value and bool(end_time) and end_time <= current_time
 
 
-def _mark_past_bookings_completed(today_value=None):
-    today_value = today_value or datetime.utcnow().date().strftime('%Y-%m-%d')
+def _booking_status_for_date(booking_date, status='confirmed', today_value=None, end_time=None, current_time=None):
+    return 'completed' if _booking_has_ended(booking_date, end_time, today_value, current_time) else (status or 'confirmed')
+
+
+def _is_completed_booking(booking, today_value=None, current_time=None):
+    if not today_value or not current_time:
+        today_value, current_time = _current_booking_cutoff_values()
+    return booking.status == 'completed' or _booking_has_ended(booking.booking_date, booking.end_time, today_value, current_time)
+
+
+def _mark_past_bookings_completed(today_value=None, current_time=None):
+    if not today_value or not current_time:
+        today_value, current_time = _current_booking_cutoff_values()
     updated = Booking.query.filter(
-        Booking.booking_date < today_value,
+        db.or_(
+            Booking.booking_date < today_value,
+            db.and_(Booking.booking_date == today_value, Booking.end_time <= current_time),
+        ),
         Booking.status != 'completed'
     ).update({'status': 'completed'}, synchronize_session=False)
     if updated:
@@ -321,9 +339,9 @@ def _archived_booking_response(booking):
     return None
 
 
-def _booking_payload(booking, today_value=None):
+def _booking_payload(booking, today_value=None, current_time=None):
     payload = booking.to_dict()
-    if _is_completed_booking(booking, today_value):
+    if _is_completed_booking(booking, today_value, current_time):
         payload['status'] = 'completed'
     return payload
 
@@ -407,7 +425,7 @@ def _ensure_upcoming_booking_data():
             end_time=end_time,
             cost=cost,
             notes=notes,
-            status=_booking_status_for_date(target_date, 'confirmed')
+            status=_booking_status_for_date(target_date, 'confirmed', end_time=end_time)
         )
         db.session.add(booking)
         db.session.flush()
@@ -787,7 +805,7 @@ def create_booking():
             end_time=end_time,
             cost=booking_cost,
             notes=notes,
-            status=_booking_status_for_date(target_date, 'confirmed')
+            status=_booking_status_for_date(target_date, 'confirmed', end_time=end_time)
         )
         db.session.add(booking)
         db.session.flush()
@@ -870,7 +888,7 @@ def update_booking(booking_id):
     booking.cost = float(data.get('cost', booking.cost) or 0.0) if data.get('manual_cost') else calculated_cost
     booking.notes = data.get('notes', booking.notes)
     requested_status = data.get('status', booking.status or 'confirmed')
-    booking.status = _booking_status_for_date(booking.booking_date, requested_status)
+    booking.status = _booking_status_for_date(booking.booking_date, requested_status, end_time=booking.end_time)
     db.session.commit()
 
     return jsonify(booking.to_dict())
@@ -898,9 +916,9 @@ def delete_booking(booking_id):
 def list_bookings():
     _send_due_booking_reminders()
     _ensure_upcoming_booking_data()
-    _mark_past_bookings_completed()
+    today_value, current_time = _current_booking_cutoff_values()
+    _mark_past_bookings_completed(today_value, current_time)
     status_filter = (request.args.get('status') or '').strip().lower()
-    today_value = datetime.utcnow().date().strftime('%Y-%m-%d')
     page = _positive_int_arg('page', 1)
     per_page = _positive_int_arg('per_page', 25, maximum=100)
 
@@ -909,7 +927,11 @@ def list_bookings():
         if error:
             return error
         _ensure_historical_booking_data()
-        completed_filter = db.or_(Booking.status == 'completed', Booking.booking_date < today_value)
+        completed_filter = db.or_(
+            Booking.status == 'completed',
+            Booking.booking_date < today_value,
+            db.and_(Booking.booking_date == today_value, Booking.end_time <= current_time),
+        )
         if status_filter == 'archive':
             query = Booking.query.filter(
                 completed_filter,
@@ -929,8 +951,11 @@ def list_bookings():
             query = query.order_by(Booking.booking_date.desc(), Booking.start_time.desc())
     elif status_filter == 'upcoming':
         query = Booking.query.filter(
-            Booking.booking_date >= today_value,
-            Booking.status != 'completed'
+            Booking.status != 'completed',
+            db.or_(
+                Booking.booking_date > today_value,
+                db.and_(Booking.booking_date == today_value, Booking.end_time > current_time),
+            )
         ).order_by(Booking.booking_date.asc(), Booking.start_time.asc())
     else:
         query = Booking.query.order_by(Booking.booking_date.asc(), Booking.start_time.asc())
@@ -938,7 +963,7 @@ def list_bookings():
     total = query.count()
     bookings = query.offset((page - 1) * per_page).limit(per_page).all()
     return jsonify({
-        'bookings': [_booking_payload(b, today_value) for b in bookings],
+        'bookings': [_booking_payload(b, today_value, current_time) for b in bookings],
         'pagination': {
             'page': page,
             'per_page': per_page,

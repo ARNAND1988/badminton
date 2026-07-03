@@ -426,16 +426,31 @@
             <div class="mt-1 text-2xl font-bold text-slate-900">€{{ monthlyInvoice.total }}</div>
           </div>
         </div>
-        <div v-if="monthlyInvoice?.booking_items?.length" class="mt-4 rounded border border-slate-200 bg-white p-3">
-          <div class="mb-2 flex items-center justify-between gap-3">
-            <h4 class="font-semibold text-slate-900">Family booking details</h4>
-            <button class="text-sm font-semibold text-indigo-700 hover:text-indigo-900" @click="showVerificationDetails(monthlyInvoice, 'Your family booking verification')">Verify details</button>
-          </div>
-          <div class="space-y-2 text-sm">
-            <div v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="flex flex-col justify-between gap-1 rounded bg-slate-50 px-3 py-2 sm:flex-row">
-              <span>{{ item.date }} · {{ item.court }} · {{ item.participants?.join(', ') }}</span>
-              <span class="font-semibold">{{ item.total_people_played }} players · €{{ item.total_cost }} total · €{{ item.cost_per_person }} each · €{{ item.amount }}</span>
+        <div v-if="monthlyInvoice" class="mt-4 rounded border border-slate-200 bg-white p-3">
+          <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex flex-wrap gap-2">
+              <button class="btn-secondary" :class="invoiceDetailTab === 'booking' ? 'bg-indigo-100 text-indigo-800' : ''" @click="invoiceDetailTab = 'booking'">Booking costs</button>
+              <button class="btn-secondary" :class="invoiceDetailTab === 'misc' ? 'bg-emerald-100 text-emerald-800' : ''" @click="invoiceDetailTab = 'misc'">Misc costs</button>
             </div>
+            <button v-if="invoiceDetailTab === 'booking' && monthlyInvoice.booking_items?.length" class="text-sm font-semibold text-indigo-700 hover:text-indigo-900" @click="showVerificationDetails(monthlyInvoice, 'Your family booking verification')">Verify booking details</button>
+          </div>
+
+          <div v-if="invoiceDetailTab === 'booking'" class="space-y-2 text-sm">
+            <h4 class="font-semibold text-slate-900">Booking cost details</h4>
+            <div v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="flex flex-col justify-between gap-1 rounded bg-indigo-50 px-3 py-2 sm:flex-row">
+              <span>{{ item.date }} · {{ item.court }} · {{ item.participants?.join(', ') }}</span>
+              <span class="font-semibold">{{ item.total_people_played }} players · €{{ item.total_cost }} booking total · €{{ item.cost_per_person }} each · €{{ item.amount }}</span>
+            </div>
+            <p v-if="!monthlyInvoice.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
+          </div>
+
+          <div v-if="invoiceDetailTab === 'misc'" class="space-y-2 text-sm">
+            <h4 class="font-semibold text-slate-900">Misc cost details</h4>
+            <div v-for="item in monthlyInvoice.misc_items" :key="item.cost_id" class="flex flex-col justify-between gap-1 rounded bg-emerald-50 px-3 py-2 sm:flex-row">
+              <span>{{ item.purchase_date || 'No purchase date' }} · {{ item.title }} · {{ item.status }}</span>
+              <span class="font-semibold">Split by {{ item.split_count }} members · €{{ item.amount }}</span>
+            </div>
+            <p v-if="!monthlyInvoice.misc_items?.length" class="text-sm text-slate-600">No misc costs for this month.</p>
           </div>
         </div>
       </div>
@@ -945,6 +960,7 @@ export default {
     const adminBookingTab = ref('bookings')
     const adminCostTab = ref('misc')
     const completedBookingTab = ref('completed')
+    const invoiceDetailTab = ref('booking')
     const newCourtName = ref('')
     const newCourtLocation = ref('')
     const newCourtDescription = ref('')
@@ -2038,6 +2054,7 @@ export default {
       completedBookingPagination,
       archivedBookingPagination,
       completedBookingTab,
+      invoiceDetailTab,
       courts,
       calculatedBookingCost,
       freezePeriods,

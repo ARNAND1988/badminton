@@ -172,7 +172,6 @@ def _monthly_invoice_summary(user, month_value):
         .filter(
             Booking.booking_date >= start_date,
             Booking.booking_date < end_date,
-            Booking.booking_date < datetime.utcnow().strftime('%Y-%m-%d'),
             Booking.status == 'completed',
         )
         .order_by(Booking.booking_date.asc(), Booking.start_time.asc())

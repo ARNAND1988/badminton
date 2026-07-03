@@ -1145,3 +1145,57 @@ def test_misc_costs_archive_by_july_to_june_cost_year(client, app):
     archive_titles = {cost['title'] for cost in archive_resp.get_json()['costs']}
     assert 'June upload' in archive_titles
     assert 'July active' not in archive_titles
+
+
+def test_admin_monthly_invoice_lists_family_and_name_matched_participants_once(client, app):
+    with app.app_context():
+        admin = User(phone='+31100001001', email='split-admin@example.com', name='Split Admin', role='admin')
+        renjith = User(phone='+31100001002', email='renjith@example.com', name='Renjith R', role='member')
+        court = Court(name='Split Court', hourly_rate=80.0, is_active=True)
+        db.session.add_all([admin, renjith, court])
+        db.session.commit()
+        reema = FamilyMember(user_id=renjith.id, name='Reema', relationship='family')
+        booking = Booking(court_id=court.id, booking_date='2026-07-03', start_time='19:30', end_time='20:30', cost=80, status='completed')
+        db.session.add_all([reema, booking])
+        db.session.commit()
+        db.session.add_all([
+            BookingParticipant(booking_id=booking.id, phone='Renjith', name='Renjith', status='participated', is_adhoc=True),
+            BookingParticipant(booking_id=booking.id, phone='Reema', name='Reema', status='participated', is_adhoc=True),
+            BookingParticipant(booking_id=booking.id, phone='Guest', name='Guest', status='participated', is_adhoc=True),
+            BookingParticipant(booking_id=booking.id, phone='Skipped', name='Skipped', status='tentative', is_adhoc=True),
+        ])
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    resp = client.get('/api/admin/invoices/monthly?month=2026-07', headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    invoices = {invoice['user']['name']: invoice for invoice in data['invoices']}
+    assert invoices['Renjith R']['booking_total'] == 26.67
+    assert invoices['Reema']['booking_total'] == 26.67
+    assert invoices['Guest']['booking_total'] == 26.66
+    assert data['totals']['booking_total'] == 80.0
+
+
+def test_current_user_monthly_invoice_deduplicates_name_matched_participant(client, app):
+    with app.app_context():
+        member = User(phone='+31100001003', email='renjith-current@example.com', name='Renjith R', role='member')
+        court = Court(name='Current Split Court', hourly_rate=80.0, is_active=True)
+        db.session.add_all([member, court])
+        db.session.commit()
+        booking = Booking(court_id=court.id, booking_date='2026-07-03', start_time='19:30', end_time='20:30', cost=40, status='completed')
+        db.session.add(booking)
+        db.session.commit()
+        db.session.add_all([
+            BookingParticipant(booking_id=booking.id, phone=member.phone, name='Renjith R', status='participated'),
+            BookingParticipant(booking_id=booking.id, phone='Renjith', name='Renjith', status='participated', is_adhoc=True),
+        ])
+        db.session.commit()
+        token = jwt.encode({'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    resp = client.get('/api/invoices/monthly?month=2026-07', headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['booking_total'] == 20.0
+    assert data['booking_items'][0]['attendee_count'] == 1
+    assert data['booking_items'][0]['participants'] == ['Renjith R']

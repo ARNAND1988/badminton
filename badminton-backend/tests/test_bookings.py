@@ -854,6 +854,58 @@ def test_completed_bookings_can_be_filtered_by_invoice_month(client, app):
     assert bad_resp.status_code == 400
     assert bad_resp.get_json()['error'] == 'month must use YYYY-MM'
 
+
+def test_completed_bookings_for_july_so_far_include_yesterday_and_ended_today(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def utcnow(cls):
+            return cls(2026, 7, 3, 12, 0, 0)
+
+    monkeypatch.setattr(bookings_module, 'datetime', FixedDateTime)
+
+    with app.app_context():
+        user = User(phone='+31100000920', email='july-so-far@example.com', name='July So Far', role='member')
+        court = Court(name='July So Far Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([user, court])
+        db.session.commit()
+
+        june_booking = Booking(court_id=court.id, booking_date='2026-06-30', start_time='18:00', end_time='19:00', cost=20, status='confirmed')
+        july_first_booking = Booking(court_id=court.id, booking_date='2026-07-01', start_time='18:00', end_time='19:00', cost=20, status='confirmed')
+        yesterday_booking = Booking(court_id=court.id, booking_date='2026-07-02', start_time='18:00', end_time='19:00', cost=20, status='confirmed')
+        today_ended_booking = Booking(court_id=court.id, booking_date='2026-07-03', start_time='10:00', end_time='11:00', cost=20, status='confirmed')
+        today_future_booking = Booking(court_id=court.id, booking_date='2026-07-03', start_time='13:00', end_time='14:00', cost=20, status='confirmed')
+        future_booking = Booking(court_id=court.id, booking_date='2026-07-04', start_time='18:00', end_time='19:00', cost=20, status='confirmed')
+        db.session.add_all([june_booking, july_first_booking, yesterday_booking, today_ended_booking, today_future_booking, future_booking])
+        db.session.commit()
+
+        token = jwt.encode(
+            {'user_id': user.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+        june_id = june_booking.id
+        july_first_id = july_first_booking.id
+        yesterday_id = yesterday_booking.id
+        today_ended_id = today_ended_booking.id
+        today_future_id = today_future_booking.id
+        future_id = future_booking.id
+
+    resp = client.get(
+        '/api/bookings?status=completed&month=2026-07&page=1&per_page=100',
+        headers={'Authorization': f'Bearer {token}'},
+    )
+
+    assert resp.status_code == 200
+    returned_ids = {booking['id'] for booking in resp.get_json()['bookings']}
+    assert yesterday_id in returned_ids
+    assert july_first_id in returned_ids
+    assert today_ended_id in returned_ids
+    assert today_future_id not in returned_ids
+    assert future_id not in returned_ids
+    assert june_id not in returned_ids
+
 def test_openapi_and_swagger_docs_are_available(client):
     spec_resp = client.get('/api/openapi.json')
     assert spec_resp.status_code == 200
@@ -923,6 +975,15 @@ def test_yesterday_booking_moves_from_upcoming_to_completed(client, app):
     assert completed_resp.status_code == 200
     completed_bookings = completed_resp.get_json()['bookings']
     assert any(item['id'] == booking_id and item['status'] == 'completed' for item in completed_bookings)
+
+    current_month = datetime.utcnow().strftime('%Y-%m')
+    monthly_resp = client.get(
+        f'/api/bookings?status=completed&month={current_month}&page=1&per_page=100',
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert monthly_resp.status_code == 200
+    monthly_bookings = monthly_resp.get_json()['bookings']
+    assert any(item['id'] == booking_id and item['booking_date'] == yesterday for item in monthly_bookings)
 
     with app.app_context():
         assert Booking.query.get(booking_id).status == 'completed'

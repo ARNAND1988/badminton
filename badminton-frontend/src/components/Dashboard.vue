@@ -521,7 +521,7 @@
                 class="flex items-center justify-between rounded border bg-white px-3 py-2 text-sm"
               >
                 <span class="font-medium text-slate-800">{{ participantName(participant) }}</span>
-                <span class="text-slate-700">€{{ participant.cost_share }}</span>
+                <span class="text-slate-500">Attending</span>
               </div>
               <p v-if="!booking.cost_split.attended_count" class="text-sm text-slate-600">No attending players recorded.</p>
             </div>
@@ -1438,7 +1438,6 @@ export default {
           await Promise.all([
             loadMiscCosts(),
             loadMonthlyInvoice(),
-            loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
           ])
         } else if (activeView.value === 'admin-bookings') {
@@ -1480,7 +1479,6 @@ export default {
           await Promise.all([
             loadMiscCosts(),
             loadAdminMonthlyInvoices(),
-            loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
           ])
         } else if (activeView.value === 'notifications') {

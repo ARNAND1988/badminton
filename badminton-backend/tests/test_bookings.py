@@ -812,3 +812,76 @@ def test_archive_bookings_backfill_historical_loaded_data(client, app):
 def test_misc_costs_require_login(client):
     resp = client.get('/api/misc-costs')
     assert resp.status_code == 401
+
+
+def test_fiscal_year_archive_keeps_july_to_june_active_and_locks_archived_bookings(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000666', email='archive-admin@example.com', name='Archive Admin', role='admin')
+        court = Court(name='Fiscal Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([admin, court])
+        db.session.commit()
+        june_booking = Booking(court_id=court.id, booking_date='2026-06-30', start_time='18:00', end_time='19:00', cost=20, status='completed')
+        july_booking = Booking(court_id=court.id, booking_date='2026-07-01', start_time='18:00', end_time='19:00', cost=20, status='completed')
+        db.session.add_all([june_booking, july_booking])
+        db.session.commit()
+        db.session.add(BookingParticipant(booking_id=june_booking.id, phone='archived-player', name='Archived Player', status='attending'))
+        db.session.commit()
+        participant_id = june_booking.participants[0].id
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+        june_id = june_booking.id
+        july_id = july_booking.id
+
+    headers = {'Authorization': f'Bearer {token}'}
+    archive_resp = client.get('/api/bookings?status=archive&page=1&per_page=10000', headers=headers)
+    assert archive_resp.status_code == 200
+    archive_dates = {booking['id']: booking['booking_date'] for booking in archive_resp.get_json()['bookings']}
+    assert archive_dates[june_id] == '2026-06-30'
+    assert july_id not in archive_dates
+
+    completed_resp = client.get('/api/bookings?status=completed&page=1&per_page=10000', headers=headers)
+    assert completed_resp.status_code == 200
+    completed_dates = {booking['id']: booking['booking_date'] for booking in completed_resp.get_json()['bookings']}
+    assert completed_dates[july_id] == '2026-07-01'
+    assert june_id not in completed_dates
+
+    update_resp = client.put(f'/api/bookings/{june_id}/participants/{participant_id}', json={
+        'name': 'Changed',
+        'status': 'not_attending',
+    }, headers=headers)
+    assert update_resp.status_code == 409
+    assert update_resp.get_json()['error'] == 'booking_archived'
+
+
+def test_misc_costs_archive_by_july_to_june_cost_year(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000667', email='misc-archive-admin@example.com', name='Misc Archive Admin', role='admin')
+        db.session.add(admin)
+        db.session.commit()
+        db.session.add_all([
+            MiscCost(title='June upload', amount=10, purchase_date='2026-06-30', split_count=1),
+            MiscCost(title='July active', amount=20, purchase_date='2026-07-01', split_count=1),
+        ])
+        db.session.commit()
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    headers = {'Authorization': f'Bearer {token}'}
+    active_resp = client.get('/api/misc-costs', headers=headers)
+    assert active_resp.status_code == 200
+    active_data = active_resp.get_json()
+    assert active_data['archive_cutoff_date'] == '2026-07-01'
+    assert 'July active' in {cost['title'] for cost in active_data['costs']}
+    assert 'June upload' not in {cost['title'] for cost in active_data['costs']}
+
+    archive_resp = client.get('/api/misc-costs?status=archive', headers=headers)
+    assert archive_resp.status_code == 200
+    archive_titles = {cost['title'] for cost in archive_resp.get_json()['costs']}
+    assert 'June upload' in archive_titles
+    assert 'July active' not in archive_titles

@@ -161,7 +161,8 @@
             </div>
             <div>
               <label class="form-label">💶 Cost</label>
-              <input v-model="bookingCost" type="number" min="0" step="0.01" placeholder="Cost" class="form-input" />
+              <input :value="calculatedBookingCost" type="number" min="0" step="0.01" class="form-input" readonly />
+              <p class="mt-1 text-xs text-slate-500">Calculated from court rates and duration.</p>
             </div>
             <div v-if="!editingBookingId">
               <label class="form-label">🔁 Recurring</label>
@@ -182,8 +183,8 @@
               <p class="mt-1 text-xs text-slate-500">weeks</p>
             </div>
             <div>
-              <label class="form-label">Number of bookings</label>
-              <input v-model.number="recurringCount" type="number" min="1" class="form-input" />
+              <label class="form-label">Stop after</label>
+              <input v-model="recurringEndDate" type="date" class="form-input" />
             </div>
           </div>
 
@@ -234,7 +235,7 @@
     <section v-if="activeView === 'admin-courts'" class="space-y-6">
       <div>
         <h2 class="section-title">Manage Courts</h2>
-        <p class="section-copy mt-1">Maintain courts, locations, map links, and hourly rates.</p>
+        <p class="section-copy mt-1">Maintain courts, locations, map links, hourly rates, and vacation freeze periods.</p>
       </div>
 
       <div class="grid gap-6 lg:grid-cols-2">
@@ -246,6 +247,7 @@
             <input v-model="newCourtMapLink" placeholder="Google Maps link" class="form-input" />
             <input v-model="newCourtDescription" placeholder="Description" class="form-input" />
             <input v-model="newCourtRate" type="number" min="0" step="0.01" placeholder="Hourly rate" class="form-input" />
+            <input v-model="newCourtHalfHourRate" type="number" min="0" step="0.01" placeholder="30-minute rate" class="form-input" />
             <button class="btn-dark w-full" @click="createCourt">Add court</button>
           </div>
         </div>
@@ -259,7 +261,8 @@
                 <input v-model="court.location" class="form-input" placeholder="Location" />
                 <input v-model="court.map_link" class="form-input" placeholder="Google Maps link" />
                 <input v-model="court.description" class="form-input" placeholder="Description" />
-                <input v-model.number="court.hourly_rate" type="number" min="0" step="0.01" class="form-input" />
+                <input v-model.number="court.hourly_rate" type="number" min="0" step="0.01" class="form-input" placeholder="Hourly rate" />
+                <input v-model.number="court.half_hour_rate" type="number" min="0" step="0.01" class="form-input" placeholder="30-minute rate" />
               </div>
               <div class="grid grid-cols-2 gap-2">
                 <button class="btn-secondary" @click="updateCourt(court)">Save</button>
@@ -268,6 +271,41 @@
             </article>
           </div>
           <p v-if="!courts.length && !loading" class="text-sm text-slate-600">No courts found.</p>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="mb-4">
+          <h3 class="text-lg font-semibold">No-play freeze periods</h3>
+          <p class="section-copy">Dates in these ranges are skipped on the play availability calendar.</p>
+        </div>
+
+        <form class="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_1.4fr_auto]" @submit.prevent="createFreezePeriod">
+          <input v-model="newFreezeTitle" class="form-input" placeholder="Vacation / hall closed" />
+          <input v-model="newFreezeStartDate" type="date" class="form-input" />
+          <input v-model="newFreezeEndDate" type="date" class="form-input" />
+          <input v-model="newFreezeReason" class="form-input" placeholder="Optional reason" />
+          <button class="btn-dark">Add</button>
+        </form>
+
+        <div class="mt-4 space-y-3">
+          <article v-for="period in freezePeriods" :key="period.id" class="sub-card space-y-3">
+            <div class="grid gap-2 lg:grid-cols-[1.2fr_1fr_1fr_1.4fr_auto]">
+              <input v-model="period.title" class="form-input" />
+              <input v-model="period.start_date" type="date" class="form-input" />
+              <input v-model="period.end_date" type="date" class="form-input" />
+              <input v-model="period.reason" class="form-input" placeholder="Reason" />
+              <label class="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                <input v-model="period.is_active" type="checkbox" class="h-5 w-5 accent-emerald-600" />
+                Active
+              </label>
+            </div>
+            <div class="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+              <button class="btn-secondary" @click="updateFreezePeriod(period)">Save</button>
+              <button class="btn-muted" @click="deleteFreezePeriod(period)">Delete</button>
+            </div>
+          </article>
+          <p v-if="!freezePeriods.length && !loading" class="text-sm text-slate-600">No freeze periods configured.</p>
         </div>
       </div>
     </section>
@@ -771,6 +809,7 @@ export default {
     const completedBookingHistory = ref([])
     const archivedBookingHistory = ref([])
     const courts = ref([])
+    const freezePeriods = ref([])
     const familyMembers = ref([])
     const adminUsers = ref([])
     const playDays = ref([])
@@ -794,6 +833,7 @@ export default {
     const recurringMode = ref(false)
     const recurringIntervalWeeks = ref(1)
     const recurringCount = ref(1)
+    const recurringEndDate = ref(new Date().toISOString().slice(0, 10))
     const adminBookingTab = ref('bookings')
     const completedBookingTab = ref('completed')
     const newCourtName = ref('')
@@ -801,6 +841,11 @@ export default {
     const newCourtDescription = ref('')
     const newCourtMapLink = ref('')
     const newCourtRate = ref('25')
+    const newCourtHalfHourRate = ref('12.5')
+    const newFreezeTitle = ref('')
+    const newFreezeStartDate = ref(new Date().toISOString().slice(0, 10))
+    const newFreezeEndDate = ref(new Date().toISOString().slice(0, 10))
+    const newFreezeReason = ref('')
     const newFamilyName = ref('')
     const newParticipantName = ref({})
     const newParticipantPhone = ref({})
@@ -821,6 +866,18 @@ export default {
     const hasToken = () => hasAuthSession()
     const isLoggedIn = computed(() => hasAuthSession())
     const activeCourts = computed(() => courts.value.filter((court) => court.is_active !== false))
+    const selectedCourt = computed(() => activeCourts.value.find((court) => String(court.id) === String(selectedCourtId.value)) || null)
+    const calculatedBookingCost = computed(() => {
+      const court = selectedCourt.value
+      const duration = bookingDurationMinutes(startTime.value, endTime.value)
+      if (!court || !duration) return '0.00'
+      const hourlyRate = Number(court.hourly_rate || 0)
+      const halfHourRate = Number(court.half_hour_rate ?? (hourlyRate / 2))
+      const hours = Math.floor(duration / 60)
+      const remainder = duration % 60
+      const halfHours = Math.ceil(remainder / 30)
+      return ((hours * hourlyRate) + (halfHours * halfHourRate)).toFixed(2)
+    })
     const todayIso = () => new Date().toISOString().slice(0, 10)
     const upcomingBookings = computed(() => {
       const today = todayIso()
@@ -862,6 +919,15 @@ export default {
 
     function parseBookingDate(dateValue) {
       return new Date(`${dateValue}T00:00:00`)
+    }
+
+    function bookingDurationMinutes(startValue, endValue) {
+      const [startHour, startMinute] = (startValue || '').split(':').map(Number)
+      const [endHour, endMinute] = (endValue || '').split(':').map(Number)
+      if ([startHour, startMinute, endHour, endMinute].some((value) => Number.isNaN(value))) return 0
+      const start = startHour * 60 + startMinute
+      const end = endHour * 60 + endMinute
+      return end > start ? end - start : 0
     }
 
     function bookingDayLabel(dateValue) {
@@ -1049,6 +1115,7 @@ export default {
       familyMembers.value = []
       adminUsers.value = []
       courts.value = []
+      freezePeriods.value = []
       isAdmin.value = false
       newParticipantName.value = {}
       newParticipantPhone.value = {}
@@ -1090,6 +1157,11 @@ export default {
       if (!selectedCourtId.value && activeCourts.value.length) {
         selectedCourtId.value = activeCourts.value[0].id
       }
+    }
+
+    async function loadFreezePeriods() {
+      const data = await fetchJson('/api/admin/freeze-periods')
+      freezePeriods.value = data.periods || []
     }
 
     async function loadFamilyMembers() {
@@ -1202,7 +1274,10 @@ export default {
             errorMsg.value = 'Admin access is required.'
             return
           }
-          await loadCourts()
+          await Promise.all([
+            loadCourts(),
+            loadFreezePeriods()
+          ])
         } else if (activeView.value === 'admin-costs') {
           if (!loggedIn) {
             router.push('/login')
@@ -1333,6 +1408,7 @@ export default {
       recurringMode.value = false
       recurringIntervalWeeks.value = 1
       recurringCount.value = 1
+      recurringEndDate.value = bookingDate.value
       if (activeCourts.value.length) {
         selectedCourtId.value = activeCourts.value[0].id
       }
@@ -1374,10 +1450,10 @@ export default {
             booking_date: bookingDate.value,
             start_time: startTime.value,
             end_time: endTime.value,
-            cost: parseFloat(bookingCost.value || 0),
             recurring: recurringMode.value,
             recurring_interval_weeks: recurringIntervalWeeks.value,
             recurring_count: recurringCount.value,
+            recurring_end_date: recurringEndDate.value,
             notes: bookingNotes.value,
             participants: []
           })
@@ -1404,7 +1480,6 @@ export default {
             booking_date: bookingDate.value,
             start_time: startTime.value,
             end_time: endTime.value,
-            cost: parseFloat(bookingCost.value || 0),
             notes: bookingNotes.value,
             status: 'confirmed'
           })
@@ -1523,7 +1598,8 @@ export default {
             location: newCourtLocation.value,
             description: newCourtDescription.value,
             map_link: newCourtMapLink.value,
-            hourly_rate: parseFloat(newCourtRate.value || 25)
+            hourly_rate: parseFloat(newCourtRate.value || 25),
+            half_hour_rate: newCourtHalfHourRate.value === '' ? null : parseFloat(newCourtHalfHourRate.value || 0)
           })
         })
         msg.value = `Added court ${data.name}.`
@@ -1532,6 +1608,7 @@ export default {
         newCourtDescription.value = ''
         newCourtMapLink.value = ''
         newCourtRate.value = '25'
+        newCourtHalfHourRate.value = '12.5'
         await loadCourts()
         selectedCourtId.value = data.id
       } catch (err) {
@@ -1550,6 +1627,7 @@ export default {
             description: court.description,
             map_link: court.map_link,
             hourly_rate: court.hourly_rate,
+            half_hour_rate: court.half_hour_rate,
             is_active: court.is_active
           })
         })
@@ -1566,6 +1644,55 @@ export default {
         msg.value = `Deleted court ${court.name}.`
         await loadCourts()
         await loadBookings({ status: 'upcoming', perPage: 100 })
+      } catch (err) {
+        msg.value = err.message
+      }
+    }
+
+    async function createFreezePeriod() {
+      try {
+        const data = await fetchJson('/api/admin/freeze-periods', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: newFreezeTitle.value,
+            start_date: newFreezeStartDate.value,
+            end_date: newFreezeEndDate.value,
+            reason: newFreezeReason.value,
+            is_active: true
+          })
+        })
+        msg.value = `Added freeze period ${data.title}.`
+        newFreezeTitle.value = ''
+        newFreezeReason.value = ''
+        await Promise.all([loadFreezePeriods(), loadPlayAvailability()])
+      } catch (err) {
+        msg.value = err.message
+      }
+    }
+
+    async function updateFreezePeriod(period) {
+      try {
+        const data = await fetchJson(`/api/admin/freeze-periods/${period.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(period)
+        })
+        msg.value = `Updated freeze period ${data.title}.`
+        await Promise.all([loadFreezePeriods(), loadPlayAvailability()])
+      } catch (err) {
+        msg.value = err.message
+      }
+    }
+
+    async function deleteFreezePeriod(period) {
+      if (!window.confirm(`Delete freeze period ${period.title}?`)) {
+        return
+      }
+      try {
+        await fetchJson(`/api/admin/freeze-periods/${period.id}`, { method: 'DELETE' })
+        msg.value = `Deleted freeze period ${period.title}.`
+        await Promise.all([loadFreezePeriods(), loadPlayAvailability()])
       } catch (err) {
         msg.value = err.message
       }
@@ -1769,6 +1896,8 @@ export default {
       archivedBookingPagination,
       completedBookingTab,
       courts,
+      calculatedBookingCost,
+      freezePeriods,
       familyMembers,
       familyAttendancePeople,
       availabilityPeople,
@@ -1797,11 +1926,17 @@ export default {
       recurringMode,
       recurringIntervalWeeks,
       recurringCount,
+      recurringEndDate,
       newCourtName,
       newCourtLocation,
       newCourtDescription,
       newCourtMapLink,
       newCourtRate,
+      newCourtHalfHourRate,
+      newFreezeTitle,
+      newFreezeStartDate,
+      newFreezeEndDate,
+      newFreezeReason,
       newFamilyName,
       newAdminFamilyName,
       newAdminFamilyRelationship,
@@ -1818,6 +1953,7 @@ export default {
       availabilityStatuses,
       addParticipant,
       createCourt,
+      createFreezePeriod,
       createAdminFamilyMember,
       changeArchivedBookingPage,
       changeCompletedBookingPage,
@@ -1825,6 +1961,7 @@ export default {
       createInvoice,
       createMiscCost,
       deleteCourt,
+      deleteFreezePeriod,
       deleteAdminFamilyMember,
       deleteAdminUser,
       deleteBooking,
@@ -1832,6 +1969,7 @@ export default {
       deleteMiscCost,
       loadMonthlyInvoice,
       loadPlayAvailability,
+      loadFreezePeriods,
       loadWhatsAppNotifications,
       familyPersonBookingStatus,
       availabilityPersonStatus,
@@ -1851,6 +1989,7 @@ export default {
       startEditBooking,
       settleBookingCost,
       updateCourt,
+      updateFreezePeriod,
       updateAdminFamilyMember,
       updateAdminUser,
       updateMiscCost,

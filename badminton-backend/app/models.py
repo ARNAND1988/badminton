@@ -95,6 +95,7 @@ class Court(db.Model):
     description = db.Column(db.Text, nullable=True)
     map_link = db.Column(db.String(1024), nullable=True)
     hourly_rate = db.Column(db.Float, default=25.0)
+    half_hour_rate = db.Column(db.Float, nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -106,6 +107,7 @@ class Court(db.Model):
             'description': self.description,
             'map_link': self.map_link,
             'hourly_rate': self.hourly_rate,
+            'half_hour_rate': self.half_hour_rate if self.half_hour_rate is not None else round(float(self.hourly_rate or 0.0) / 2, 2),
             'is_active': self.is_active,
         }
 
@@ -215,6 +217,28 @@ class MiscCost(db.Model):
             'split_count': split_count,
             'cost_per_person': round(float(self.amount or 0.0) / split_count, 2),
             'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CourtFreezePeriod(db.Model):
+    __tablename__ = 'court_freeze_periods'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(128), nullable=False)
+    start_date = db.Column(db.String(10), nullable=False)
+    end_date = db.Column(db.String(10), nullable=False)
+    reason = db.Column(db.Text, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'start_date': self.start_date,
+            'end_date': self.end_date,
+            'reason': self.reason,
+            'is_active': self.is_active,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

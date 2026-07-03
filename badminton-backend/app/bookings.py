@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request, current_app
 import jwt
 
 from . import db
-from .models import Booking, BookingParticipant, Court, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User
+from .models import Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User
 
 bookings_bp = Blueprint('bookings', __name__)
 
@@ -48,6 +48,34 @@ def _next_dates(count=7):
     return [today + timedelta(days=index) for index in range(count)]
 
 
+def _parse_iso_date(value):
+    try:
+        return datetime.strptime(value, '%Y-%m-%d').date()
+    except Exception:
+        return None
+
+
+def _date_is_frozen(date_value):
+    return CourtFreezePeriod.query.filter(
+        CourtFreezePeriod.is_active.is_(True),
+        CourtFreezePeriod.start_date <= date_value,
+        CourtFreezePeriod.end_date >= date_value,
+    ).first()
+
+
+def _next_playable_dates(count=7, start=None):
+    current = start or datetime.utcnow().date()
+    dates = []
+    checked = 0
+    while len(dates) < count and checked < 370:
+        date_value = current.strftime('%Y-%m-%d')
+        if not _date_is_frozen(date_value):
+            dates.append(current)
+        current += timedelta(days=1)
+        checked += 1
+    return dates
+
+
 def _next_weekend_dates(count=4):
     today = datetime.utcnow().date()
     days_until_saturday = (5 - today.weekday()) % 7
@@ -88,6 +116,35 @@ def _month_bounds(month_value):
     else:
         end = start.replace(month=start.month + 1)
     return start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
+
+
+def _time_to_minutes(value):
+    try:
+        hours, minutes = [int(part) for part in (value or '').split(':')]
+    except Exception:
+        return None
+    if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+        return None
+    return hours * 60 + minutes
+
+
+def _booking_duration_minutes(start_time, end_time):
+    start = _time_to_minutes(start_time)
+    end = _time_to_minutes(end_time)
+    if start is None or end is None or end <= start:
+        return None
+    return end - start
+
+
+def _calculated_booking_cost(court, start_time, end_time):
+    duration = _booking_duration_minutes(start_time, end_time)
+    if duration is None:
+        raise ValueError('end_time must be after start_time')
+    hourly_rate = float(court.hourly_rate or 0.0)
+    half_hour_rate = float(court.half_hour_rate if court.half_hour_rate is not None else hourly_rate / 2)
+    hours, remainder = divmod(duration, 60)
+    half_hours = (remainder + 29) // 30
+    return round((hours * hourly_rate) + (half_hours * half_hour_rate), 2)
 
 
 def _participant_keys_for_user(user):
@@ -271,6 +328,7 @@ def _ensure_upcoming_booking_data():
         court.location = court.location or location
         court.description = court.description or description
         court.hourly_rate = court.hourly_rate or hourly_rate
+        court.half_hour_rate = court.half_hour_rate if court.half_hour_rate is not None else round(float(court.hourly_rate or hourly_rate) / 2, 2)
         court.is_active = True if court.is_active is None else court.is_active
     db.session.flush()
 
@@ -343,6 +401,7 @@ def _ensure_historical_booking_data():
         court.location = court.location or name
         court.description = court.description or 'Historical booking location'
         court.hourly_rate = court.hourly_rate or hourly_rate
+        court.half_hour_rate = court.half_hour_rate if court.half_hour_rate is not None else round(float(court.hourly_rate or hourly_rate) / 2, 2)
         court.is_active = True if court.is_active is None else court.is_active
     db.session.flush()
 
@@ -510,10 +569,12 @@ def list_play_availability():
     start_date = request.args.get('start_date')
     days = min(max(int(request.args.get('days', 7) or 7), 1), 14)
     if start_date:
-        start = datetime.strptime(start_date, '%Y-%m-%d').date()
-        dates = [start + timedelta(days=index) for index in range(days)]
+        start = _parse_iso_date(start_date)
+        if not start:
+            return jsonify({'error': 'invalid_start_date'}), 400
+        dates = _next_playable_dates(days, start=start)
     else:
-        dates = _next_dates(days)
+        dates = _next_playable_dates(days)
 
     date_values = [date_value.strftime('%Y-%m-%d') for date_value in dates]
     votes = PlayAvailabilityVote.query.filter(
@@ -650,12 +711,14 @@ def create_booking():
     booking_date = data.get('booking_date')
     start_time = data.get('start_time')
     end_time = data.get('end_time')
-    cost = data.get('cost', 0.0)
+    manual_cost = bool(data.get('manual_cost', False))
+    cost = data.get('cost')
     notes = data.get('notes', '')
     participants = data.get('participants', []) or []
     recurring = bool(data.get('recurring', False))
     recurring_interval_weeks = int(data.get('recurring_interval_weeks', 1) or 1)
     recurring_count = int(data.get('recurring_count', 1) or 1)
+    recurring_end_date = data.get('recurring_end_date') or data.get('end_date')
 
     if not all([court_id, booking_date, start_time, end_time]):
         return jsonify({'error': 'court_id, booking_date, start_time and end_time are required'}), 400
@@ -663,6 +726,11 @@ def create_booking():
     court = Court.query.get(court_id)
     if not court:
         return jsonify({'error': 'court_not_found'}), 404
+    try:
+        calculated_cost = _calculated_booking_cost(court, start_time, end_time)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    booking_cost = float(cost or 0.0) if manual_cost and cost is not None else calculated_cost
 
     def _create_single_booking(target_date):
         if _slot_overlaps(court_id, target_date, start_time, end_time):
@@ -673,7 +741,7 @@ def create_booking():
             booking_date=target_date,
             start_time=start_time,
             end_time=end_time,
-            cost=float(cost or 0.0),
+            cost=booking_cost,
             notes=notes,
             status='confirmed'
         )
@@ -690,10 +758,23 @@ def create_booking():
     try:
         if recurring:
             current_date = datetime.strptime(booking_date, '%Y-%m-%d').date()
-            for index in range(recurring_count):
-                booking = _create_single_booking(current_date.strftime('%Y-%m-%d'))
-                created_bookings.append(booking)
-                current_date += timedelta(weeks=recurring_interval_weeks)
+            stop_date = _parse_iso_date(recurring_end_date) if recurring_end_date else None
+            if recurring_end_date and not stop_date:
+                return jsonify({'error': 'recurring_end_date must use YYYY-MM-DD'}), 400
+            if stop_date and stop_date < current_date:
+                return jsonify({'error': 'recurring_end_date must be on or after booking_date'}), 400
+            if stop_date:
+                while current_date <= stop_date:
+                    booking = _create_single_booking(current_date.strftime('%Y-%m-%d'))
+                    created_bookings.append(booking)
+                    current_date += timedelta(weeks=recurring_interval_weeks)
+            else:
+                for index in range(recurring_count):
+                    booking = _create_single_booking(current_date.strftime('%Y-%m-%d'))
+                    created_bookings.append(booking)
+                    current_date += timedelta(weeks=recurring_interval_weeks)
+            if not created_bookings:
+                return jsonify({'error': 'no_bookings_generated'}), 400
         else:
             booking = _create_single_booking(booking_date)
             created_bookings.append(booking)
@@ -701,6 +782,8 @@ def create_booking():
         return jsonify({'error': str(exc)}), 409
 
     db.session.commit()
+    for booking in created_bookings:
+        _send_whatsapp_event('booking_created', _booking_notification_context(booking))
     return jsonify(created_bookings[-1].to_dict())
 
 
@@ -728,11 +811,16 @@ def update_booking(booking_id):
     if _slot_overlaps(court_id, booking_date, start_time, end_time, exclude_booking_id=booking.id):
         return jsonify({'error': 'slot_unavailable'}), 409
 
+    try:
+        calculated_cost = _calculated_booking_cost(court, start_time, end_time)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
     booking.court_id = court_id
     booking.booking_date = booking_date
     booking.start_time = start_time
     booking.end_time = end_time
-    booking.cost = float(data.get('cost', booking.cost) or 0.0)
+    booking.cost = float(data.get('cost', booking.cost) or 0.0) if data.get('manual_cost') else calculated_cost
     booking.notes = data.get('notes', booking.notes)
     booking.status = data.get('status', booking.status or 'confirmed')
     db.session.commit()
@@ -747,6 +835,7 @@ def delete_booking(booking_id):
         return error
 
     booking = Booking.query.get_or_404(booking_id)
+    _send_whatsapp_event('booking_cancelled', _booking_notification_context(booking))
     Invoice.query.filter_by(booking_id=booking.id).delete()
     BookingParticipant.query.filter_by(booking_id=booking.id).delete()
     db.session.delete(booking)
@@ -1238,6 +1327,7 @@ def create_court():
         description=data.get('description', ''),
         map_link=(data.get('map_link') or '').strip() or None,
         hourly_rate=data.get('hourly_rate', 25.0),
+        half_hour_rate=data.get('half_hour_rate'),
         is_active=data.get('is_active', True)
     )
     db.session.add(court)
@@ -1272,6 +1362,8 @@ def update_court(court_id):
     court.description = (data.get('description') or '').strip()
     court.map_link = (data.get('map_link') or '').strip() or None
     court.hourly_rate = float(data.get('hourly_rate', court.hourly_rate) or 0.0)
+    half_hour_rate = data.get('half_hour_rate', court.half_hour_rate)
+    court.half_hour_rate = float(half_hour_rate) if half_hour_rate not in (None, '') else None
     if 'is_active' in data:
         court.is_active = bool(data.get('is_active'))
     db.session.commit()
@@ -1289,12 +1381,87 @@ def delete_court(court_id):
     db.session.commit()
     return jsonify(court.to_dict())
 
+
+def _apply_freeze_period_data(period, data):
+    title = (data.get('title') or '').strip()
+    start_date = (data.get('start_date') or '').strip()
+    end_date = (data.get('end_date') or '').strip()
+    if not title:
+        return jsonify({'error': 'title required'}), 400
+    start = _parse_iso_date(start_date)
+    end = _parse_iso_date(end_date)
+    if not start or not end:
+        return jsonify({'error': 'start_date and end_date must use YYYY-MM-DD'}), 400
+    if end < start:
+        return jsonify({'error': 'end_date must be on or after start_date'}), 400
+    period.title = title
+    period.start_date = start_date
+    period.end_date = end_date
+    period.reason = (data.get('reason') or '').strip() or None
+    if 'is_active' in data:
+        period.is_active = bool(data.get('is_active'))
+    return None
+
+
+@bookings_bp.route('/admin/freeze-periods', methods=['GET'])
+def list_freeze_periods():
+    user, error = _require_admin()
+    if error:
+        return error
+    periods = CourtFreezePeriod.query.order_by(CourtFreezePeriod.start_date.asc(), CourtFreezePeriod.created_at.asc()).all()
+    return jsonify({'periods': [period.to_dict() for period in periods]})
+
+
+@bookings_bp.route('/admin/freeze-periods', methods=['POST'])
+def create_freeze_period():
+    user, error = _require_admin()
+    if error:
+        return error
+    period = CourtFreezePeriod(is_active=True)
+    validation_error = _apply_freeze_period_data(period, request.get_json() or {})
+    if validation_error:
+        return validation_error
+    db.session.add(period)
+    db.session.commit()
+    return jsonify(period.to_dict()), 201
+
+
+@bookings_bp.route('/admin/freeze-periods/<int:period_id>', methods=['PUT'])
+def update_freeze_period(period_id):
+    user, error = _require_admin()
+    if error:
+        return error
+    period = CourtFreezePeriod.query.get_or_404(period_id)
+    validation_error = _apply_freeze_period_data(period, request.get_json() or {})
+    if validation_error:
+        return validation_error
+    db.session.commit()
+    return jsonify(period.to_dict())
+
+
+@bookings_bp.route('/admin/freeze-periods/<int:period_id>', methods=['DELETE'])
+def delete_freeze_period(period_id):
+    user, error = _require_admin()
+    if error:
+        return error
+    period = CourtFreezePeriod.query.get_or_404(period_id)
+    db.session.delete(period)
+    db.session.commit()
+    return jsonify({'status': 'deleted', 'id': period_id})
+
 WHATSAPP_NOTIFICATION_DEFAULTS = [
     {
         'event_key': 'booking_created',
         'title': 'New booking created',
         'description': 'Notify the WhatsApp group when an admin creates a court booking.',
         'template': '🏸 New badminton booking\nCourt: {{court}}\nDate: {{date}}\nTime: {{start_time}}-{{end_time}}\nNotes: {{notes}}',
+    },
+    {
+        'event_key': 'booking_cancelled',
+        'title': 'Booking cancelled',
+        'description': 'Notify the WhatsApp group when an admin deletes or cancels a court booking.',
+        'template': '❌ Badminton booking cancelled\nCourt: {{court}}\nDate: {{date}}\nTime: {{start_time}}-{{end_time}}\nNotes: {{notes}}',
+        'is_enabled': True,
     },
     {
         'event_key': 'booking_reminder',
@@ -1324,7 +1491,8 @@ def _ensure_whatsapp_notification_settings():
     for spec in WHATSAPP_NOTIFICATION_DEFAULTS:
         if spec['event_key'] in existing:
             continue
-        db.session.add(WhatsAppNotificationSetting(**spec, is_enabled=False, send_to_group=True))
+        setting_data = {key: value for key, value in spec.items() if key != 'is_enabled'}
+        db.session.add(WhatsAppNotificationSetting(**setting_data, is_enabled=spec.get('is_enabled', False), send_to_group=True))
         changed = True
     if changed:
         db.session.commit()
@@ -1335,6 +1503,15 @@ def _render_template(template, context):
     for key, value in (context or {}).items():
         rendered = rendered.replace('{{' + key + '}}', str(value if value is not None else ''))
     return rendered
+
+
+def _fallback_whatsapp_group_id(exclude_event_key=None):
+    from .models import WhatsAppNotificationSetting
+    query = WhatsAppNotificationSetting.query.filter(WhatsAppNotificationSetting.group_id.isnot(None))
+    if exclude_event_key:
+        query = query.filter(WhatsAppNotificationSetting.event_key != exclude_event_key)
+    setting = query.order_by(WhatsAppNotificationSetting.updated_at.desc()).first()
+    return setting.group_id if setting else None
 
 
 def _send_whatsapp_bot_message(message, recipient=None):
@@ -1357,6 +1534,48 @@ def _send_whatsapp_bot_message(message, recipient=None):
         return ('sent' if response.ok else 'failed'), response.text[:1000]
     except Exception as exc:
         return 'failed', str(exc)
+
+
+def _send_whatsapp_event(event_key, context):
+    from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
+    _ensure_whatsapp_notification_settings()
+    setting = WhatsAppNotificationSetting.query.filter_by(event_key=event_key).first()
+    if not setting or not setting.is_enabled:
+        return None
+
+    message = _render_template(setting.template, context)
+    recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id(event_key)
+    status, response_text = _send_whatsapp_bot_message(message, recipient)
+    log = WhatsAppNotificationLog(
+        setting_id=setting.id,
+        event_key=setting.event_key,
+        recipient=recipient,
+        message=message,
+        status=status,
+        response=response_text,
+    )
+    db.session.add(log)
+    db.session.commit()
+    return log
+
+
+def _booking_notification_context(booking):
+    court = booking.court or Court.query.get(booking.court_id)
+    court_name = court.name if court else 'Court'
+    return {
+        'booking_id': booking.id,
+        'court': court_name,
+        'court_name': court_name,
+        'court.name': court_name,
+        'court_location': court.location if court else '',
+        'court.location': court.location if court else '',
+        'date': booking.booking_date,
+        'booking_date': booking.booking_date,
+        'start_time': booking.start_time,
+        'end_time': booking.end_time,
+        'cost': booking.cost or 0,
+        'notes': booking.notes or 'No notes',
+    }
 
 
 def _list_whatsapp_bot_groups():
@@ -1439,7 +1658,11 @@ def test_whatsapp_notification(setting_id):
     setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
     data = request.get_json() or {}
     sample_context = {
-        'court': data.get('court', 'Court 1'),
+        'court': data.get('court', data.get('court_name', 'Court 1')),
+        'court_name': data.get('court_name', data.get('court', 'Court 1')),
+        'court.name': data.get('court_name', data.get('court', 'Court 1')),
+        'court_location': data.get('court_location', ''),
+        'court.location': data.get('court_location', ''),
         'date': data.get('date', datetime.utcnow().date().strftime('%Y-%m-%d')),
         'start_time': data.get('start_time', '19:00'),
         'end_time': data.get('end_time', '20:00'),

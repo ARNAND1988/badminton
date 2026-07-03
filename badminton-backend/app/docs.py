@@ -32,6 +32,8 @@ ENDPOINT_DOCS = {
     '/api/admin/family-members/{member_id}': ('Admin', 'Update or delete a family member.'),
     '/api/admin/courts': ('Admin Courts', 'List or create courts.'),
     '/api/admin/courts/{court_id}': ('Admin Courts', 'Update or soft-delete a court.'),
+    '/api/admin/freeze-periods': ('Admin Courts', 'List or create no-play freeze periods.'),
+    '/api/admin/freeze-periods/{period_id}': ('Admin Courts', 'Update or delete a no-play freeze period.'),
     '/api/admin/invoices/monthly': ('Admin Invoices', 'List monthly invoice summaries for all users.'),
     '/api/admin/whatsapp-groups': ('WhatsApp', 'List WhatsApp groups visible to the paired bot.'),
     '/api/admin/whatsapp-notifications': ('WhatsApp', 'List WhatsApp notification settings and recent logs.'),

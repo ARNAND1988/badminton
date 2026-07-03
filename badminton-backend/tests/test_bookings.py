@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta
 
 from app import db
-from app.models import Booking, BookingParticipant, Court, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User
+from app.models import Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting
 
 
 def test_booking_availability_and_invoice(client, app):
@@ -61,10 +61,20 @@ def test_booking_availability_and_invoice(client, app):
     assert update_data['booking_date'] == '2030-01-02'
     assert update_data['start_time'] == '19:00'
     assert update_data['notes'] == 'Updated match'
-    assert update_data['cost'] == 30
+    assert update_data['cost'] == 25.0
 
 
-def test_admin_can_delete_booking_with_participants_and_invoice(client, app):
+def test_admin_can_delete_booking_with_participants_invoice_and_cancel_notification(client, app, monkeypatch):
+    import app.bookings as bookings_module
+
+    sent_messages = []
+
+    def fake_send(message, recipient=None):
+        sent_messages.append({'message': message, 'recipient': recipient})
+        return 'sent', '{"status":"sent"}'
+
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', fake_send)
+
     with app.app_context():
         admin = User(phone='+31100000900', email='delete-admin@example.com', name='Delete Admin', role='admin')
         member = User(phone='+31100000901', email='delete-member@example.com', name='Delete Member', role='member')
@@ -84,6 +94,14 @@ def test_admin_can_delete_booking_with_participants_and_invoice(client, app):
         db.session.add_all([
             BookingParticipant(booking_id=booking.id, phone=member.phone, name=member.name, status='attending'),
             Invoice(booking_id=booking.id, total_amount=25, split_count=1, status='pending'),
+            WhatsAppNotificationSetting(
+                event_key='booking_cancelled',
+                title='Booking cancelled',
+                template='Cancelled {{court.name}} on {{date}} at {{start_time}}',
+                is_enabled=True,
+                send_to_group=True,
+                group_id='120363409786593643@g.us',
+            ),
         ])
         db.session.commit()
         booking_id = booking.id
@@ -96,20 +114,157 @@ def test_admin_can_delete_booking_with_participants_and_invoice(client, app):
     resp = client.delete(f'/api/bookings/{booking_id}', headers={'Authorization': f'Bearer {token}'})
     assert resp.status_code == 200
     assert resp.get_json()['status'] == 'deleted'
+    assert sent_messages == [{
+        'message': 'Cancelled Delete Court on 2030-03-01 at 18:00',
+        'recipient': '120363409786593643@g.us',
+    }]
 
     with app.app_context():
         assert Booking.query.get(booking_id) is None
         assert BookingParticipant.query.filter_by(booking_id=booking_id).count() == 0
         assert Invoice.query.filter_by(booking_id=booking_id).count() == 0
+        log = WhatsAppNotificationLog.query.filter_by(event_key='booking_cancelled').order_by(WhatsAppNotificationLog.id.desc()).first()
+        assert log.status == 'sent'
+        assert 'Delete Court' in log.message
 
 
-def test_recurring_booking_creation(client, app):
+def test_booking_create_triggers_whatsapp_notification_with_court_name(client, app, monkeypatch):
+    import app.bookings as bookings_module
+
+    sent_messages = []
+
+    def fake_send(message, recipient=None):
+        sent_messages.append({'message': message, 'recipient': recipient})
+        return 'sent', '{"status":"sent"}'
+
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', fake_send)
+
+    with app.app_context():
+        admin = User(phone='+31100000910', email='notify-admin@example.com', name='Notify Admin', role='admin')
+        court = Court(name='Real Notification Court', hourly_rate=25.0, is_active=True)
+        db.session.add_all([admin, court])
+        db.session.commit()
+        setting = WhatsAppNotificationSetting.query.filter_by(event_key='booking_created').first()
+        if not setting:
+            setting = WhatsAppNotificationSetting(
+                event_key='booking_created',
+                title='New booking created',
+                template='Court: {{court_name}} / {{court}} on {{date}}',
+                is_enabled=True,
+                send_to_group=True,
+                group_id='120363409786593643@g.us',
+            )
+            db.session.add(setting)
+        setting.template = 'Court: {{court_name}} / {{court}} / {{court.name}} on {{date}}'
+        setting.is_enabled = True
+        setting.group_id = '120363409786593643@g.us'
+        db.session.commit()
+        court_id = court.id
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    resp = client.post('/api/bookings', json={
+        'court_id': court_id,
+        'booking_date': '2030-04-01',
+        'start_time': '18:00',
+        'end_time': '19:00',
+        'notes': 'Notify test',
+        'participants': []
+    }, headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 200
+    assert sent_messages == [{
+        'message': 'Court: Real Notification Court / Real Notification Court / Real Notification Court on 2030-04-01',
+        'recipient': '120363409786593643@g.us',
+    }]
+
+    with app.app_context():
+        log = WhatsAppNotificationLog.query.filter_by(event_key='booking_created').order_by(WhatsAppNotificationLog.id.desc()).first()
+        assert log.status == 'sent'
+        assert 'Real Notification Court' in log.message
+
+
+def test_freeze_periods_skip_play_availability_days_and_are_admin_managed(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000920', email='freeze-admin@example.com', name='Freeze Admin', role='admin')
+        member = User(phone='+31100000921', email='freeze-member@example.com', name='Freeze Member', role='member')
+        db.session.add_all([admin, member])
+        db.session.commit()
+        admin_token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+        member_token = jwt.encode(
+            {'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    admin_headers = {'Authorization': f'Bearer {admin_token}'}
+    create_resp = client.post('/api/admin/freeze-periods', json={
+        'title': 'School vacation',
+        'start_date': '2030-05-02',
+        'end_date': '2030-05-03',
+        'reason': 'No hall availability',
+    }, headers=admin_headers)
+    assert create_resp.status_code == 201
+    period = create_resp.get_json()
+    assert period['is_active'] is True
+
+    member_resp = client.get('/api/admin/freeze-periods', headers={'Authorization': f'Bearer {member_token}'})
+    assert member_resp.status_code == 403
+
+    availability_resp = client.get('/api/play-availability?start_date=2030-05-01&days=4')
+    assert availability_resp.status_code == 200
+    dates = [day['date'] for day in availability_resp.get_json()['days']]
+    assert dates == ['2030-05-01', '2030-05-04', '2030-05-05', '2030-05-06']
+
+    update_resp = client.put(f"/api/admin/freeze-periods/{period['id']}", json={
+        **period,
+        'is_active': False,
+    }, headers=admin_headers)
+    assert update_resp.status_code == 200
+
+    availability_resp = client.get('/api/play-availability?start_date=2030-05-01&days=4')
+    dates = [day['date'] for day in availability_resp.get_json()['days']]
+    assert dates == ['2030-05-01', '2030-05-02', '2030-05-03', '2030-05-04']
+
+    delete_resp = client.delete(f"/api/admin/freeze-periods/{period['id']}", headers=admin_headers)
+    assert delete_resp.status_code == 200
+    with app.app_context():
+        assert CourtFreezePeriod.query.get(period['id']) is None
+
+
+def test_recurring_booking_creation_with_end_date_and_notifications(client, app, monkeypatch):
+    import app.bookings as bookings_module
+
+    sent_messages = []
+
+    def fake_send(message, recipient=None):
+        sent_messages.append({'message': message, 'recipient': recipient})
+        return 'sent', '{"status":"sent"}'
+
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', fake_send)
+
     with app.app_context():
         user = User(phone='+31100000001', email='owner2@example.com', name='Owner 2', role='admin')
         db.session.add(user)
         db.session.commit()
-        court = Court(name='Court 2', hourly_rate=30.0, is_active=True)
-        db.session.add(court)
+        court = Court(name='Court 2', hourly_rate=30.0, half_hour_rate=18.0, is_active=True)
+        db.session.add_all([
+            court,
+            WhatsAppNotificationSetting(
+                event_key='booking_created',
+                title='New booking created',
+                template='Created {{court}} {{date}} €{{cost}}',
+                is_enabled=True,
+                send_to_group=True,
+                group_id='120363409786593643@g.us',
+            ),
+        ])
         db.session.commit()
         court_id = court.id
         token = jwt.encode(
@@ -124,16 +279,23 @@ def test_recurring_booking_creation(client, app):
         'court_id': court_id,
         'booking_date': '2030-01-04',
         'start_time': '20:00',
-        'end_time': '21:00',
+        'end_time': '21:30',
         'recurring': True,
         'recurring_interval_weeks': 1,
-        'recurring_count': 3,
+        'recurring_end_date': '2030-01-18',
         'notes': 'Weekly Saturday slot'
     }, headers=headers)
     assert resp.status_code == 200
     data = resp.get_json()
     assert data['status'] == 'confirmed'
     assert data['notes'] == 'Weekly Saturday slot'
+    assert data['booking_date'] == '2030-01-18'
+    assert data['cost'] == 48.0
+    assert [item['message'] for item in sent_messages] == [
+        'Created Court 2 2030-01-04 €48.0',
+        'Created Court 2 2030-01-11 €48.0',
+        'Created Court 2 2030-01-18 €48.0',
+    ]
 
 
 def test_booking_admin_actions_require_admin_login(client, app):
@@ -183,6 +345,7 @@ def test_admin_can_update_and_soft_delete_court(client, app):
         'description': 'Freshly lined',
         'map_link': 'https://maps.google.com/?q=Main+hall',
         'hourly_rate': 28,
+        'half_hour_rate': 15,
     }, headers=headers)
     assert update_resp.status_code == 200
     update_data = update_resp.get_json()
@@ -190,6 +353,7 @@ def test_admin_can_update_and_soft_delete_court(client, app):
     assert update_data['location'] == 'Main hall'
     assert update_data['map_link'] == 'https://maps.google.com/?q=Main+hall'
     assert update_data['hourly_rate'] == 28
+    assert update_data['half_hour_rate'] == 15
 
     delete_resp = client.delete(f'/api/admin/courts/{court_id}', headers=headers)
     assert delete_resp.status_code == 200
@@ -363,7 +527,7 @@ def test_booking_rsvp_admin_attendance_and_cost_split(client, app):
     assert list_resp.status_code == 200
     booking = next(item for item in list_resp.get_json()['bookings'] if item['id'] == booking_id)
     assert booking['cost_split']['attended_count'] == 2
-    assert booking['cost_split']['cost_per_person'] == 30.0
+    assert booking['cost_split']['cost_per_person'] == 40.0
 
     invoice_resp = client.post(f'/api/bookings/{booking_id}/invoice', headers=admin_headers)
     assert invoice_resp.status_code == 200

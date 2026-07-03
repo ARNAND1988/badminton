@@ -120,6 +120,8 @@ def create_app():
             db.session.execute(db.text('ALTER TABLE courts ADD COLUMN description TEXT'))
         if 'map_link' not in court_columns:
             db.session.execute(db.text('ALTER TABLE courts ADD COLUMN map_link VARCHAR(1024)'))
+        if 'half_hour_rate' not in court_columns:
+            db.session.execute(db.text('ALTER TABLE courts ADD COLUMN half_hour_rate FLOAT'))
         participant_columns = {col['name'] for col in inspector.get_columns('booking_participants')}
         if 'name' not in participant_columns:
             db.session.execute(db.text('ALTER TABLE booking_participants ADD COLUMN name VARCHAR(128)'))

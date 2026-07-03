@@ -338,6 +338,18 @@
           </span>
           <span v-if="!familyMembers.length" class="text-sm text-slate-600">No family members added yet.</span>
         </div>
+        <div v-if="monthlyInvoice?.booking_items?.length" class="mt-4 rounded border border-slate-200 bg-white p-3">
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <h4 class="font-semibold text-slate-900">Family booking details</h4>
+            <button class="text-sm font-semibold text-indigo-700 hover:text-indigo-900" @click="showVerificationDetails(monthlyInvoice, 'Your family booking verification')">Verify details</button>
+          </div>
+          <div class="space-y-2 text-sm">
+            <div v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="flex flex-col justify-between gap-1 rounded bg-slate-50 px-3 py-2 sm:flex-row">
+              <span>{{ item.date }} · {{ item.court }} · {{ item.participants?.join(', ') }}</span>
+              <span class="font-semibold">{{ item.total_people_played }} players · €{{ item.total_cost }} total · €{{ item.cost_per_person }} each · €{{ item.amount }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -424,6 +436,18 @@
           <div class="rounded border border-slate-200 bg-slate-50 p-3">
             <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total</div>
             <div class="mt-1 text-2xl font-bold text-slate-900">€{{ monthlyInvoice.total }}</div>
+          </div>
+        </div>
+        <div v-if="monthlyInvoice?.booking_items?.length" class="mt-4 rounded border border-slate-200 bg-white p-3">
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <h4 class="font-semibold text-slate-900">Family booking details</h4>
+            <button class="text-sm font-semibold text-indigo-700 hover:text-indigo-900" @click="showVerificationDetails(monthlyInvoice, 'Your family booking verification')">Verify details</button>
+          </div>
+          <div class="space-y-2 text-sm">
+            <div v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="flex flex-col justify-between gap-1 rounded bg-slate-50 px-3 py-2 sm:flex-row">
+              <span>{{ item.date }} · {{ item.court }} · {{ item.participants?.join(', ') }}</span>
+              <span class="font-semibold">{{ item.total_people_played }} players · €{{ item.total_cost }} total · €{{ item.cost_per_person }} each · €{{ item.amount }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -518,6 +542,10 @@
       <div>
         <h2 class="section-title">Split Costs</h2>
         <p class="section-copy mt-1">Create and maintain shared expenses, then settle completed court booking invoices.</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button class="btn-secondary" :class="adminCostTab === 'misc' ? 'bg-emerald-100 text-emerald-800' : ''" @click="adminCostTab = 'misc'">Misc costs</button>
+          <button class="btn-secondary" :class="adminCostTab === 'booking' ? 'bg-emerald-100 text-emerald-800' : ''" @click="adminCostTab = 'booking'">Booking costs</button>
+        </div>
       </div>
 
       <div class="panel-card">
@@ -549,7 +577,7 @@
           <div class="overflow-x-auto rounded border border-slate-200 bg-white">
             <table class="min-w-full divide-y divide-slate-200 text-sm">
               <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <tr><th class="px-3 py-2">Member</th><th class="px-3 py-2">Bookings</th><th class="px-3 py-2">Shared costs</th><th class="px-3 py-2">Total</th></tr>
+                <tr><th class="px-3 py-2">Member</th><th class="px-3 py-2">Bookings</th><th class="px-3 py-2">Shared costs</th><th class="px-3 py-2">Total</th><th class="px-3 py-2">Verify</th></tr>
               </thead>
               <tbody class="divide-y divide-slate-100">
                 <tr v-for="invoice in adminMonthlyInvoices.invoices" :key="invoice.user.id">
@@ -557,6 +585,7 @@
                   <td class="px-3 py-2">€{{ invoice.booking_total }}</td>
                   <td class="px-3 py-2">€{{ invoice.misc_total }}</td>
                   <td class="px-3 py-2 font-semibold text-slate-900">€{{ invoice.total }}</td>
+                  <td class="px-3 py-2"><button class="text-sm font-semibold text-indigo-700 hover:text-indigo-900" @click="showVerificationDetails(invoice, invoice.user.name || invoice.user.email || invoice.user.phone)">Details</button></td>
                 </tr>
               </tbody>
             </table>
@@ -564,7 +593,7 @@
         </div>
       </div>
 
-      <div class="panel-card">
+      <div v-if="adminCostTab === 'misc'" class="panel-card">
         <h3 class="mb-3 text-lg font-semibold">Add shared cost</h3>
         <div class="grid gap-3 md:grid-cols-2">
           <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
@@ -577,7 +606,7 @@
         <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
       </div>
 
-      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div v-if="adminCostTab === 'misc'" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <article v-for="cost in miscCosts" :key="cost.id" class="sub-card space-y-3 p-4">
           <div class="flex items-start justify-between gap-3">
             <div>
@@ -604,7 +633,7 @@
         </article>
       </div>
 
-      <div class="mt-8 space-y-4">
+      <div v-if="adminCostTab === 'booking'" class="mt-8 space-y-4">
         <div>
           <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
           <p class="section-copy">Generate or settle booking invoices based on attending members. Completed bookings stay editable for attendance updates; bookings from previous July-June cost years are in Archive.</p>
@@ -821,6 +850,52 @@
       </div>
     </section>
 
+    <div v-if="verificationDetails" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" @click.self="closeVerificationDetails">
+      <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
+        <div class="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h3 class="text-lg font-bold text-slate-900">Cost verification</h3>
+            <p class="text-sm text-slate-600">{{ verificationDetails.title }}</p>
+          </div>
+          <button class="btn-muted" @click="closeVerificationDetails">Close</button>
+        </div>
+        <div class="mt-4 grid gap-3 sm:grid-cols-4">
+          <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
+            <div class="text-xs font-semibold uppercase text-indigo-600">Playing days</div>
+            <div class="mt-1 text-xl font-bold text-indigo-900">{{ verificationDetails.items.length }}</div>
+          </div>
+          <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
+            <div class="text-xs font-semibold uppercase text-emerald-600">Total people</div>
+            <div class="mt-1 text-xl font-bold text-emerald-900">{{ verificationDetails.totalPeople }}</div>
+          </div>
+          <div class="rounded border border-slate-200 bg-slate-50 p-3">
+            <div class="text-xs font-semibold uppercase text-slate-500">Total cost</div>
+            <div class="mt-1 text-xl font-bold text-slate-900">€{{ verificationDetails.totalCost }}</div>
+          </div>
+          <div class="rounded border border-amber-100 bg-amber-50 p-3">
+            <div class="text-xs font-semibold uppercase text-amber-600">Your share</div>
+            <div class="mt-1 text-xl font-bold text-amber-900">€{{ verificationDetails.shareCost }}</div>
+          </div>
+        </div>
+        <div class="mt-4 overflow-x-auto rounded border border-slate-200">
+          <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <tr><th class="px-3 py-2">Playing day</th><th class="px-3 py-2">Players</th><th class="px-3 py-2">Total cost</th><th class="px-3 py-2">Per share</th><th class="px-3 py-2">Member share</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr v-for="item in verificationDetails.items" :key="item.booking_id || item.date">
+                <td class="px-3 py-2 font-medium text-slate-900">{{ item.date }}<div class="text-xs font-normal text-slate-500">{{ item.court }} · {{ item.start_time }}-{{ item.end_time }}</div></td>
+                <td class="px-3 py-2">{{ item.total_people_played }}</td>
+                <td class="px-3 py-2">€{{ item.total_cost }}</td>
+                <td class="px-3 py-2">€{{ item.cost_per_person }}</td>
+                <td class="px-3 py-2 font-semibold">€{{ item.amount }}<div v-if="item.participants?.length" class="text-xs font-normal text-slate-500">{{ item.participants.join(', ') }}</div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -880,6 +955,7 @@ export default {
     const recurringCount = ref(1)
     const recurringEndDate = ref(new Date().toISOString().slice(0, 10))
     const adminBookingTab = ref('bookings')
+    const adminCostTab = ref('misc')
     const completedBookingTab = ref('completed')
     const newCourtName = ref('')
     const newCourtLocation = ref('')
@@ -904,6 +980,7 @@ export default {
     const newMiscPurchaseDate = ref(new Date().toISOString().slice(0, 10))
     const newMiscSplitCount = ref(1)
     const msg = ref('')
+    const verificationDetails = ref(null)
     const isAdmin = ref(false)
     const apiBase = import.meta.env.VITE_API_BASE || ''
 
@@ -1049,6 +1126,21 @@ export default {
         ? totals.tentative_attendees || []
         : totals.available_attendees || []
       return attendees.map((attendee) => attendee.name).filter(Boolean)
+    }
+
+    function showVerificationDetails(invoice, title = 'Booking verification') {
+      const items = invoice?.booking_items || []
+      verificationDetails.value = {
+        title,
+        items,
+        totalPeople: items.reduce((sum, item) => sum + Number(item.total_people_played || 0), 0),
+        totalCost: items.reduce((sum, item) => sum + Number(item.total_cost || 0), 0).toFixed(2),
+        shareCost: Number(invoice?.booking_total || 0).toFixed(2)
+      }
+    }
+
+    function closeVerificationDetails() {
+      verificationDetails.value = null
     }
 
     async function fetchJson(url, options = {}) {
@@ -1965,11 +2057,13 @@ export default {
       loading,
       errorMsg,
       msg,
+      verificationDetails,
       editingBookingId,
       playDays,
       maxFamilyAttendees,
       bookingDate,
       adminBookingTab,
+      adminCostTab,
       startTime,
       endTime,
       bookingCost,
@@ -2012,6 +2106,7 @@ export default {
       createFamilyMember,
       createInvoice,
       createMiscCost,
+      closeVerificationDetails,
       deleteCourt,
       deleteFreezePeriod,
       deleteAdminFamilyMember,
@@ -2041,6 +2136,7 @@ export default {
       setAvailabilityPersonStatus,
       startEditBooking,
       settleBookingCost,
+      showVerificationDetails,
       updateCourt,
       updateFreezePeriod,
       updateAdminFamilyMember,

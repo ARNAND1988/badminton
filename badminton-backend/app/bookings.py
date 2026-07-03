@@ -160,11 +160,19 @@ def _monthly_invoice_summary(user, month_value):
         return None
 
     participant_keys = _participant_keys_for_user(user)
+    participant_labels = {user.phone: user.name or user.email or user.phone}
+    for member in user.family_members:
+        participant_labels[f'family:{member.id}'] = member.name
     booking_items = []
     booking_total = 0.0
     bookings = (
         Booking.query
-        .filter(Booking.booking_date >= start_date, Booking.booking_date < end_date)
+        .filter(
+            Booking.booking_date >= start_date,
+            Booking.booking_date < end_date,
+            Booking.booking_date < datetime.utcnow().strftime('%Y-%m-%d'),
+            Booking.status == 'completed',
+        )
         .order_by(Booking.booking_date.asc(), Booking.start_time.asc())
         .all()
     )
@@ -184,7 +192,10 @@ def _monthly_invoice_summary(user, month_value):
             'start_time': booking.start_time,
             'end_time': booking.end_time,
             'attendee_count': len(matching),
+            'total_people_played': split_count,
+            'total_cost': round(float(booking.cost or 0.0), 2),
             'cost_per_person': per_person,
+            'participants': [participant_labels.get(participant.phone, participant.name or participant.phone or 'Player') for participant in matching],
             'amount': amount,
             'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
         })

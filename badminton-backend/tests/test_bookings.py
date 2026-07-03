@@ -650,7 +650,7 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
 
         booking = Booking(
             court_id=court.id,
-            booking_date='2030-05-12',
+            booking_date='2026-05-12',
             start_time='19:00',
             end_time='20:00',
             cost=60,
@@ -662,7 +662,7 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
             BookingParticipant(booking_id=booking.id, phone=member.phone, name='Invoice Member', status='attending'),
             BookingParticipant(booking_id=booking.id, phone=admin.phone, name='Invoice Admin', status='attending'),
             Invoice(booking_id=booking.id, total_amount=60, split_count=2, status='generated'),
-            MiscCost(title='May shuttles', amount=30, purchase_date='2030-05-02', split_count=3, status='open'),
+            MiscCost(title='May shuttles', amount=30, purchase_date='2026-05-02', split_count=3, status='open'),
         ])
         db.session.commit()
 
@@ -677,7 +677,7 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
             algorithm='HS256',
         )
 
-    member_resp = client.get('/api/invoices/monthly?month=2030-05', headers={'Authorization': f'Bearer {member_token}'})
+    member_resp = client.get('/api/invoices/monthly?month=2026-05', headers={'Authorization': f'Bearer {member_token}'})
     assert member_resp.status_code == 200
     member_invoice = member_resp.get_json()
     assert member_invoice['booking_total'] == 30.0
@@ -685,10 +685,10 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
     assert member_invoice['total'] == 40.0
     assert member_invoice['booking_items'][0]['invoice_status'] == 'generated'
 
-    admin_resp = client.get('/api/admin/invoices/monthly?month=2030-05', headers={'Authorization': f'Bearer {admin_token}'})
+    admin_resp = client.get('/api/admin/invoices/monthly?month=2026-05', headers={'Authorization': f'Bearer {admin_token}'})
     assert admin_resp.status_code == 200
     admin_data = admin_resp.get_json()
-    assert admin_data['month'] == '2030-05'
+    assert admin_data['month'] == '2026-05'
     assert any(invoice['user']['email'] == 'invoice-member@example.com' and invoice['total'] == 40.0 for invoice in admin_data['invoices'])
 
 

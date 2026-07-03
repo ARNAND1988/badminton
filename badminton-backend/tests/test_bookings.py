@@ -778,6 +778,48 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
     assert any(invoice['user']['email'] == 'invoice-member@example.com' and invoice['total'] == 40.0 for invoice in admin_data['invoices'])
 
 
+def test_monthly_invoice_includes_completed_booking_on_current_day_without_mixing_misc(client, app):
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    month = datetime.utcnow().strftime('%Y-%m')
+    with app.app_context():
+        member = User(phone='+31100000918', email='today-invoice-member@example.com', name='Today Invoice Member', role='member')
+        court = Court(name='Today Invoice Court', hourly_rate=40.0, is_active=True)
+        db.session.add_all([member, court])
+        db.session.commit()
+
+        booking = Booking(
+            court_id=court.id,
+            booking_date=today,
+            start_time='19:00',
+            end_time='20:00',
+            cost=50,
+            status='completed',
+        )
+        db.session.add(booking)
+        db.session.commit()
+        db.session.add_all([
+            BookingParticipant(booking_id=booking.id, phone=member.phone, name='Today Invoice Member', status='attending'),
+            Invoice(booking_id=booking.id, total_amount=50, split_count=1, status='generated'),
+            MiscCost(title='Current month shuttles', amount=15, purchase_date=today, split_count=1, status='open'),
+        ])
+        db.session.commit()
+
+        member_token = jwt.encode(
+            {'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    resp = client.get(f'/api/invoices/monthly?month={month}', headers={'Authorization': f'Bearer {member_token}'})
+    assert resp.status_code == 200
+    invoice = resp.get_json()
+    assert invoice['booking_total'] == 50.0
+    assert invoice['misc_total'] == 15.0
+    assert invoice['total'] == 65.0
+    assert invoice['booking_items'][0]['total_cost'] == 50.0
+    assert invoice['misc_items'][0]['amount'] == 15.0
+
+
 def test_openapi_and_swagger_docs_are_available(client):
     spec_resp = client.get('/api/openapi.json')
     assert spec_resp.status_code == 200

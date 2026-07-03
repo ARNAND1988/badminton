@@ -338,18 +338,6 @@
           </span>
           <span v-if="!familyMembers.length" class="text-sm text-slate-600">No family members added yet.</span>
         </div>
-        <div v-if="monthlyInvoice?.booking_items?.length" class="mt-4 rounded border border-slate-200 bg-white p-3">
-          <div class="mb-2 flex items-center justify-between gap-3">
-            <h4 class="font-semibold text-slate-900">Family booking details</h4>
-            <button class="text-sm font-semibold text-indigo-700 hover:text-indigo-900" @click="showVerificationDetails(monthlyInvoice, 'Your family booking verification')">Verify details</button>
-          </div>
-          <div class="space-y-2 text-sm">
-            <div v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="flex flex-col justify-between gap-1 rounded bg-slate-50 px-3 py-2 sm:flex-row">
-              <span>{{ item.date }} · {{ item.court }} · {{ item.participants?.join(', ') }}</span>
-              <span class="font-semibold">{{ item.total_people_played }} players · €{{ item.total_cost }} total · €{{ item.cost_per_person }} each · €{{ item.amount }}</span>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -935,7 +923,7 @@ export default {
     const miscCosts = ref([])
     const monthlyInvoice = ref(null)
     const adminMonthlyInvoices = ref(null)
-    const monthlyInvoiceMonth = ref(new Date().toISOString().slice(0, 7))
+    const monthlyInvoiceMonth = ref(localIsoMonth())
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
     const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
@@ -944,7 +932,7 @@ export default {
     const loading = ref(false)
     const errorMsg = ref('')
     const editingBookingId = ref(null)
-    const bookingDate = ref(new Date().toISOString().slice(0, 10))
+    const bookingDate = ref(localIsoDate())
     const startTime = ref('18:00')
     const endTime = ref('19:00')
     const bookingCost = ref('0')
@@ -953,7 +941,7 @@ export default {
     const recurringMode = ref(false)
     const recurringIntervalWeeks = ref(1)
     const recurringCount = ref(1)
-    const recurringEndDate = ref(new Date().toISOString().slice(0, 10))
+    const recurringEndDate = ref(localIsoDate())
     const adminBookingTab = ref('bookings')
     const adminCostTab = ref('misc')
     const completedBookingTab = ref('completed')
@@ -964,8 +952,8 @@ export default {
     const newCourtRate = ref('25')
     const newCourtHalfHourRate = ref('12.5')
     const newFreezeTitle = ref('')
-    const newFreezeStartDate = ref(new Date().toISOString().slice(0, 10))
-    const newFreezeEndDate = ref(new Date().toISOString().slice(0, 10))
+    const newFreezeStartDate = ref(localIsoDate())
+    const newFreezeEndDate = ref(localIsoDate())
     const newFreezeReason = ref('')
     const newFamilyName = ref('')
     const newParticipantName = ref({})
@@ -977,12 +965,23 @@ export default {
     const newMiscDescription = ref('')
     const newMiscAmount = ref('')
     const newMiscPaidBy = ref('')
-    const newMiscPurchaseDate = ref(new Date().toISOString().slice(0, 10))
+    const newMiscPurchaseDate = ref(localIsoDate())
     const newMiscSplitCount = ref(1)
     const msg = ref('')
     const verificationDetails = ref(null)
     const isAdmin = ref(false)
     const apiBase = import.meta.env.VITE_API_BASE || ''
+
+    function localIsoDate(date = new Date()) {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
+    function localIsoMonth(date = new Date()) {
+      return localIsoDate(date).slice(0, 7)
+    }
 
     const token = () => getSessionValue('auth_token')
     const hasToken = () => hasAuthSession()
@@ -1000,7 +999,7 @@ export default {
       const halfHours = Math.ceil(remainder / 30)
       return ((hours * hourlyRate) + (halfHours * halfHourRate)).toFixed(2)
     })
-    const todayIso = () => new Date().toISOString().slice(0, 10)
+    const todayIso = () => localIsoDate()
     const upcomingBookings = computed(() => {
       const today = todayIso()
       return bookings.value.filter((booking) => booking.booking_date >= today && booking.status !== 'completed')
@@ -1307,7 +1306,8 @@ export default {
     }
 
     async function loadPlayAvailability() {
-      const data = await fetchJson('/api/play-availability?days=7')
+      const params = new URLSearchParams({ start_date: localIsoDate(), days: '7' })
+      const data = await fetchJson(`/api/play-availability?${params.toString()}`)
       playDays.value = (data.days || []).map(normalizePlayDay)
     }
 
@@ -1543,7 +1543,7 @@ export default {
 
     function resetBookingForm() {
       editingBookingId.value = null
-      bookingDate.value = new Date().toISOString().slice(0, 10)
+      bookingDate.value = localIsoDate()
       startTime.value = '18:00'
       endTime.value = '19:00'
       bookingCost.value = '0'
@@ -1860,7 +1860,7 @@ export default {
         newMiscDescription.value = ''
         newMiscAmount.value = ''
         newMiscPaidBy.value = ''
-        newMiscPurchaseDate.value = new Date().toISOString().slice(0, 10)
+        newMiscPurchaseDate.value = localIsoDate()
         newMiscSplitCount.value = 1
         await loadMiscCosts()
       } catch (err) {

@@ -610,13 +610,16 @@ def list_play_availability():
 
     start_date = request.args.get('start_date')
     days = min(max(int(request.args.get('days', 7) or 7), 1), 14)
+    today = datetime.utcnow().date()
     if start_date:
         start = _parse_iso_date(start_date)
         if not start:
             return jsonify({'error': 'invalid_start_date'}), 400
+        if start < today:
+            start = today
         dates = _next_playable_dates(days, start=start)
     else:
-        dates = _next_playable_dates(days)
+        dates = _next_playable_dates(days, start=today)
 
     date_values = [date_value.strftime('%Y-%m-%d') for date_value in dates]
     votes = PlayAvailabilityVote.query.filter(

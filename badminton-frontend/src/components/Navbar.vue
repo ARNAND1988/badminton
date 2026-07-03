@@ -94,13 +94,37 @@
     </div>
   </nav>
 
-  <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-200/70 bg-white/90 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden" aria-label="Mobile primary navigation">
-    <ul class="mx-auto flex max-w-lg gap-1 overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <li v-for="link in mobilePageLinks" :key="link.label" class="min-w-[4.7rem] flex-1">
+  <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-200/70 bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden" aria-label="Mobile primary navigation">
+    <div
+      v-if="isAdminMenuOpen && adminLinks.length"
+      class="mx-auto mb-2 max-w-lg rounded-2xl border border-emerald-200 bg-white p-2 shadow-2xl shadow-slate-900/15"
+    >
+      <p class="px-2 pb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Admin menu</p>
+      <div class="grid grid-cols-2 gap-2">
+        <router-link
+          v-for="link in adminLinks"
+          :key="link.label"
+          :to="link.to"
+          :class="mobileAdminLinkClass(link.to)"
+          @click="isAdminMenuOpen = false"
+        >
+          <component :is="link.icon" class="h-5 w-5" />
+          <span>{{ link.label }}</span>
+        </router-link>
+      </div>
+    </div>
+    <ul class="mx-auto grid max-w-lg items-stretch gap-1 py-2" :class="mobileNavGridClass">
+      <li v-for="link in mobilePageLinks" :key="link.label" class="min-w-0">
         <router-link :to="link.to" :class="mobileNavClass(link.to)">
           <component :is="link.icon" class="h-5 w-5" />
           <span>{{ link.mobileLabel }}</span>
         </router-link>
+      </li>
+      <li v-if="adminLinks.length" class="min-w-0">
+        <button type="button" :class="mobileAdminButtonClass" :aria-expanded="isAdminMenuOpen" @click.stop="toggleAdminMenu">
+          <AdminIcon class="h-5 w-5" />
+          <span>Admin</span>
+        </button>
       </li>
     </ul>
   </nav>
@@ -243,7 +267,11 @@ export default {
       ]
     })
 
-    const mobilePageLinks = computed(() => [...pageLinks.value, ...adminLinks.value])
+    const mobilePageLinks = computed(() => pageLinks.value)
+    const mobileNavGridClass = computed(() => {
+      if (adminLinks.value.length) return 'grid-cols-4'
+      return pageLinks.value.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'
+    })
 
     function navTextClass(path) {
       const base = 'block rounded-xl border border-transparent px-4 py-2 text-sm font-bold transition hover:border-sky-300/40 hover:bg-white/10 hover:text-sky-100'
@@ -260,13 +288,27 @@ export default {
     })
 
     function mobileNavClass(path) {
-      const base = 'flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-semibold transition'
+      const base = 'flex h-full min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[0.68rem] font-semibold leading-tight transition sm:text-xs [&>span]:max-w-full [&>span]:truncate'
       return route.path === path
         ? `${base} bg-emerald-100 text-emerald-800 shadow-sm`
         : `${base} text-slate-500 hover:bg-emerald-50 hover:text-emerald-700`
     }
 
-    return { accountMenuRef, adminLinks, adminMenuButtonClass, isAccountMenuOpen, isAdminMenuOpen, isLoggedIn, logoUrl, logout, mobileNavClass, mobilePageLinks, navTextClass, pageLinks, route, toggleAccountMenu, toggleAdminMenu, userDisplayName, userInitial }
+    function mobileAdminLinkClass(path) {
+      const base = 'flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-bold transition'
+      return route.path === path
+        ? `${base} bg-emerald-100 text-emerald-800 shadow-sm`
+        : `${base} text-slate-600 hover:bg-emerald-50 hover:text-emerald-700`
+    }
+
+    const mobileAdminButtonClass = computed(() => {
+      const base = 'flex h-full min-h-14 w-full flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 text-[0.68rem] font-semibold leading-tight transition sm:text-xs'
+      return route.path.startsWith('/admin') || isAdminMenuOpen.value
+        ? `${base} bg-emerald-100 text-emerald-800 shadow-sm`
+        : `${base} text-slate-500 hover:bg-emerald-50 hover:text-emerald-700`
+    })
+
+    return { accountMenuRef, AdminIcon, adminLinks, adminMenuButtonClass, isAccountMenuOpen, isAdminMenuOpen, isLoggedIn, logoUrl, logout, mobileAdminButtonClass, mobileAdminLinkClass, mobileNavClass, mobileNavGridClass, mobilePageLinks, navTextClass, pageLinks, route, toggleAccountMenu, toggleAdminMenu, userDisplayName, userInitial }
   }
 }
 </script>

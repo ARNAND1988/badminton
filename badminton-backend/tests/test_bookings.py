@@ -584,7 +584,7 @@ def test_create_app_adds_court_map_link_to_existing_database(tmp_path, monkeypat
         assert 'map_link' in columns
 
 
-def test_completed_bookings_require_login_and_include_past_confirmed_bookings(client, app):
+def test_archive_bookings_require_login_and_include_past_confirmed_bookings(client, app):
     from app.models import Booking
 
     with app.app_context():
@@ -607,10 +607,10 @@ def test_completed_bookings_require_login_and_include_past_confirmed_bookings(cl
             algorithm='HS256',
         )
 
-    anonymous_resp = client.get('/api/bookings?status=completed')
+    anonymous_resp = client.get('/api/bookings?status=archive')
     assert anonymous_resp.status_code == 401
 
-    resp = client.get('/api/bookings?status=completed&page=1&per_page=100', headers={'Authorization': f'Bearer {token}'})
+    resp = client.get('/api/bookings?status=archive&page=1&per_page=100', headers={'Authorization': f'Bearer {token}'})
     assert resp.status_code == 200
     data = resp.get_json()
     assert data['pagination']['page'] == 1
@@ -620,7 +620,7 @@ def test_completed_bookings_require_login_and_include_past_confirmed_bookings(cl
     assert any(booking['booking_date'] == '2020-01-01' for booking in data['bookings'])
 
 
-def test_completed_bookings_backfill_historical_loaded_data(client, app):
+def test_archive_bookings_backfill_historical_loaded_data(client, app):
     with app.app_context():
         user = User(phone='+31100000555', email='member555@example.com', name='Member 555', role='member')
         db.session.add(user)
@@ -631,7 +631,7 @@ def test_completed_bookings_backfill_historical_loaded_data(client, app):
             algorithm='HS256',
         )
 
-    resp = client.get('/api/bookings?status=completed&page=1&per_page=10000', headers={'Authorization': f'Bearer {token}'})
+    resp = client.get('/api/bookings?status=archive&page=1&per_page=10000', headers={'Authorization': f'Bearer {token}'})
     assert resp.status_code == 200
     data = resp.get_json()
     historical = [

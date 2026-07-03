@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta
 
 from app import db
-from app.models import Court, FamilyMember, PlayAvailabilityVote, User
+from app.models import Booking, BookingParticipant, Court, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User
 
 
 def test_booking_availability_and_invoice(client, app):
@@ -62,6 +62,45 @@ def test_booking_availability_and_invoice(client, app):
     assert update_data['start_time'] == '19:00'
     assert update_data['notes'] == 'Updated match'
     assert update_data['cost'] == 30
+
+
+def test_admin_can_delete_booking_with_participants_and_invoice(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000900', email='delete-admin@example.com', name='Delete Admin', role='admin')
+        member = User(phone='+31100000901', email='delete-member@example.com', name='Delete Member', role='member')
+        court = Court(name='Delete Court', hourly_rate=25.0, is_active=True)
+        db.session.add_all([admin, member, court])
+        db.session.commit()
+        booking = Booking(
+            court_id=court.id,
+            booking_date='2030-03-01',
+            start_time='18:00',
+            end_time='19:00',
+            cost=25,
+            status='confirmed',
+        )
+        db.session.add(booking)
+        db.session.commit()
+        db.session.add_all([
+            BookingParticipant(booking_id=booking.id, phone=member.phone, name=member.name, status='attending'),
+            Invoice(booking_id=booking.id, total_amount=25, split_count=1, status='pending'),
+        ])
+        db.session.commit()
+        booking_id = booking.id
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    resp = client.delete(f'/api/bookings/{booking_id}', headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 200
+    assert resp.get_json()['status'] == 'deleted'
+
+    with app.app_context():
+        assert Booking.query.get(booking_id) is None
+        assert BookingParticipant.query.filter_by(booking_id=booking_id).count() == 0
+        assert Invoice.query.filter_by(booking_id=booking_id).count() == 0
 
 
 def test_recurring_booking_creation(client, app):
@@ -435,6 +474,79 @@ def test_misc_costs_admin_crud_and_authenticated_list(client, app):
 
     delete_resp = client.delete(f"/api/misc-costs/{cost['id']}", headers=headers)
     assert delete_resp.status_code == 200
+
+
+def test_monthly_invoice_summary_for_member_and_admin(client, app):
+    with app.app_context():
+        member = User(phone='+31100000018', email='invoice-member@example.com', name='Invoice Member', role='member')
+        admin = User(phone='+31100000019', email='invoice-admin@example.com', name='Invoice Admin', role='admin')
+        court = Court(name='Invoice Court', hourly_rate=40.0, is_active=True)
+        db.session.add_all([member, admin, court])
+        db.session.commit()
+
+        booking = Booking(
+            court_id=court.id,
+            booking_date='2030-05-12',
+            start_time='19:00',
+            end_time='20:00',
+            cost=60,
+            status='completed',
+        )
+        db.session.add(booking)
+        db.session.commit()
+        db.session.add_all([
+            BookingParticipant(booking_id=booking.id, phone=member.phone, name='Invoice Member', status='attending'),
+            BookingParticipant(booking_id=booking.id, phone=admin.phone, name='Invoice Admin', status='attending'),
+            Invoice(booking_id=booking.id, total_amount=60, split_count=2, status='generated'),
+            MiscCost(title='May shuttles', amount=30, purchase_date='2030-05-02', split_count=3, status='open'),
+        ])
+        db.session.commit()
+
+        member_token = jwt.encode(
+            {'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+        admin_token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    member_resp = client.get('/api/invoices/monthly?month=2030-05', headers={'Authorization': f'Bearer {member_token}'})
+    assert member_resp.status_code == 200
+    member_invoice = member_resp.get_json()
+    assert member_invoice['booking_total'] == 30.0
+    assert member_invoice['misc_total'] == 10.0
+    assert member_invoice['total'] == 40.0
+    assert member_invoice['booking_items'][0]['invoice_status'] == 'generated'
+
+    admin_resp = client.get('/api/admin/invoices/monthly?month=2030-05', headers={'Authorization': f'Bearer {admin_token}'})
+    assert admin_resp.status_code == 200
+    admin_data = admin_resp.get_json()
+    assert admin_data['month'] == '2030-05'
+    assert any(invoice['user']['email'] == 'invoice-member@example.com' and invoice['total'] == 40.0 for invoice in admin_data['invoices'])
+
+
+def test_openapi_and_swagger_docs_are_available(client):
+    spec_resp = client.get('/api/openapi.json')
+    assert spec_resp.status_code == 200
+    spec = spec_resp.get_json()
+    assert spec['openapi'] == '3.0.3'
+    assert '/api/bookings' in spec['paths']
+    assert '/api/admin/whatsapp-notifications' in spec['paths']
+
+    swagger_resp = client.get('/api/swagger.json')
+    assert swagger_resp.status_code == 200
+    assert swagger_resp.get_json()['info']['title'] == 'Nieuwegein Badminton API'
+
+    docs_resp = client.get('/api/docs')
+    assert docs_resp.status_code == 200
+    assert b'SwaggerUIBundle' in docs_resp.data
+
+    missing_api_resp = client.get('/api/does-not-exist')
+    assert missing_api_resp.status_code == 404
+    assert missing_api_resp.get_json()['error'] == 'not_found'
 
 
 def test_list_bookings_repopulates_upcoming_seed_data(client):

@@ -24,11 +24,11 @@ export default {
     const route = useRoute()
 
     const contentClass = computed(() => {
-      const isDashboardRoute = ['/bookings', '/availability', '/dashboard', '/costs', '/members'].includes(route.path)
+      const isDashboardRoute = ['/bookings', '/availability', '/dashboard', '/costs'].includes(route.path) || route.path.startsWith('/admin/')
       if (route.path === '/login') {
         return 'mx-auto max-w-6xl'
       }
-      const width = isDashboardRoute ? 'max-w-6xl' : 'max-w-xl'
+      const width = isDashboardRoute ? 'max-w-6xl' : 'max-w-2xl'
       return `mx-auto ${width} app-panel`
     })
 

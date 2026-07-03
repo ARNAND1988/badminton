@@ -23,6 +23,27 @@
               {{ link.label }}
             </router-link>
           </li>
+          <li v-if="adminLinks.length" class="relative">
+            <button type="button" :class="adminMenuButtonClass" @click.stop="toggleAdminMenu">
+              Admin
+              <span aria-hidden="true">▾</span>
+            </button>
+            <div
+              v-if="isAdminMenuOpen"
+              class="absolute right-0 mt-3 w-56 rounded-2xl border border-sky-200/30 bg-slate-950/95 p-2 text-sky-50 shadow-2xl shadow-sky-950/40 backdrop-blur-xl"
+            >
+              <router-link
+                v-for="link in adminLinks"
+                :key="link.label"
+                :to="link.to"
+                class="block rounded-xl px-3 py-2 text-sm font-semibold text-sky-100/80 transition hover:bg-white/10 hover:text-white"
+                :class="route.path === link.to ? 'bg-sky-400/15 text-white' : ''"
+                @click="isAdminMenuOpen = false"
+              >
+                {{ link.label }}
+              </router-link>
+            </div>
+          </li>
         </ul>
       </div>
 
@@ -74,8 +95,8 @@
   </nav>
 
   <nav class="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-200/70 bg-white/90 px-2 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_30px_rgba(15,23,42,0.08)] backdrop-blur md:hidden" aria-label="Mobile primary navigation">
-    <ul class="mx-auto grid max-w-lg gap-1 py-2" :style="mobileNavGridStyle">
-      <li v-for="link in mobilePageLinks" :key="link.label">
+    <ul class="mx-auto flex max-w-lg gap-1 overflow-x-auto py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <li v-for="link in mobilePageLinks" :key="link.label" class="min-w-[4.7rem] flex-1">
         <router-link :to="link.to" :class="mobileNavClass(link.to)">
           <component :is="link.icon" class="h-5 w-5" />
           <span>{{ link.mobileLabel }}</span>
@@ -88,7 +109,7 @@
 <script>
 import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { clearAuthSession, getAuthSessionVersion, getSessionValue, hasAuthSession } from '../authSession'
+import { clearAuthSession, getAuthSessionVersion, getSessionValue, hasAuthSession, setSessionValue } from '../authSession'
 import logoUrl from '../assets/nieuwegein-badminton-logo.svg'
 
 function navIcon(pathData) {
@@ -104,6 +125,7 @@ function navIcon(pathData) {
 const CalendarIcon = navIcon('M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zM18 9H2v7a2 2 0 002 2h12a2 2 0 002-2V9z')
 const ShuttleIcon = navIcon('M10.7 2.3a1 1 0 00-1.4 0L3 8.6V15a2 2 0 002 2h3v-4h4v4h3a2 2 0 002-2V8.6l-6.3-6.3z')
 const CostIcon = navIcon('M10 2a8 8 0 100 16 8 8 0 000-16zm1 4a1 1 0 10-2 0v.2a3 3 0 00-1.7.9 2.3 2.3 0 00-.6 1.7c0 1.5 1.1 2.2 2.8 2.6 1.1.3 1.5.5 1.5 1s-.5.9-1.2.9c-.8 0-1.5-.3-2.1-.8a1 1 0 10-1.3 1.5 5 5 0 002.6 1.2v.2a1 1 0 102 0v-.2c1.6-.4 2.6-1.5 2.6-2.9 0-1.7-1.2-2.4-3-2.8-1-.3-1.4-.5-1.4-.9s.4-.8 1.1-.8c.6 0 1.1.2 1.6.5a1 1 0 101.1-1.7A4.4 4.4 0 0011 6.2V6z')
+const AdminIcon = navIcon('M10 2a3 3 0 00-3 3v1H5a2 2 0 00-2 2v7a2 2 0 002 2h10a2 2 0 002-2V8a2 2 0 00-2-2h-2V5a3 3 0 00-3-3zm-1 4V5a1 1 0 112 0v1H9z')
 
 export default {
   name: 'Navbar',
@@ -111,32 +133,91 @@ export default {
     const route = useRoute()
     const router = useRouter()
     const isAccountMenuOpen = ref(false)
+    const isAdminMenuOpen = ref(false)
     const accountMenuRef = ref(null)
+    const sessionSnapshot = ref({
+      email: getSessionValue('member_email') || '',
+      name: getSessionValue('member_name') || '',
+      role: getSessionValue('member_role') || 'member'
+    })
     const isLoggedIn = computed(() => hasAuthSession())
     const userDisplayName = computed(() => {
       getAuthSessionVersion()
-      return getSessionValue('member_name') || getSessionValue('member_email') || 'Member'
+      return sessionSnapshot.value.name || sessionSnapshot.value.email || 'Member'
     })
     const userInitial = computed(() => userDisplayName.value.trim().charAt(0) || 'M')
 
     function logout() {
       isAccountMenuOpen.value = false
       clearAuthSession()
+      refreshSessionSnapshot()
       router.replace('/availability')
     }
 
     function toggleAccountMenu() {
       isAccountMenuOpen.value = !isAccountMenuOpen.value
+      isAdminMenuOpen.value = false
+    }
+
+    function toggleAdminMenu() {
+      isAdminMenuOpen.value = !isAdminMenuOpen.value
+      isAccountMenuOpen.value = false
     }
 
     function closeAccountMenu(event) {
       if (!accountMenuRef.value?.contains(event.target)) {
         isAccountMenuOpen.value = false
       }
+      isAdminMenuOpen.value = false
     }
 
-    onMounted(() => document.addEventListener('click', closeAccountMenu))
-    onBeforeUnmount(() => document.removeEventListener('click', closeAccountMenu))
+    function rememberSession() {
+      return Boolean(localStorage.getItem('auth_token'))
+    }
+
+    function refreshSessionSnapshot() {
+      sessionSnapshot.value = {
+        email: getSessionValue('member_email') || '',
+        name: getSessionValue('member_name') || '',
+        role: getSessionValue('member_role') || 'member'
+      }
+    }
+
+    async function refreshCurrentUser() {
+      const token = getSessionValue('auth_token')
+      refreshSessionSnapshot()
+      if (!token) return
+      try {
+        const response = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (!response.ok) return
+        const data = await response.json()
+        const user = data.user || {}
+        const remember = rememberSession()
+        setSessionValue('member_name', user.name || '', remember)
+        setSessionValue('member_email', user.email || '', remember)
+        setSessionValue('member_phone', user.phone || '', remember)
+        setSessionValue('member_role', user.role || 'member', remember)
+        refreshSessionSnapshot()
+      } catch (err) {
+        refreshSessionSnapshot()
+      }
+    }
+
+    function handleAuthChanged() {
+      refreshCurrentUser()
+    }
+
+    onMounted(() => {
+      document.addEventListener('click', closeAccountMenu)
+      window.addEventListener('badminton-auth-changed', handleAuthChanged)
+      refreshCurrentUser()
+    })
+    onBeforeUnmount(() => {
+      document.removeEventListener('click', closeAccountMenu)
+      window.removeEventListener('badminton-auth-changed', handleAuthChanged)
+    })
 
     const pageLinks = computed(() => {
       const links = [
@@ -145,19 +226,24 @@ export default {
       ]
       getAuthSessionVersion()
       if (isLoggedIn.value) {
-        links.push({ label: 'Costs', mobileLabel: 'Cost', to: '/costs', icon: CostIcon })
-      }
-      if (isLoggedIn.value && getSessionValue('member_role') === 'admin') {
-        links.push({ label: 'Notifications', mobileLabel: 'Notify', to: '/notifications', icon: CostIcon })
-        links.push({ label: 'Members', mobileLabel: 'Members', to: '/members', icon: ShuttleIcon })
+        links.push({ label: 'My Invoices', mobileLabel: 'Invoices', to: '/costs', icon: CostIcon })
       }
       return links
     })
 
-    const mobilePageLinks = computed(() => pageLinks.value.slice(0, 4))
-    const mobileNavGridStyle = computed(() => ({
-      gridTemplateColumns: `repeat(${Math.max(mobilePageLinks.value.length, 1)}, minmax(0, 1fr))`
-    }))
+    const adminLinks = computed(() => {
+      getAuthSessionVersion()
+      if (!isLoggedIn.value || sessionSnapshot.value.role !== 'admin') return []
+      return [
+        { label: 'Manage Bookings', mobileLabel: 'Bookings+', to: '/admin/bookings', icon: CalendarIcon },
+        { label: 'Courts', mobileLabel: 'Courts', to: '/admin/courts', icon: ShuttleIcon },
+        { label: 'Members', mobileLabel: 'Members', to: '/admin/members', icon: AdminIcon },
+        { label: 'Split Costs', mobileLabel: 'Split', to: '/admin/costs', icon: CostIcon },
+        { label: 'WhatsApp', mobileLabel: 'WhatsApp', to: '/admin/notifications', icon: AdminIcon }
+      ]
+    })
+
+    const mobilePageLinks = computed(() => [...pageLinks.value, ...adminLinks.value])
 
     function navTextClass(path) {
       const base = 'block rounded-xl border border-transparent px-4 py-2 text-sm font-bold transition hover:border-sky-300/40 hover:bg-white/10 hover:text-sky-100'
@@ -166,6 +252,13 @@ export default {
         : `${base} text-sky-100/75`
     }
 
+    const adminMenuButtonClass = computed(() => {
+      const base = 'flex items-center gap-1 rounded-xl border border-transparent px-4 py-2 text-sm font-bold transition hover:border-sky-300/40 hover:bg-white/10 hover:text-sky-100'
+      return route.path.startsWith('/admin')
+        ? `${base} border-sky-300/50 bg-sky-400/15 text-white shadow-[0_0_18px_rgba(14,165,233,0.25)]`
+        : `${base} text-sky-100/75`
+    })
+
     function mobileNavClass(path) {
       const base = 'flex flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-xs font-semibold transition'
       return route.path === path
@@ -173,7 +266,7 @@ export default {
         : `${base} text-slate-500 hover:bg-emerald-50 hover:text-emerald-700`
     }
 
-    return { accountMenuRef, isAccountMenuOpen, isLoggedIn, logoUrl, logout, mobileNavClass, mobileNavGridStyle, mobilePageLinks, navTextClass, pageLinks, toggleAccountMenu, userDisplayName, userInitial }
+    return { accountMenuRef, adminLinks, adminMenuButtonClass, isAccountMenuOpen, isAdminMenuOpen, isLoggedIn, logoUrl, logout, mobileNavClass, mobilePageLinks, navTextClass, pageLinks, route, toggleAccountMenu, toggleAdminMenu, userDisplayName, userInitial }
   }
 }
 </script>

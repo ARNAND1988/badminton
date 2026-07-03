@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Register from '../components/Register.vue'
 import Dashboard from '../components/Dashboard.vue'
+import NotFound from '../components/NotFound.vue'
 import { hasAuthSession } from '../authSession'
 
 const routes = [
@@ -37,21 +38,56 @@ const routes = [
     name: 'costs',
     component: Dashboard,
     props: { initialView: 'costs' },
-    meta: { navLabel: 'Misc Costs', requiresAuth: true }
+    meta: { navLabel: 'My Invoices', requiresAuth: true }
   },
   {
-    path: '/notifications',
+    path: '/admin/bookings',
+    name: 'admin-bookings',
+    component: Dashboard,
+    props: { initialView: 'admin-bookings' },
+    meta: { navLabel: 'Manage Bookings', requiresAuth: true }
+  },
+  {
+    path: '/admin/courts',
+    name: 'admin-courts',
+    component: Dashboard,
+    props: { initialView: 'admin-courts' },
+    meta: { navLabel: 'Manage Courts', requiresAuth: true }
+  },
+  {
+    path: '/admin/costs',
+    name: 'admin-costs',
+    component: Dashboard,
+    props: { initialView: 'admin-costs' },
+    meta: { navLabel: 'Split Costs', requiresAuth: true }
+  },
+  {
+    path: '/admin/notifications',
     name: 'notifications',
     component: Dashboard,
     props: { initialView: 'notifications' },
     meta: { navLabel: 'Notifications', requiresAuth: true }
   },
   {
-    path: '/members',
+    path: '/admin/members',
     name: 'members',
     component: Dashboard,
     props: { initialView: 'members' },
-    meta: { navLabel: 'Members' }
+    meta: { navLabel: 'Members', requiresAuth: true }
+  },
+  {
+    path: '/notifications',
+    redirect: '/admin/notifications'
+  },
+  {
+    path: '/members',
+    redirect: '/admin/members'
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: NotFound,
+    meta: { navLabel: 'Not Found' }
   }
 ]
 

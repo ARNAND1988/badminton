@@ -78,6 +78,93 @@ def _valid_availability_status(status):
     return status in {'available', 'tentative', 'not_available'}
 
 
+def _month_bounds(month_value):
+    try:
+        start = datetime.strptime(month_value, '%Y-%m').date()
+    except Exception:
+        return None, None
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
+    return start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
+
+
+def _participant_keys_for_user(user):
+    keys = {user.phone}
+    for member in user.family_members:
+        keys.add(f'family:{member.id}')
+    return keys
+
+
+def _monthly_invoice_summary(user, month_value):
+    start_date, end_date = _month_bounds(month_value)
+    if not start_date:
+        return None
+
+    participant_keys = _participant_keys_for_user(user)
+    booking_items = []
+    booking_total = 0.0
+    bookings = (
+        Booking.query
+        .filter(Booking.booking_date >= start_date, Booking.booking_date < end_date)
+        .order_by(Booking.booking_date.asc(), Booking.start_time.asc())
+        .all()
+    )
+    for booking in bookings:
+        attending = [participant for participant in booking.participants if participant.status == 'attending']
+        matching = [participant for participant in attending if participant.phone in participant_keys]
+        if not matching:
+            continue
+        split_count = max(1, len(attending) or 1)
+        per_person = round(float(booking.cost or 0.0) / split_count, 2)
+        amount = round(per_person * len(matching), 2)
+        booking_total += amount
+        booking_items.append({
+            'booking_id': booking.id,
+            'date': booking.booking_date,
+            'court': booking.court.name if booking.court else None,
+            'start_time': booking.start_time,
+            'end_time': booking.end_time,
+            'attendee_count': len(matching),
+            'cost_per_person': per_person,
+            'amount': amount,
+            'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
+        })
+
+    misc_items = []
+    misc_total = 0.0
+    misc_costs = (
+        MiscCost.query
+        .filter(MiscCost.purchase_date >= start_date, MiscCost.purchase_date < end_date)
+        .order_by(MiscCost.purchase_date.asc(), MiscCost.created_at.asc())
+        .all()
+    )
+    for cost in misc_costs:
+        split_count = max(1, int(cost.split_count or 1))
+        amount = round(float(cost.amount or 0.0) / split_count, 2)
+        misc_total += amount
+        misc_items.append({
+            'cost_id': cost.id,
+            'title': cost.title,
+            'purchase_date': cost.purchase_date,
+            'status': cost.status,
+            'split_count': split_count,
+            'amount': amount,
+        })
+
+    total = round(booking_total + misc_total, 2)
+    return {
+        'user': user.to_dict(),
+        'month': month_value,
+        'booking_items': booking_items,
+        'misc_items': misc_items,
+        'booking_total': round(booking_total, 2),
+        'misc_total': round(misc_total, 2),
+        'total': total,
+    }
+
+
 def _availability_attendee_payload(user, attendees, default_status='available'):
     family_members = {
         member.id: member for member in FamilyMember.query.filter_by(user_id=user.id).all()
@@ -643,6 +730,20 @@ def update_booking(booking_id):
     return jsonify(booking.to_dict())
 
 
+@bookings_bp.route('/bookings/<int:booking_id>', methods=['DELETE'])
+def delete_booking(booking_id):
+    user, error = _require_admin()
+    if error:
+        return error
+
+    booking = Booking.query.get_or_404(booking_id)
+    Invoice.query.filter_by(booking_id=booking.id).delete()
+    BookingParticipant.query.filter_by(booking_id=booking.id).delete()
+    db.session.delete(booking)
+    db.session.commit()
+    return jsonify({'status': 'deleted', 'id': booking_id})
+
+
 @bookings_bp.route('/bookings', methods=['GET'])
 def list_bookings():
     _ensure_upcoming_booking_data()
@@ -916,6 +1017,34 @@ def delete_misc_cost(cost_id):
     db.session.delete(cost)
     db.session.commit()
     return jsonify({'status': 'deleted'})
+
+
+@bookings_bp.route('/invoices/monthly', methods=['GET'])
+def current_user_monthly_invoice():
+    user, error = _require_login()
+    if error:
+        return error
+
+    month_value = request.args.get('month') or datetime.utcnow().strftime('%Y-%m')
+    summary = _monthly_invoice_summary(user, month_value)
+    if not summary:
+        return jsonify({'error': 'month must use YYYY-MM'}), 400
+    return jsonify(summary)
+
+
+@bookings_bp.route('/admin/invoices/monthly', methods=['GET'])
+def admin_monthly_invoices():
+    user, error = _require_admin()
+    if error:
+        return error
+
+    month_value = request.args.get('month') or datetime.utcnow().strftime('%Y-%m')
+    start_date, _ = _month_bounds(month_value)
+    if not start_date:
+        return jsonify({'error': 'month must use YYYY-MM'}), 400
+    users = User.query.order_by(User.name.asc(), User.email.asc(), User.phone.asc()).all()
+    summaries = [_monthly_invoice_summary(item, month_value) for item in users]
+    return jsonify({'month': month_value, 'invoices': summaries})
 
 
 @bookings_bp.route('/admin/users', methods=['GET'])
@@ -1196,15 +1325,41 @@ def _send_whatsapp_bot_message(message, recipient=None):
     bot_url = os.environ.get('WHATSAPP_BOT_URL')
     if not bot_url:
         return 'skipped', 'WHATSAPP_BOT_URL is not configured'
+    headers = {}
+    bot_token = os.environ.get('WHATSAPP_BOT_TOKEN')
+    if bot_token:
+        headers['X-Bot-Token'] = bot_token
     try:
         response = requests.post(
             f"{bot_url.rstrip('/')}/send",
             json={'message': message, 'recipient': recipient},
+            headers=headers,
             timeout=5,
         )
         return ('sent' if response.ok else 'failed'), response.text[:1000]
     except Exception as exc:
         return 'failed', str(exc)
+
+
+def _list_whatsapp_bot_groups():
+    import os
+    import requests
+    bot_url = os.environ.get('WHATSAPP_BOT_URL')
+    if not bot_url:
+        return None, (jsonify({'error': 'whatsapp_bot_not_configured'}), 503)
+    headers = {}
+    bot_token = os.environ.get('WHATSAPP_BOT_TOKEN')
+    if bot_token:
+        headers['X-Bot-Token'] = bot_token
+    try:
+        response = requests.get(f"{bot_url.rstrip('/')}/groups", headers=headers, timeout=8)
+    except Exception as exc:
+        return None, (jsonify({'error': 'whatsapp_bot_unreachable', 'message': str(exc)}), 503)
+    if response.status_code == 503:
+        return None, (jsonify({'error': 'whatsapp_not_ready', 'message': 'Scan the WhatsApp QR code before listing groups.'}), 503)
+    if not response.ok:
+        return None, (jsonify({'error': 'whatsapp_bot_error', 'message': response.text[:1000]}), response.status_code)
+    return response.json(), None
 
 
 @bookings_bp.route('/admin/whatsapp-notifications', methods=['GET'])
@@ -1217,6 +1372,17 @@ def list_whatsapp_notifications():
     settings = WhatsAppNotificationSetting.query.order_by(WhatsAppNotificationSetting.title.asc()).all()
     logs = WhatsAppNotificationLog.query.order_by(WhatsAppNotificationLog.created_at.desc()).limit(10).all()
     return jsonify({'settings': [item.to_dict() for item in settings], 'logs': [item.to_dict() for item in logs]})
+
+
+@bookings_bp.route('/admin/whatsapp-groups', methods=['GET'])
+def list_whatsapp_groups():
+    user, error = _require_admin()
+    if error:
+        return error
+    data, bot_error = _list_whatsapp_bot_groups()
+    if bot_error:
+        return bot_error
+    return jsonify(data)
 
 
 @bookings_bp.route('/admin/whatsapp-notifications/<int:setting_id>', methods=['PUT'])

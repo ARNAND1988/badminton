@@ -39,6 +39,7 @@ services:
       FLASK_ENV: development
       AUTH_MOCK: "1"
       WHATSAPP_BOT_URL: http://whatsapp-bot:3000
+      WHATSAPP_BOT_TOKEN: ${WHATSAPP_BOT_TOKEN:-dev-whatsapp-bot-token}
     depends_on:
       postgres:
         condition: service_healthy
@@ -54,6 +55,7 @@ services:
     environment:
       WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
       WHATSAPP_SESSION_PATH: /data/session
+      WHATSAPP_BOT_TOKEN: ${WHATSAPP_BOT_TOKEN:-dev-whatsapp-bot-token}
     volumes:
       - whatsapp_bot_data:/data
     ports:

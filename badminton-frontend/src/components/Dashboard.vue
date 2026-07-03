@@ -97,11 +97,6 @@
               </div>
             </div>
 
-            <div v-if="isAdmin" class="mt-4 flex justify-end gap-2">
-              <button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit</button>
-              <button class="btn-purple" @click.stop="createInvoice(booking.id)">Invoice</button>
-            </div>
-
             <div v-if="isLoggedIn" class="mt-4 space-y-3 border-t border-slate-100 pt-4">
               <h4 class="text-sm font-semibold text-slate-900">Your family attendance</h4>
               <div v-for="person in familyAttendancePeople" :key="person.key" class="rounded border bg-white p-3">
@@ -124,54 +119,19 @@
               </div>
             </div>
 
-            <div v-if="isAdmin" class="mt-4 space-y-3 border-t border-slate-100 pt-4">
-              <h4 class="text-sm font-semibold text-slate-900">Attendance</h4>
-              <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1fr_1fr_auto]">
-                <input v-model="participant.name" class="form-input" placeholder="Name" />
-                <select v-model="participant.status" class="form-input">
-                  <option value="attending">Attending</option>
-                  <option value="not_attending">Not attending</option>
-                  <option value="tentative">Tentative</option>
-                </select>
-                <button class="btn-secondary" @click.stop="updateParticipant(booking, participant)">Save</button>
-              </div>
-              <div class="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
-                <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="Ad hoc name" />
-                <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" />
-                <select v-model="newParticipantStatus[booking.id]" class="form-input">
-                  <option value="attending">Attending</option>
-                  <option value="not_attending">Not attending</option>
-                  <option value="tentative">Tentative</option>
-                </select>
-                <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
-              </div>
-            </div>
           </article>
         </div>
         <p v-if="!upcomingBookings.length && !loading" class="p-3 text-sm text-slate-600">No upcoming bookings found.</p>
       </div>
+    </section>
 
-      <div v-if="isAdmin" class="space-y-4">
-        <div class="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
-          <button
-            type="button"
-            class="rounded-md px-4 py-2 text-sm font-semibold transition"
-            :class="adminBookingTab === 'bookings' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
-            @click="adminBookingTab = 'bookings'"
-          >
-            Manage bookings
-          </button>
-          <button
-            type="button"
-            class="rounded-md px-4 py-2 text-sm font-semibold transition"
-            :class="adminBookingTab === 'courts' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'"
-            @click="adminBookingTab = 'courts'"
-          >
-            Manage courts
-          </button>
-        </div>
+    <section v-if="activeView === 'admin-bookings'" class="space-y-6">
+      <div>
+        <h2 class="section-title">Manage Bookings</h2>
+        <p class="section-copy mt-1">Create court bookings, update attendance, and generate per-booking invoices.</p>
+      </div>
 
-        <div v-if="adminBookingTab === 'bookings'" class="panel-card p-4 sm:p-5">
+      <div class="panel-card p-4 sm:p-5">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div class="min-w-0">
               <h3 class="text-base font-semibold sm:text-lg">{{ editingBookingId ? 'Edit booking' : 'Create booking' }}</h3>
@@ -230,40 +190,84 @@
           <div class="mt-3 flex justify-end">
             <button class="btn-primary w-full sm:w-auto" @click="saveBooking">{{ editingBookingId ? 'Update booking' : 'Create booking' }}</button>
           </div>
+      </div>
+
+      <div class="grid gap-4 lg:grid-cols-2">
+        <article v-for="booking in upcomingBookings" :key="booking.id" class="sub-card space-y-4 p-4">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h3>
+              <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
+            </div>
+            <div class="flex gap-2">
+              <button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit</button>
+              <button class="btn-purple" @click.stop="createInvoice(booking.id)">Invoice</button>
+              <button class="btn-muted" @click.stop="deleteBooking(booking)">Delete</button>
+            </div>
+          </div>
+          <div class="space-y-3 border-t border-slate-100 pt-4">
+            <h4 class="text-sm font-semibold text-slate-900">Attendance</h4>
+            <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1fr_1fr_auto]">
+              <input v-model="participant.name" class="form-input" placeholder="Name" />
+              <select v-model="participant.status" class="form-input">
+                <option value="attending">Attending</option>
+                <option value="not_attending">Not attending</option>
+                <option value="tentative">Tentative</option>
+              </select>
+              <button class="btn-secondary" @click.stop="updateParticipant(booking, participant)">Save</button>
+            </div>
+            <div class="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+              <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="Ad hoc name" />
+              <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" />
+              <select v-model="newParticipantStatus[booking.id]" class="form-input">
+                <option value="attending">Attending</option>
+                <option value="not_attending">Not attending</option>
+                <option value="tentative">Tentative</option>
+              </select>
+              <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section v-if="activeView === 'admin-courts'" class="space-y-6">
+      <div>
+        <h2 class="section-title">Manage Courts</h2>
+        <p class="section-copy mt-1">Maintain courts, locations, map links, and hourly rates.</p>
+      </div>
+
+      <div class="grid gap-6 lg:grid-cols-2">
+        <div class="panel-card">
+          <h3 class="mb-3 text-lg font-semibold">Add court</h3>
+          <div class="space-y-3">
+            <input v-model="newCourtName" placeholder="Court name" class="form-input" />
+            <input v-model="newCourtLocation" placeholder="Location" class="form-input" />
+            <input v-model="newCourtMapLink" placeholder="Google Maps link" class="form-input" />
+            <input v-model="newCourtDescription" placeholder="Description" class="form-input" />
+            <input v-model="newCourtRate" type="number" min="0" step="0.01" placeholder="Hourly rate" class="form-input" />
+            <button class="btn-dark w-full" @click="createCourt">Add court</button>
+          </div>
         </div>
 
-        <div v-if="adminBookingTab === 'courts'" class="grid gap-6 lg:grid-cols-2">
-          <div class="panel-card">
-            <h3 class="mb-3 text-lg font-semibold">Add court</h3>
-            <div class="space-y-3">
-              <input v-model="newCourtName" placeholder="Court name" class="form-input" />
-              <input v-model="newCourtLocation" placeholder="📍 Location" class="form-input" />
-              <input v-model="newCourtMapLink" placeholder="🗺️ Google Maps link" class="form-input" />
-              <input v-model="newCourtDescription" placeholder="📝 Description" class="form-input" />
-              <input v-model="newCourtRate" type="number" min="0" step="0.01" placeholder="Hourly rate" class="form-input" />
-              <button class="btn-dark w-full" @click="createCourt">Add court</button>
-            </div>
+        <div class="panel-card">
+          <h3 class="mb-3 text-lg font-semibold">Courts</h3>
+          <div class="space-y-3">
+            <article v-for="court in courts" :key="court.id" class="sub-card space-y-3">
+              <div class="grid gap-2">
+                <input v-model="court.name" class="form-input" />
+                <input v-model="court.location" class="form-input" placeholder="Location" />
+                <input v-model="court.map_link" class="form-input" placeholder="Google Maps link" />
+                <input v-model="court.description" class="form-input" placeholder="Description" />
+                <input v-model.number="court.hourly_rate" type="number" min="0" step="0.01" class="form-input" />
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <button class="btn-secondary" @click="updateCourt(court)">Save</button>
+                <button class="btn-muted" @click="deleteCourt(court)">Delete</button>
+              </div>
+            </article>
           </div>
-
-          <div class="panel-card">
-            <h3 class="mb-3 text-lg font-semibold">Courts</h3>
-            <div class="space-y-3">
-              <article v-for="court in courts" :key="court.id" class="sub-card space-y-3">
-                <div class="grid gap-2">
-                  <input v-model="court.name" class="form-input" />
-                  <input v-model="court.location" class="form-input" placeholder="📍 Location" />
-                  <input v-model="court.map_link" class="form-input" placeholder="🗺️ Google Maps link" />
-                  <input v-model="court.description" class="form-input" placeholder="📝 Description" />
-                  <input v-model.number="court.hourly_rate" type="number" min="0" step="0.01" class="form-input" />
-                </div>
-                <div class="grid grid-cols-2 gap-2">
-                  <button class="btn-secondary" @click="updateCourt(court)">Save</button>
-                  <button class="btn-muted" @click="deleteCourt(court)">Delete</button>
-                </div>
-              </article>
-            </div>
-            <p v-if="!courts.length && !loading" class="text-sm text-slate-600">No courts found.</p>
-          </div>
+          <p v-if="!courts.length && !loading" class="text-sm text-slate-600">No courts found.</p>
         </div>
       </div>
     </section>
@@ -355,21 +359,35 @@
 
     <section v-if="activeView === 'costs'" class="space-y-6">
       <div>
-        <h2 class="section-title">Misc Costs</h2>
-        <p class="section-copy mt-1">Track rackets, shuttles, grips, and other shared badminton expenses.</p>
+        <h2 class="section-title">My Invoices</h2>
+        <p class="section-copy mt-1">Review shared expenses and your portion of completed court booking invoices.</p>
       </div>
 
-      <div v-if="isAdmin" class="panel-card">
-        <h3 class="mb-3 text-lg font-semibold">Add shared cost</h3>
-        <div class="grid gap-3 md:grid-cols-2">
-          <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
-          <input v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
-          <input v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
-          <input v-model="newMiscPurchaseDate" type="date" class="form-input" />
-          <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" />
-          <input v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
+      <div class="panel-card">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Monthly summary</h3>
+            <p class="section-copy">Your booking and shared-cost total for the selected month.</p>
+          </div>
+          <label class="block sm:w-48">
+            <span class="form-label">Month</span>
+            <input v-model="monthlyInvoiceMonth" type="month" class="form-input" @change="loadMonthlyInvoice" />
+          </label>
         </div>
-        <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
+        <div v-if="monthlyInvoice" class="mt-4 grid gap-3 sm:grid-cols-3">
+          <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
+            <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Bookings</div>
+            <div class="mt-1 text-2xl font-bold text-indigo-900">€{{ monthlyInvoice.booking_total }}</div>
+          </div>
+          <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
+            <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Shared Costs</div>
+            <div class="mt-1 text-2xl font-bold text-emerald-900">€{{ monthlyInvoice.misc_total }}</div>
+          </div>
+          <div class="rounded border border-slate-200 bg-slate-50 p-3">
+            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total</div>
+            <div class="mt-1 text-2xl font-bold text-slate-900">€{{ monthlyInvoice.total }}</div>
+          </div>
+        </div>
       </div>
 
       <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -388,21 +406,6 @@
             Paid by {{ cost.paid_by || 'Not set' }} · {{ cost.purchase_date || 'No purchase date' }} · {{ cost.status }}
           </p>
 
-          <div v-if="isAdmin" class="space-y-2 border-t border-slate-100 pt-3">
-            <input v-model="cost.title" class="form-input" />
-            <input v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
-            <input v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
-            <input v-model="cost.purchase_date" type="date" class="form-input" />
-            <input v-model.number="cost.split_count" type="number" min="1" class="form-input" />
-            <select v-model="cost.status" class="form-input">
-              <option value="open">Open</option>
-              <option value="settled">Settled</option>
-            </select>
-            <div class="grid grid-cols-2 gap-2">
-              <button class="btn-secondary" @click="updateMiscCost(cost)">Save</button>
-              <button class="btn-muted" @click="deleteMiscCost(cost)">Delete</button>
-            </div>
-          </div>
         </article>
       </div>
 
@@ -458,10 +461,6 @@
               <p v-if="!booking.cost_split.attended_count" class="text-sm text-slate-600">No attending players recorded.</p>
             </div>
 
-            <div v-if="isAdmin" class="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
-              <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
-              <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
-            </div>
             </div>
           </article>
         </div>
@@ -474,6 +473,76 @@
           </div>
         </div>
         <p v-if="!completedBookings.length && !loading" class="text-sm text-slate-600">No completed bookings to settle yet.</p>
+      </div>
+    </section>
+
+    <section v-if="activeView === 'admin-costs'" class="space-y-6">
+      <div>
+        <h2 class="section-title">Split Costs</h2>
+        <p class="section-copy mt-1">Create and maintain shared expenses, then settle completed court booking invoices.</p>
+      </div>
+
+      <div class="panel-card">
+        <h3 class="mb-3 text-lg font-semibold">Add shared cost</h3>
+        <div class="grid gap-3 md:grid-cols-2">
+          <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
+          <input v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
+          <input v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
+          <input v-model="newMiscPurchaseDate" type="date" class="form-input" />
+          <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" />
+          <input v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
+        </div>
+        <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
+      </div>
+
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <article v-for="cost in miscCosts" :key="cost.id" class="sub-card space-y-3 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
+              <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
+            </div>
+            <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
+          </div>
+          <div class="space-y-2 border-t border-slate-100 pt-3">
+            <input v-model="cost.title" class="form-input" />
+            <input v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
+            <input v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
+            <input v-model="cost.purchase_date" type="date" class="form-input" />
+            <input v-model.number="cost.split_count" type="number" min="1" class="form-input" />
+            <select v-model="cost.status" class="form-input">
+              <option value="open">Open</option>
+              <option value="settled">Settled</option>
+            </select>
+            <div class="grid grid-cols-2 gap-2">
+              <button class="btn-secondary" @click="updateMiscCost(cost)">Save</button>
+              <button class="btn-muted" @click="deleteMiscCost(cost)">Delete</button>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <div class="mt-8 space-y-4">
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
+          <p class="section-copy">Generate or settle booking invoices based on attending members.</p>
+        </div>
+        <div class="grid gap-4 lg:grid-cols-2">
+          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
+                <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ booking.invoice?.status || 'Not started' }}</p>
+              </div>
+              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
+            </div>
+            <div class="mt-3 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
+              <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
+              <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
+            </div>
+          </article>
+        </div>
       </div>
     </section>
 
@@ -660,6 +729,8 @@ export default {
     const adminUsers = ref([])
     const playDays = ref([])
     const miscCosts = ref([])
+    const monthlyInvoice = ref(null)
+    const monthlyInvoiceMonth = ref(new Date().toISOString().slice(0, 7))
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
     const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
@@ -806,6 +877,10 @@ export default {
         available_attendees: [],
         tentative_attendees: []
       }
+    }
+
+    function completedInvoiceViewActive() {
+      return activeView.value === 'costs' || activeView.value === 'admin-costs'
     }
 
     function planningNames(booking, status) {
@@ -980,6 +1055,11 @@ export default {
       miscCosts.value = data.costs || []
     }
 
+    async function loadMonthlyInvoice() {
+      const data = await fetchJson(`/api/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
+      monthlyInvoice.value = data
+    }
+
     async function loadAdminUsers() {
       const data = await fetchJson('/api/admin/users')
       adminUsers.value = data.users || []
@@ -1005,7 +1085,7 @@ export default {
       const data = await fetchJson(`/api/admin/whatsapp-notifications/${setting.id}/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({ recipient: setting.group_id || '' })
       })
       msg.value = `Test prepared: ${data.log.status}`
       await loadWhatsAppNotifications()
@@ -1039,6 +1119,44 @@ export default {
         } else if (activeView.value === 'costs') {
           if (!loggedIn) {
             router.push('/login')
+            return
+          }
+          await Promise.all([
+            loadMiscCosts(),
+            loadMonthlyInvoice(),
+            loadBookings({ status: 'completed', page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
+          ])
+        } else if (activeView.value === 'admin-bookings') {
+          if (!loggedIn) {
+            router.push('/login')
+            return
+          }
+          if (!isAdmin.value) {
+            errorMsg.value = 'Admin access is required.'
+            return
+          }
+          await Promise.all([
+            loadBookings({ status: 'upcoming', perPage: 100 }),
+            loadPlayAvailability(),
+            loadCourts()
+          ])
+        } else if (activeView.value === 'admin-courts') {
+          if (!loggedIn) {
+            router.push('/login')
+            return
+          }
+          if (!isAdmin.value) {
+            errorMsg.value = 'Admin access is required.'
+            return
+          }
+          await loadCourts()
+        } else if (activeView.value === 'admin-costs') {
+          if (!loggedIn) {
+            router.push('/login')
+            return
+          }
+          if (!isAdmin.value) {
+            errorMsg.value = 'Admin access is required.'
             return
           }
           await Promise.all([
@@ -1237,11 +1355,29 @@ export default {
       }
     }
 
+    async function deleteBooking(booking) {
+      const label = `${booking.court?.name || 'booking'} on ${booking.booking_date} ${booking.start_time}-${booking.end_time}`
+      if (!window.confirm(`Delete ${label}? This will also remove its participants and invoice.`)) {
+        return
+      }
+      try {
+        await fetchJson(`/api/bookings/${booking.id}`, { method: 'DELETE' })
+        msg.value = 'Booking deleted successfully.'
+        if (editingBookingId.value === booking.id) resetBookingForm()
+        await loadBookings({ status: 'upcoming', perPage: 100 })
+        if (activeView.value === 'admin-costs') {
+          await loadCompletedBookings()
+        }
+      } catch (err) {
+        msg.value = err.message
+      }
+    }
+
     async function createInvoice(bookingId) {
       try {
         const data = await fetchJson(`/api/bookings/${bookingId}/invoice`, { method: 'POST' })
         msg.value = `Invoice generated: €${data.total_amount}`
-        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1255,7 +1391,7 @@ export default {
           body: JSON.stringify({ status })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1275,7 +1411,7 @@ export default {
           })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1295,7 +1431,7 @@ export default {
         newParticipantPhone.value[booking.id] = ''
         newParticipantStatus.value[booking.id] = 'attending'
         msg.value = 'Participant added.'
-        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1309,7 +1445,7 @@ export default {
           body: JSON.stringify(participant)
         })
         msg.value = 'Participant updated.'
-        await loadBookings({ status: activeView.value === 'costs' ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: activeView.value === 'costs' ? completedBookingPagination.value.per_page : 100 })
+        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1572,6 +1708,8 @@ export default {
       familyAttendancePeople,
       availabilityPeople,
       miscCosts,
+      monthlyInvoice,
+      monthlyInvoiceMonth,
       whatsappSettings,
       whatsappLogs,
       isLoggedIn,
@@ -1623,8 +1761,10 @@ export default {
       deleteCourt,
       deleteAdminFamilyMember,
       deleteAdminUser,
+      deleteBooking,
       deleteFamilyMember,
       deleteMiscCost,
+      loadMonthlyInvoice,
       loadPlayAvailability,
       loadWhatsAppNotifications,
       familyPersonBookingStatus,

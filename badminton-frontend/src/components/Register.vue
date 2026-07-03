@@ -104,7 +104,7 @@
 
 <script>
 import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { notifyAuthChanged, setSessionValue } from '../authSession'
 
 export default {
@@ -118,6 +118,7 @@ export default {
     const hasError = ref(false)
     const isSubmitting = ref(false)
     const rememberMe = ref(true)
+    const route = useRoute()
     const router = useRouter()
 
     const messageClass = computed(() => {
@@ -175,7 +176,10 @@ export default {
         if (res.ok) {
           saveSession(data)
           msg.value = isRegister ? 'Account created.' : 'Logged in.'
-          setTimeout(() => router.push('/dashboard'), 400)
+          const redirect = typeof route.query.redirect === 'string' && route.query.redirect !== '/login'
+            ? route.query.redirect
+            : '/availability'
+          await router.replace(redirect)
         } else {
           hasError.value = true
           msg.value = readableError(data.error, isRegister)

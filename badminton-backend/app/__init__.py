@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify, redirect, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -54,13 +54,45 @@ def create_app():
 
     from app.auth import auth_bp
     from app.bookings import bookings_bp
+    from app.docs import docs_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(bookings_bp, url_prefix='/api')
+    app.register_blueprint(docs_bp, url_prefix='/api')
 
     @app.route("/api/health")
     def health():
         return {"status": "ok"}
+
+    @app.route("/docs")
+    @app.route("/swagger")
+    @app.route("/swagger/")
+    def docs_redirect():
+        return redirect("/api/docs")
+
+    @app.route("/openapi.json")
+    @app.route("/swagger.json")
+    def openapi_redirect():
+        return redirect("/api/openapi.json")
+
+    @app.errorhandler(404)
+    def not_found(error):
+        if request.path.startswith('/api/'):
+            return jsonify({
+                'error': 'not_found',
+                'message': 'This API endpoint is not supported. Open /api/docs for available endpoints.',
+            }), 404
+        return (
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<title>Page not found</title>'
+            '<style>body{font-family:system-ui,sans-serif;margin:0;background:#064e3b;color:#0f172a;}'
+            'main{max-width:720px;margin:10vh auto;padding:32px;border-radius:16px;background:white;box-shadow:0 24px 80px rgba(15,23,42,.25);}'
+            'a{color:#047857;font-weight:700;text-decoration:none;}</style></head>'
+            '<body><main><p style="font-weight:800;letter-spacing:.18em;color:#047857">404</p>'
+            '<h1>Page not found</h1><p>This page is not supported by the badminton service.</p>'
+            '<p><a href="/docs">Open API docs</a></p></main></body></html>'
+        ), 404
 
     with app.app_context():
         db.create_all()

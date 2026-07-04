@@ -153,7 +153,7 @@
             <div v-if="isCompletedBookingOpen(booking.id)" class="space-y-4 border-t border-slate-100 p-4">
             <div class="grid gap-2 sm:grid-cols-3">
               <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
-                <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Attending</div>
+                <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Participated</div>
                 <div class="mt-1 text-xl font-bold text-emerald-900">{{ booking.cost_split.attended_count }}</div>
               </div>
               <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
@@ -173,9 +173,9 @@
                 class="flex items-center justify-between rounded border bg-white px-3 py-2 text-sm"
               >
                 <span class="font-medium text-slate-800">{{ participantName(participant) }}</span>
-                <span class="text-slate-500">Attending</span>
+                <span class="text-slate-500">{{ participantCompletedStatusLabel(participant) }}</span>
               </div>
-              <p v-if="!booking.cost_split.attended_count" class="text-sm text-slate-600">No attending players recorded.</p>
+              <p v-if="!booking.cost_split.attended_count" class="text-sm text-slate-600">No participated players recorded.</p>
             </div>
 
             </div>
@@ -238,6 +238,8 @@
               <select v-model="bookingStatus" class="form-input">
                 <option value="confirmed">Confirmed</option>
                 <option value="completed">Completed</option>
+                <option value="generated">Completed · Generated</option>
+                <option value="settled">Completed · Settled</option>
                 <option value="cancelled">Cancelled</option>
               </select>
             </div>
@@ -291,7 +293,6 @@
             <div v-if="isBookingOpen(booking.id)" class="space-y-3 border-t border-slate-100 p-4">
               <div class="flex flex-wrap justify-end gap-2">
                 <button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit booking details</button>
-                <button class="btn-purple" @click.stop="createInvoice(booking.id)">Invoice</button>
                 <button class="btn-muted" @click.stop="deleteBooking(booking)">Delete</button>
               </div>
 
@@ -344,7 +345,7 @@
               <div>
                 <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
                 <p class="text-sm text-slate-600">{{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
-                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ bookingStatusSummary(booking) }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} participated · €{{ booking.cost_split.cost_per_person }} each · {{ bookingStatusSummary(booking) }}</p>
               </div>
               <div class="flex items-center gap-2">
                 <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
@@ -383,10 +384,6 @@
                   <option value="tentative">Tentative</option>
                 </select>
                 <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
-              </div>
-              <div class="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
-                <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
-                <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
               </div>
             </div>
           </article>
@@ -596,9 +593,37 @@
 
           <div v-if="invoiceDetailTab === 'booking'" class="space-y-2 text-sm">
             <h4 class="font-semibold text-slate-900">Booking cost details</h4>
-            <div v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="flex flex-col justify-between gap-1 rounded bg-indigo-50 px-3 py-2 sm:flex-row">
-              <span>{{ item.date }} · {{ item.court }} · {{ item.start_time }}-{{ item.end_time }} · {{ item.total_people_played }} players · {{ bookingItemStatusSummary(item) }}</span>
-              <span class="font-semibold">Your share €{{ item.amount }}</span>
+            <div v-if="monthlyInvoice.booking_items?.length" class="overflow-x-auto rounded border border-slate-200">
+              <table class="min-w-[760px] divide-y divide-slate-200 text-sm sm:min-w-full">
+                <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-3 py-2">Booking</th>
+                    <th class="px-3 py-2">Players</th>
+                    <th class="px-3 py-2">Total cost</th>
+                    <th class="px-3 py-2">Each</th>
+                    <th class="px-3 py-2">Status</th>
+                    <th class="px-3 py-2 text-right">Your share</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                  <tr v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="align-top">
+                    <td class="px-3 py-2 font-medium text-slate-900">
+                      {{ item.date }}
+                      <div class="text-xs font-normal text-slate-500">{{ item.court }} · {{ item.start_time }}-{{ item.end_time }}</div>
+                    </td>
+                    <td class="px-3 py-2">
+                      {{ item.total_people_played }}
+                      <div v-if="item.participants?.length" class="max-w-48 truncate text-xs text-slate-500">{{ item.participants.join(', ') }}</div>
+                    </td>
+                    <td class="px-3 py-2">€{{ item.total_cost }}</td>
+                    <td class="px-3 py-2">€{{ item.cost_per_person }}</td>
+                    <td class="px-3 py-2">
+                      <span class="inline-flex rounded-full bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">{{ bookingItemStatusSummary(item) }}</span>
+                    </td>
+                    <td class="px-3 py-2 text-right font-semibold text-slate-900">€{{ item.amount }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
             <p v-if="!monthlyInvoice.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
           </div>
@@ -743,7 +768,7 @@
               <div>
                 <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
                 <p class="text-sm text-slate-600">{{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
-                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ bookingStatusSummary(booking) }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} participated · €{{ booking.cost_split.cost_per_person }} each · {{ bookingStatusSummary(booking) }}</p>
               </div>
               <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
             </div>
@@ -1180,8 +1205,11 @@ export default {
     }
 
     function bookingLifecycleStatus(booking) {
-      if (booking?.invoice?.status === 'settled') return 'Settled'
-      return statusLabel(booking?.status, 'Created')
+      const bookingLabel = statusLabel(booking?.status, 'Created')
+      const invoiceStatus = booking?.invoice?.status
+      if (invoiceStatus === 'settled') return `${bookingLabel} · Settled`
+      if (invoiceStatus === 'generated') return `${bookingLabel} · Generated`
+      return bookingLabel
     }
 
     function bookingStatusSummary(booking) {
@@ -1189,8 +1217,10 @@ export default {
     }
 
     function bookingItemStatusSummary(item) {
-      if (item?.invoice_status === 'settled') return 'Settled'
-      return statusLabel(item?.booking_status, 'Completed')
+      const bookingLabel = statusLabel(item?.booking_status, 'Completed')
+      if (item?.invoice_status === 'settled') return `${bookingLabel} · Settled`
+      if (item?.invoice_status === 'generated') return `${bookingLabel} · Generated`
+      return bookingLabel
     }
 
     function isBookingOpen(bookingId) {
@@ -1223,6 +1253,10 @@ export default {
         else counts.tentative += 1
         return counts
       }, { attending: 0, not_attending: 0, tentative: 0 })
+    }
+
+    function participantCompletedStatusLabel(participant) {
+      return participant?.status === 'participated' ? 'Participated' : statusLabel(participant?.status, 'Participated')
     }
 
     function participantName(participant) {
@@ -1727,7 +1761,7 @@ export default {
       startTime.value = booking.start_time
       endTime.value = booking.end_time
       bookingCost.value = String(booking.cost || 0)
-      bookingStatus.value = booking.status || 'confirmed'
+      bookingStatus.value = ['generated', 'settled'].includes(booking.invoice?.status) ? booking.invoice.status : (booking.status || 'confirmed')
       bookingNotes.value = booking.notes || ''
       recurringMode.value = false
       msg.value = ''
@@ -2263,6 +2297,7 @@ export default {
       toggleBooking,
       isCompletedBookingOpen,
       toggleCompletedBooking,
+      participantCompletedStatusLabel,
       loading,
       errorMsg,
       msg,
@@ -2316,7 +2351,6 @@ export default {
       changeArchivedBookingPage,
       changeCompletedBookingPage,
       createFamilyMember,
-      createInvoice,
       createMiscCost,
       closeVerificationDetails,
       deleteCourt,
@@ -2348,7 +2382,6 @@ export default {
       testWhatsAppNotification,
       setAvailabilityPersonStatus,
       startEditBooking,
-      settleBookingCost,
       showVerificationDetails,
       updateCourt,
       updateFreezePeriod,

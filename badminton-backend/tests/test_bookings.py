@@ -94,6 +94,79 @@ def test_completed_booking_update_converts_attending_members_to_participated(cli
     assert data['status'] == 'completed'
     assert data['participants'][0]['status'] == 'participated'
 
+
+def test_completed_booking_participant_write_normalizes_attending_to_participated(client, app):
+    with app.app_context():
+        admin = User(phone='+31100002002', email='completed-write-admin@example.com', name='Completed Write Admin', role='admin')
+        court = Court(name='Completed Write Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([admin, court])
+        db.session.commit()
+        booking = Booking(court_id=court.id, booking_date='2030-06-02', start_time='18:00', end_time='19:00', cost=20, status='completed')
+        db.session.add(booking)
+        db.session.commit()
+        participant = BookingParticipant(booking_id=booking.id, phone='player-2', name='Player Two', status='tentative')
+        db.session.add(participant)
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        booking_id = booking.id
+        participant_id = participant.id
+
+    headers = {'Authorization': f'Bearer {token}'}
+    update_resp = client.put(f'/api/bookings/{booking_id}/participants/{participant_id}', json={
+        'name': 'Player Two',
+        'phone': 'player-2',
+        'status': 'attending',
+    }, headers=headers)
+
+    assert update_resp.status_code == 200
+    assert update_resp.get_json()['status'] == 'participated'
+
+    add_resp = client.post(f'/api/bookings/{booking_id}/participants', json={
+        'name': 'Player Three',
+        'phone': 'player-3',
+        'status': 'attending',
+    }, headers=headers)
+
+    assert add_resp.status_code == 200
+    assert add_resp.get_json()['status'] == 'participated'
+
+
+def test_update_booking_status_dropdown_can_generate_and_settle_invoice(client, app):
+    with app.app_context():
+        admin = User(phone='+31100002003', email='status-invoice-admin@example.com', name='Status Invoice Admin', role='admin')
+        court = Court(name='Status Invoice Court', hourly_rate=30.0, is_active=True)
+        db.session.add_all([admin, court])
+        db.session.commit()
+        booking = Booking(court_id=court.id, booking_date='2030-06-03', start_time='18:00', end_time='19:00', cost=30, status='confirmed')
+        db.session.add(booking)
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        booking_id = booking.id
+        court_id = court.id
+
+    headers = {'Authorization': f'Bearer {token}'}
+    payload = {
+        'court_id': court_id,
+        'booking_date': '2030-06-03',
+        'start_time': '18:00',
+        'end_time': '19:00',
+        'status': 'generated',
+    }
+    generated_resp = client.put(f'/api/bookings/{booking_id}', json=payload, headers=headers)
+
+    assert generated_resp.status_code == 200
+    generated_data = generated_resp.get_json()
+    assert generated_data['status'] == 'completed'
+    assert generated_data['invoice']['status'] == 'generated'
+
+    payload['status'] = 'settled'
+    settled_resp = client.put(f'/api/bookings/{booking_id}', json=payload, headers=headers)
+
+    assert settled_resp.status_code == 200
+    settled_data = settled_resp.get_json()
+    assert settled_data['status'] == 'completed'
+    assert settled_data['invoice']['status'] == 'settled'
+
 def test_admin_can_delete_booking_with_participants_invoice_and_cancel_notification(client, app, monkeypatch):
     import app.bookings as bookings_module
 

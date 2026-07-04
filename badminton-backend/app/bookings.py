@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request, current_app
 import jwt
 
 from . import db
-from .models import Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, rounded_up_cost_split
+from .models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, rounded_up_cost_split
 
 bookings_bp = Blueprint('bookings', __name__)
 
@@ -42,6 +42,34 @@ def _require_admin():
         return None, (jsonify({'error': 'admin_required'}), 403)
     return user, None
 
+
+
+def _public_user_label(user):
+    return user.name or user.email or user.phone or f'User {user.id}'
+
+
+def _snapshot_fields(obj, fields):
+    return {field: getattr(obj, field, None) for field in fields}
+
+
+def _changed_fields(before, after):
+    return {key: {'from': before.get(key), 'to': after.get(key)} for key in before if before.get(key) != after.get(key)}
+
+
+def _record_admin_audit(user, event_type, entity_type, entity_id=None, summary='', details=None):
+    log = AdminAuditLog(
+        admin_user_id=user.id if user else None,
+        admin_name=user.name if user else None,
+        admin_email=user.email if user else None,
+        admin_phone=user.phone if user else None,
+        event_type=event_type,
+        entity_type=entity_type,
+        entity_id=str(entity_id) if entity_id is not None else None,
+        summary=summary[:512] if summary else f'{event_type} {entity_type}',
+        details=json.dumps(details or {}, sort_keys=True),
+    )
+    db.session.add(log)
+    return log
 
 def _next_dates(count=7):
     today = datetime.utcnow().date()
@@ -554,7 +582,6 @@ def _ensure_historical_booking_data():
         invoice.total_amount = cost
         invoice.split_count = 1
         invoice.status = 'settled'
-    booking.status = 'settled'
     db.session.commit()
 
 
@@ -626,6 +653,10 @@ def create_family_member():
         name=name,
     )
     db.session.add(member)
+    after = _snapshot_fields(member, ['name', 'relationship', 'is_club_member'])
+    changes = _changed_fields(before, after)
+    if changes:
+        _record_admin_audit(user, 'update', 'family_member', member.id, f'Updated family member {member.name}', {'changes': changes})
     db.session.commit()
     return jsonify(member.to_dict())
 
@@ -864,6 +895,8 @@ def create_booking():
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 409
 
+    for booking in created_bookings:
+        _record_admin_audit(user, 'create', 'booking', booking.id, f'Created booking for {booking.court.name if booking.court else booking.court_id} on {booking.booking_date}', {'booking': booking.to_dict()})
     db.session.commit()
     for booking in created_bookings:
         _send_whatsapp_event('booking_created', _booking_notification_context(booking))
@@ -881,6 +914,7 @@ def update_booking(booking_id):
     if archived_error:
         return archived_error
     data = request.get_json() or {}
+    before = _snapshot_fields(booking, ['court_id', 'booking_date', 'start_time', 'end_time', 'cost', 'notes', 'status'])
 
     court_id = data.get('court_id', booking.court_id)
     booking_date = data.get('booking_date', booking.booking_date)
@@ -921,6 +955,10 @@ def update_booking(booking_id):
             db.session.add(invoice)
         invoice.status = 'settled'
     _sync_booking_invoice(booking)
+    after = _snapshot_fields(booking, ['court_id', 'booking_date', 'start_time', 'end_time', 'cost', 'notes', 'status'])
+    changes = _changed_fields(before, after)
+    if changes:
+        _record_admin_audit(user, 'update', 'booking', booking.id, f'Updated booking {booking.id}', {'changes': changes})
     db.session.commit()
 
     return jsonify(booking.to_dict())
@@ -936,7 +974,9 @@ def delete_booking(booking_id):
     archived_error = _archived_booking_response(booking)
     if archived_error:
         return archived_error
+    booking_snapshot = booking.to_dict()
     _send_whatsapp_event('booking_cancelled', _booking_notification_context(booking))
+    _record_admin_audit(user, 'delete', 'booking', booking.id, f'Deleted booking {booking.id}', {'booking': booking_snapshot})
     Invoice.query.filter_by(booking_id=booking.id).delete()
     BookingParticipant.query.filter_by(booking_id=booking.id).delete()
     db.session.delete(booking)
@@ -1176,6 +1216,7 @@ def generate_invoice(booking_id):
     invoice.total_amount = total_amount
     invoice.split_count = max(1, attended_count or 1)
     invoice.status = invoice.status if invoice.status == 'settled' else 'generated'
+    _record_admin_audit(user, 'create', 'invoice', invoice.booking_id, f'Generated invoice for booking {booking.id}', {'invoice': invoice.to_dict()})
     db.session.commit()
     return jsonify(invoice.to_dict())
 
@@ -1199,6 +1240,7 @@ def settle_booking_cost(booking_id):
     invoice.split_count = max(1, attended_count or 1)
     invoice.status = 'settled'
     booking.status = 'settled'
+    _record_admin_audit(user, 'settle', 'booking', booking.id, f'Settled booking cost for booking {booking.id}', {'invoice': invoice.to_dict()})
     db.session.commit()
     return jsonify(invoice.to_dict())
 
@@ -1240,6 +1282,8 @@ def create_misc_cost():
         status=data.get('status', 'open') or 'open',
     )
     db.session.add(cost)
+    db.session.flush()
+    _record_admin_audit(user, 'create', 'misc_cost', cost.id, f'Created shared cost {cost.title}', {'cost': cost.to_dict()})
     db.session.commit()
     return jsonify(cost.to_dict())
 
@@ -1251,6 +1295,7 @@ def update_misc_cost(cost_id):
         return error
 
     cost = MiscCost.query.get_or_404(cost_id)
+    before = _snapshot_fields(cost, ['title', 'description', 'amount', 'paid_by', 'purchase_date', 'split_count', 'status'])
     data = request.get_json() or {}
     title = (data.get('title', cost.title) or '').strip()
     if not title:
@@ -1263,6 +1308,10 @@ def update_misc_cost(cost_id):
     cost.purchase_date = (data.get('purchase_date', cost.purchase_date) or '').strip() or None
     cost.split_count = max(1, int(data.get('split_count', cost.split_count) or 1))
     cost.status = data.get('status', cost.status) or 'open'
+    after = _snapshot_fields(cost, ['title', 'description', 'amount', 'paid_by', 'purchase_date', 'split_count', 'status'])
+    changes = _changed_fields(before, after)
+    if changes:
+        _record_admin_audit(user, 'update', 'misc_cost', cost.id, f'Updated shared cost {cost.title}', {'changes': changes})
     db.session.commit()
     return jsonify(cost.to_dict())
 
@@ -1274,6 +1323,8 @@ def delete_misc_cost(cost_id):
         return error
 
     cost = MiscCost.query.get_or_404(cost_id)
+    cost_snapshot = cost.to_dict()
+    _record_admin_audit(user, 'delete', 'misc_cost', cost.id, f'Deleted shared cost {cost.title}', {'cost': cost_snapshot})
     db.session.delete(cost)
     db.session.commit()
     return jsonify({'status': 'deleted'})
@@ -1460,6 +1511,8 @@ def create_admin_user():
             is_club_member=bool(data.get('is_club_member', False))
         )
         db.session.add(user)
+        db.session.flush()
+        _record_admin_audit(admin, 'create', 'user', user.id, f'Created user {_public_user_label(user)}', {'user': _admin_user_payload(user)})
         db.session.commit()
     return jsonify(_admin_user_payload(user))
 
@@ -1471,6 +1524,7 @@ def update_admin_user(user_id):
         return error
 
     target_user = User.query.get_or_404(user_id)
+    before = _snapshot_fields(target_user, ['email', 'phone', 'name', 'whatsapp_number', 'role', 'is_club_member'])
     data = request.get_json() or {}
 
     if 'email' in data:
@@ -1502,6 +1556,10 @@ def update_admin_user(user_id):
             return jsonify({'error': 'invalid_role'}), 400
         target_user.role = role
 
+    after = _snapshot_fields(target_user, ['email', 'phone', 'name', 'whatsapp_number', 'role', 'is_club_member'])
+    changes = _changed_fields(before, after)
+    if changes:
+        _record_admin_audit(admin, 'update', 'user', target_user.id, f'Updated user {_public_user_label(target_user)}', {'changes': changes})
     db.session.commit()
     return jsonify(_admin_user_payload(target_user))
 
@@ -1513,7 +1571,9 @@ def delete_admin_user(user_id):
         return error
 
     target_user = User.query.get_or_404(user_id)
+    user_snapshot = _admin_user_payload(target_user)
 
+    _record_admin_audit(user, 'delete', 'user', target_user.id, f'Deleted user {_public_user_label(target_user)}', {'user': user_snapshot})
     FamilyMember.query.filter_by(user_id=target_user.id).delete()
     PlayAvailabilityVote.query.filter_by(user_id=target_user.id).update(
         {PlayAvailabilityVote.user_id: None},
@@ -1532,6 +1592,7 @@ def update_admin_family_member(member_id):
         return error
 
     member = FamilyMember.query.get_or_404(member_id)
+    before = _snapshot_fields(member, ['name', 'relationship', 'is_club_member'])
     data = request.get_json() or {}
     if 'name' in data:
         name = (data.get('name') or '').strip()
@@ -1567,6 +1628,8 @@ def create_admin_family_member():
         is_club_member=bool(data.get('is_club_member', False))
     )
     db.session.add(member)
+    db.session.flush()
+    _record_admin_audit(user, 'create', 'family_member', member.id, f'Created family member {member.name}', {'family_member': member.to_dict(), 'owner_id': owner.id})
     db.session.commit()
     return jsonify(member.to_dict())
 
@@ -1578,6 +1641,8 @@ def delete_admin_family_member(member_id):
         return error
 
     member = FamilyMember.query.get_or_404(member_id)
+    member_snapshot = member.to_dict()
+    _record_admin_audit(user, 'delete', 'family_member', member.id, f'Deleted family member {member.name}', {'family_member': member_snapshot})
     db.session.delete(member)
     db.session.commit()
     return jsonify({'status': 'deleted'})
@@ -1603,6 +1668,8 @@ def create_court():
         is_active=data.get('is_active', True)
     )
     db.session.add(court)
+    db.session.flush()
+    _record_admin_audit(user, 'create', 'court', court.id, f'Created court {court.name}', {'court': court.to_dict()})
     db.session.commit()
     return jsonify(court.to_dict())
 
@@ -1624,6 +1691,7 @@ def update_court(court_id):
         return error
 
     court = Court.query.get_or_404(court_id)
+    before = _snapshot_fields(court, ['name', 'location', 'description', 'map_link', 'hourly_rate', 'half_hour_rate', 'is_active'])
     data = request.get_json() or {}
     name = (data.get('name') or court.name or '').strip()
     if not name:
@@ -1638,6 +1706,10 @@ def update_court(court_id):
     court.half_hour_rate = float(half_hour_rate) if half_hour_rate not in (None, '') else None
     if 'is_active' in data:
         court.is_active = bool(data.get('is_active'))
+    after = _snapshot_fields(court, ['name', 'location', 'description', 'map_link', 'hourly_rate', 'half_hour_rate', 'is_active'])
+    changes = _changed_fields(before, after)
+    if changes:
+        _record_admin_audit(user, 'update', 'court', court.id, f'Updated court {court.name}', {'changes': changes})
     db.session.commit()
     return jsonify(court.to_dict())
 
@@ -1649,7 +1721,9 @@ def delete_court(court_id):
         return error
 
     court = Court.query.get_or_404(court_id)
+    before = court.to_dict()
     court.is_active = False
+    _record_admin_audit(user, 'delete', 'court', court.id, f'Deleted court {court.name}', {'court': before})
     db.session.commit()
     return jsonify(court.to_dict())
 
@@ -1694,6 +1768,8 @@ def create_freeze_period():
     if validation_error:
         return validation_error
     db.session.add(period)
+    db.session.flush()
+    _record_admin_audit(user, 'create', 'freeze_period', period.id, f'Created freeze period {period.title}', {'freeze_period': period.to_dict()})
     db.session.commit()
     return jsonify(period.to_dict()), 201
 
@@ -1704,9 +1780,14 @@ def update_freeze_period(period_id):
     if error:
         return error
     period = CourtFreezePeriod.query.get_or_404(period_id)
+    before = _snapshot_fields(period, ['title', 'start_date', 'end_date', 'reason', 'is_active'])
     validation_error = _apply_freeze_period_data(period, request.get_json() or {})
     if validation_error:
         return validation_error
+    after = _snapshot_fields(period, ['title', 'start_date', 'end_date', 'reason', 'is_active'])
+    changes = _changed_fields(before, after)
+    if changes:
+        _record_admin_audit(user, 'update', 'freeze_period', period.id, f'Updated freeze period {period.title}', {'changes': changes})
     db.session.commit()
     return jsonify(period.to_dict())
 
@@ -1717,6 +1798,8 @@ def delete_freeze_period(period_id):
     if error:
         return error
     period = CourtFreezePeriod.query.get_or_404(period_id)
+    period_snapshot = period.to_dict()
+    _record_admin_audit(user, 'delete', 'freeze_period', period.id, f'Deleted freeze period {period.title}', {'freeze_period': period_snapshot})
     db.session.delete(period)
     db.session.commit()
     return jsonify({'status': 'deleted', 'id': period_id})
@@ -1909,6 +1992,28 @@ def run_booking_reminders():
     logs = _send_due_booking_reminders()
     return jsonify({'sent': len(logs), 'logs': [log.to_dict() for log in logs]})
 
+
+@bookings_bp.route('/admin/audit-logs', methods=['GET'])
+def list_admin_audit_logs():
+    user, error = _require_admin()
+    if error:
+        return error
+
+    page = _positive_int_arg('page', 1)
+    per_page = _positive_int_arg('per_page', 50, maximum=100)
+    query = AdminAuditLog.query.order_by(AdminAuditLog.occurred_at.desc(), AdminAuditLog.id.desc())
+    total = query.count()
+    logs = query.offset((page - 1) * per_page).limit(per_page).all()
+    return jsonify({
+        'logs': [log.to_dict() for log in logs],
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total': total,
+            'pages': (total + per_page - 1) // per_page if total else 0,
+        }
+    })
+
 @bookings_bp.route('/admin/whatsapp-notifications', methods=['GET'])
 def list_whatsapp_notifications():
     user, error = _require_admin()
@@ -1939,6 +2044,7 @@ def update_whatsapp_notification(setting_id):
         return error
     from .models import WhatsAppNotificationSetting
     setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
+    before = _snapshot_fields(setting, ['title', 'description', 'template', 'is_enabled', 'send_to_group', 'group_id'])
     data = request.get_json() or {}
     if 'title' in data:
         setting.title = (data.get('title') or '').strip() or setting.title
@@ -1955,6 +2061,10 @@ def update_whatsapp_notification(setting_id):
         setting.send_to_group = bool(data.get('send_to_group'))
     if 'group_id' in data:
         setting.group_id = (data.get('group_id') or '').strip() or None
+    after = _snapshot_fields(setting, ['title', 'description', 'template', 'is_enabled', 'send_to_group', 'group_id'])
+    changes = _changed_fields(before, after)
+    if changes:
+        _record_admin_audit(user, 'update', 'whatsapp_notification', setting.id, f'Updated WhatsApp notification {setting.title}', {'changes': changes})
     db.session.commit()
     return jsonify(setting.to_dict())
 
@@ -1966,11 +2076,12 @@ def test_whatsapp_notification(setting_id):
         return error
     from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
     setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
+    before = _snapshot_fields(setting, ['title', 'description', 'template', 'is_enabled', 'send_to_group', 'group_id'])
     data = request.get_json() or {}
     sample_context = {
-        'court': data.get('court', data.get('court_name', 'Court 1')),
-        'court_name': data.get('court_name', data.get('court', 'Court 1')),
-        'court.name': data.get('court_name', data.get('court', 'Court 1')),
+        'court': data.get('court', data.get('court_name', 'Sample court')),
+        'court_name': data.get('court_name', data.get('court', 'Sample court')),
+        'court.name': data.get('court_name', data.get('court', 'Sample court')),
         'court_location': data.get('court_location', ''),
         'court.location': data.get('court_location', ''),
         'date': data.get('date', datetime.utcnow().date().strftime('%Y-%m-%d')),

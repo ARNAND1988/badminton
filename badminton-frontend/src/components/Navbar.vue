@@ -264,6 +264,7 @@ export default {
         { label: 'Courts', mobileLabel: 'Courts', to: '/admin/courts', icon: ShuttleIcon },
         { label: 'Members', mobileLabel: 'Members', to: '/admin/members', icon: AdminIcon },
         { label: 'Split Costs', mobileLabel: 'Split', to: '/admin/costs', icon: CostIcon },
+        { label: 'Audit Logs', mobileLabel: 'Logs', to: '/admin/audit-logs', icon: AdminIcon },
         { label: 'WhatsApp', mobileLabel: 'WhatsApp', to: '/admin/notifications', icon: AdminIcon }
       ]
     })

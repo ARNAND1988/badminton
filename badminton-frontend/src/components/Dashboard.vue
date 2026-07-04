@@ -877,6 +877,56 @@
       </div>
     </section>
 
+
+    <section v-if="activeView === 'admin-audit-logs'" class="space-y-6">
+      <div>
+        <h2 class="section-title">Admin Audit Logs</h2>
+        <p class="section-copy mt-1">Append-only activity history for admin actions. These rows are read-only and show when an event happened, who did it, the event type, and what changed.</p>
+      </div>
+
+      <div class="panel-card overflow-hidden p-0">
+        <div class="border-b border-slate-100 bg-slate-50 px-4 py-3">
+          <h3 class="text-base font-semibold text-slate-900">Recent admin activity</h3>
+          <p class="text-sm text-slate-600">Newest events first.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-white text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th class="px-3 py-2">When</th>
+                <th class="px-3 py-2">Admin</th>
+                <th class="px-3 py-2">Event</th>
+                <th class="px-3 py-2">Entity</th>
+                <th class="px-3 py-2">Summary</th>
+                <th class="px-3 py-2">Details</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr v-for="log in adminAuditLogs" :key="log.id" class="align-top">
+                <td class="whitespace-nowrap px-3 py-3 font-medium text-slate-900">{{ auditLogDate(log.occurred_at) }}</td>
+                <td class="px-3 py-3 text-slate-700">
+                  <div class="font-semibold text-slate-900">{{ log.admin_name || log.admin_email || log.admin_phone || 'Unknown admin' }}</div>
+                  <div class="text-xs text-slate-500">{{ log.admin_email || log.admin_phone || `User ${log.admin_user_id || 'unknown'}` }}</div>
+                </td>
+                <td class="px-3 py-3"><span class="rounded-full bg-indigo-50 px-2 py-1 text-xs font-bold uppercase text-indigo-700">{{ log.event_type }}</span></td>
+                <td class="px-3 py-3 text-slate-700">{{ log.entity_type }}<div v-if="log.entity_id" class="text-xs text-slate-500">#{{ log.entity_id }}</div></td>
+                <td class="px-3 py-3 text-slate-800">{{ log.summary }}</td>
+                <td class="px-3 py-3"><pre class="max-w-md whitespace-pre-wrap rounded bg-slate-950 p-2 text-xs text-slate-100">{{ auditLogDetails(log.details) }}</pre></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="!adminAuditLogs.length && !loading" class="p-4 text-sm text-slate-600">No admin audit logs found.</p>
+        <div v-if="adminAuditPagination.pages > 1" class="flex items-center justify-between border-t border-slate-100 p-3 text-sm">
+          <span class="text-slate-600">Page {{ adminAuditPagination.page }} of {{ adminAuditPagination.pages }} · {{ adminAuditPagination.total }} logs</span>
+          <div class="flex gap-2">
+            <button class="btn-secondary" :disabled="adminAuditPagination.page <= 1" @click="changeAdminAuditPage(adminAuditPagination.page - 1)">Previous</button>
+            <button class="btn-secondary" :disabled="adminAuditPagination.page >= adminAuditPagination.pages" @click="changeAdminAuditPage(adminAuditPagination.page + 1)">Next</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section v-if="activeView === 'notifications'" class="space-y-6">
       <div class="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-sky-50 p-4 shadow-sm sm:p-6">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1029,8 +1079,10 @@ export default {
     const monthlyInvoiceMonth = ref(localIsoMonth())
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
+    const adminAuditLogs = ref([])
     const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
     const archivedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
+    const adminAuditPagination = ref({ page: 1, per_page: 50, total: 0, pages: 0 })
     const openBookingIds = ref(new Set())
     const openCompletedBookingIds = ref(new Set())
     const openMiscCostIds = ref(new Set())
@@ -1539,6 +1591,29 @@ export default {
       adminUsers.value = data.users || []
     }
 
+
+    async function loadAdminAuditLogs() {
+      const data = await fetchJson(`/api/admin/audit-logs?page=${adminAuditPagination.value.page}&per_page=${adminAuditPagination.value.per_page}`)
+      adminAuditLogs.value = data.logs || []
+      adminAuditPagination.value = data.pagination || adminAuditPagination.value
+    }
+
+    function auditLogDate(value) {
+      if (!value) return 'Unknown time'
+      return new Date(value).toLocaleString()
+    }
+
+    function auditLogDetails(details) {
+      if (!details || (typeof details === 'object' && !Object.keys(details).length)) return 'No structured details'
+      return JSON.stringify(details, null, 2)
+    }
+
+    async function changeAdminAuditPage(page) {
+      if (page < 1 || (adminAuditPagination.value.pages && page > adminAuditPagination.value.pages)) return
+      adminAuditPagination.value = { ...adminAuditPagination.value, page }
+      await loadDashboard()
+    }
+
     async function loadWhatsAppNotifications() {
       const data = await fetchJson('/api/admin/whatsapp-notifications')
       whatsappSettings.value = data.settings || []
@@ -1645,6 +1720,16 @@ export default {
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page }),
             loadAdminUsers()
           ])
+        } else if (activeView.value === 'admin-audit-logs') {
+          if (!loggedIn) {
+            router.push('/login')
+            return
+          }
+          if (!isAdmin.value) {
+            errorMsg.value = 'Admin access is required.'
+            return
+          }
+          await loadAdminAuditLogs()
         } else if (activeView.value === 'notifications') {
           if (!loggedIn) {
             router.push('/login')
@@ -2278,6 +2363,10 @@ export default {
       activeView,
       activeCourts,
       adminUsers,
+      adminAuditLogs,
+      adminAuditPagination,
+      auditLogDate,
+      auditLogDetails,
       bookingInterest,
       bookingDateLabel,
       bookingDayLabel,
@@ -2366,6 +2455,7 @@ export default {
       createFreezePeriod,
       createAdminFamilyMember,
       changeArchivedBookingPage,
+      changeAdminAuditPage,
       changeCompletedBookingPage,
       createFamilyMember,
       createMiscCost,

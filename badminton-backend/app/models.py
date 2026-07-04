@@ -82,6 +82,42 @@ class FamilyMember(db.Model):
         }
 
 
+class AdminAuditLog(db.Model):
+    __tablename__ = 'admin_audit_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    occurred_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    admin_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    admin_name = db.Column(db.String(255), nullable=True)
+    admin_email = db.Column(db.String(255), nullable=True)
+    admin_phone = db.Column(db.String(64), nullable=True)
+    event_type = db.Column(db.String(64), nullable=False)
+    entity_type = db.Column(db.String(64), nullable=False)
+    entity_id = db.Column(db.String(64), nullable=True)
+    summary = db.Column(db.String(512), nullable=False)
+    details = db.Column(db.Text, nullable=True)
+
+    admin = db.relationship('User', lazy=True)
+
+    def to_dict(self):
+        try:
+            details = json.loads(self.details or '{}')
+        except Exception:
+            details = {}
+        return {
+            'id': self.id,
+            'occurred_at': self.occurred_at.isoformat() if self.occurred_at else None,
+            'admin_user_id': self.admin_user_id,
+            'admin_name': self.admin_name,
+            'admin_email': self.admin_email,
+            'admin_phone': self.admin_phone,
+            'event_type': self.event_type,
+            'entity_type': self.entity_type,
+            'entity_id': self.entity_id,
+            'summary': self.summary,
+            'details': details,
+        }
+
+
 class PlayAvailabilityVote(db.Model):
     __tablename__ = 'play_availability_votes'
     id = db.Column(db.Integer, primary_key=True)

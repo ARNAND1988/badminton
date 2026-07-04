@@ -142,17 +142,22 @@ def create_app():
         if play_vote_user_id and not play_vote_user_id.get('nullable') and db.engine.dialect.name != 'sqlite':
             db.session.execute(db.text('ALTER TABLE play_availability_votes ALTER COLUMN user_id DROP NOT NULL'))
         db.session.commit()
-        admin_user = User.query.filter_by(phone='+10000000000').first()
-        if not admin_user:
-            admin_user = User(
-                phone='+10000000000',
-            )
-            db.session.add(admin_user)
-        admin_user.email = 'admin@example.com'
-        admin_user.password_hash = pbkdf2_sha256.hash('admin123')
-        admin_user.name = 'admin'
-        admin_user.role = 'admin'
-        admin_user.is_club_member = True
+        should_seed_default_admin = (
+            app.config.get('TESTING')
+            or app.config.get('AUTH_MOCK')
+            or os.environ.get('ALLOW_DEFAULT_ADMIN_SEED', '').lower() in ('1', 'true', 'yes')
+            or os.environ.get('FLASK_ENV', '').lower() == 'development'
+        )
+        if should_seed_default_admin:
+            admin_user = User.query.filter_by(phone='+10000000000').first()
+            if not admin_user:
+                admin_user = User(phone='+10000000000')
+                db.session.add(admin_user)
+            admin_user.email = 'admin@example.com'
+            admin_user.password_hash = pbkdf2_sha256.hash('admin123')
+            admin_user.name = 'admin'
+            admin_user.role = 'admin'
+            admin_user.is_club_member = True
         db.session.commit()
 
     return app

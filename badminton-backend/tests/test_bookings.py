@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta
 
 from app import db
-from app.models import Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting
+from app.models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting
 
 
 def test_booking_availability_and_invoice(client, app):
@@ -64,6 +64,62 @@ def test_booking_availability_and_invoice(client, app):
     assert update_data['cost'] == 25.0
 
 
+
+
+def test_admin_audit_logs_capture_admin_booking_and_court_activity(client, app):
+    with app.app_context():
+        admin = User(phone='+31100003001', email='audit-admin@example.com', name='Audit Admin', role='admin')
+        db.session.add(admin)
+        db.session.commit()
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    headers = {'Authorization': f'Bearer {token}'}
+    court_resp = client.post('/api/admin/courts', json={
+        'name': 'Audit Court',
+        'location': 'Audit Hall',
+        'hourly_rate': 20,
+    }, headers=headers)
+    assert court_resp.status_code == 200
+    court_id = court_resp.get_json()['id']
+
+    booking_resp = client.post('/api/bookings', json={
+        'court_id': court_id,
+        'booking_date': '2030-08-01',
+        'start_time': '18:00',
+        'end_time': '19:00',
+        'notes': 'Audit booking',
+    }, headers=headers)
+    assert booking_resp.status_code == 200
+    booking_id = booking_resp.get_json()['id']
+
+    update_resp = client.put(f'/api/bookings/{booking_id}', json={
+        'court_id': court_id,
+        'booking_date': '2030-08-01',
+        'start_time': '18:30',
+        'end_time': '19:30',
+        'notes': 'Audit booking updated',
+    }, headers=headers)
+    assert update_resp.status_code == 200
+
+    delete_resp = client.delete(f'/api/bookings/{booking_id}', headers=headers)
+    assert delete_resp.status_code == 200
+
+    logs_resp = client.get('/api/admin/audit-logs', headers=headers)
+    assert logs_resp.status_code == 200
+    logs = logs_resp.get_json()['logs']
+    assert any(log['event_type'] == 'create' and log['entity_type'] == 'court' and log['admin_email'] == 'audit-admin@example.com' for log in logs)
+    assert any(log['event_type'] == 'create' and log['entity_type'] == 'booking' and log['entity_id'] == str(booking_id) for log in logs)
+    update_logs = [log for log in logs if log['event_type'] == 'update' and log['entity_type'] == 'booking']
+    assert update_logs
+    assert 'start_time' in update_logs[0]['details']['changes']
+    assert any(log['event_type'] == 'delete' and log['entity_type'] == 'booking' and log['entity_id'] == str(booking_id) for log in logs)
+
+    with app.app_context():
+        assert AdminAuditLog.query.count() >= 4
 
 def test_completed_booking_update_converts_attending_members_to_participated(client, app):
     with app.app_context():

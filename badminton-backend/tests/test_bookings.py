@@ -1071,20 +1071,20 @@ def test_openapi_and_swagger_docs_are_available(client):
     assert missing_api_resp.get_json()['error'] == 'not_found'
 
 
-def test_list_bookings_repopulates_upcoming_seed_data(client):
+def test_list_bookings_does_not_create_demo_upcoming_seed_data(client):
     from app import db
-    from app.models import Booking
+    from app.models import Booking, Court
 
     db.session.query(Booking).delete()
+    db.session.query(Court).delete()
     db.session.commit()
 
     resp = client.get('/api/bookings')
 
     assert resp.status_code == 200
-    bookings = resp.get_json()['bookings']
-    assert len(bookings) == 3
-    assert all(booking['status'] == 'confirmed' for booking in bookings)
-    assert {booking['court']['name'] for booking in bookings} == {'Court 1', 'Court 2', 'Training Court'}
+    assert resp.get_json()['bookings'] == []
+    assert Booking.query.count() == 0
+    assert Court.query.count() == 0
 
 
 def test_yesterday_booking_moves_from_upcoming_to_completed(client, app):

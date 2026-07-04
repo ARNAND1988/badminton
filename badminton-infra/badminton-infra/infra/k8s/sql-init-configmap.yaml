@@ -90,18 +90,6 @@ data:
       name = EXCLUDED.name,
       role = EXCLUDED.role;
 
-    INSERT INTO courts (name, location, description, hourly_rate, is_active)
-    SELECT 'Court 1', 'Nieuwegein Sports Centre', 'Main indoor badminton court near reception', 25.0, TRUE
-    WHERE NOT EXISTS (SELECT 1 FROM courts WHERE name = 'Court 1');
-
-    INSERT INTO courts (name, location, description, hourly_rate, is_active)
-    SELECT 'Court 2', 'Nieuwegein Sports Centre', 'Second indoor court for doubles practice', 22.5, TRUE
-    WHERE NOT EXISTS (SELECT 1 FROM courts WHERE name = 'Court 2');
-
-    INSERT INTO courts (name, location, description, hourly_rate, is_active)
-    SELECT 'Training Court', 'Nieuwegein Sports Centre', 'Smaller court for warmups and junior sessions', 18.0, TRUE
-    WHERE NOT EXISTS (SELECT 1 FROM courts WHERE name = 'Training Court');
-
     INSERT INTO family_members (user_id, name, relationship)
     SELECT u.id, 'Noah Janssen', 'Child'
     FROM users u
@@ -242,71 +230,3 @@ data:
       total_amount = EXCLUDED.total_amount,
       split_count = EXCLUDED.split_count,
       status = 'settled';
-
-    DO $$
-    DECLARE
-      court_one_id INTEGER;
-      court_two_id INTEGER;
-      training_court_id INTEGER;
-      booking_one_id INTEGER;
-      booking_two_id INTEGER;
-    BEGIN
-      SELECT id INTO court_one_id FROM courts WHERE name = 'Court 1' LIMIT 1;
-      SELECT id INTO court_two_id FROM courts WHERE name = 'Court 2' LIMIT 1;
-      SELECT id INTO training_court_id FROM courts WHERE name = 'Training Court' LIMIT 1;
-
-      IF court_one_id IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM bookings
-          WHERE court_id = court_one_id
-            AND booking_date = to_char(CURRENT_DATE + INTERVAL '1 day', 'YYYY-MM-DD')
-            AND start_time = '19:00'
-            AND end_time = '20:00'
-        )
-      THEN
-        INSERT INTO bookings (court_id, booking_date, start_time, end_time, cost, notes, status)
-        VALUES (court_one_id, to_char(CURRENT_DATE + INTERVAL '1 day', 'YYYY-MM-DD'), '19:00', '20:00', 25.0, 'Evening doubles practice', 'confirmed')
-        RETURNING id INTO booking_one_id;
-
-        INSERT INTO booking_participants (booking_id, phone)
-        VALUES
-          (booking_one_id, '+31611111111'),
-          (booking_one_id, '+31622222222');
-
-        INSERT INTO invoices (booking_id, total_amount, split_count, status)
-        VALUES (booking_one_id, 25.0, 2, 'generated')
-        ON CONFLICT (booking_id) DO NOTHING;
-      END IF;
-
-      IF court_two_id IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM bookings
-          WHERE court_id = court_two_id
-            AND booking_date = to_char(CURRENT_DATE + INTERVAL '3 days', 'YYYY-MM-DD')
-            AND start_time = '10:00'
-            AND end_time = '12:00'
-        )
-      THEN
-        INSERT INTO bookings (court_id, booking_date, start_time, end_time, cost, notes, status)
-        VALUES (court_two_id, to_char(CURRENT_DATE + INTERVAL '3 days', 'YYYY-MM-DD'), '10:00', '12:00', 45.0, 'Weekend family session', 'confirmed')
-        RETURNING id INTO booking_two_id;
-
-        INSERT INTO booking_participants (booking_id, phone)
-        VALUES
-          (booking_two_id, '+31611111111'),
-          (booking_two_id, '+31633333333');
-      END IF;
-
-      IF training_court_id IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM bookings
-          WHERE court_id = training_court_id
-            AND booking_date = to_char(CURRENT_DATE + INTERVAL '7 days', 'YYYY-MM-DD')
-            AND start_time = '18:30'
-            AND end_time = '19:30'
-        )
-      THEN
-        INSERT INTO bookings (court_id, booking_date, start_time, end_time, cost, notes, status)
-        VALUES (training_court_id, to_char(CURRENT_DATE + INTERVAL '7 days', 'YYYY-MM-DD'), '18:30', '19:30', 18.0, 'Junior warmup slot', 'confirmed');
-      END IF;
-    END $$;

@@ -62,6 +62,13 @@ const routes = [
     meta: { navLabel: 'Split Costs', requiresAuth: true }
   },
   {
+    path: '/admin/audit-logs',
+    name: 'admin-audit-logs',
+    component: Dashboard,
+    props: { initialView: 'admin-audit-logs' },
+    meta: { navLabel: 'Audit Logs', requiresAuth: true }
+  },
+  {
     path: '/admin/notifications',
     name: 'notifications',
     component: Dashboard,

@@ -31,6 +31,7 @@
                 <p class="text-sm font-medium text-indigo-600">
                   {{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }}
                 </p>
+                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ bookingStatusSummary(booking) }}</p>
               </div>
               <div class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">
                 €{{ booking.cost || 0 }}
@@ -143,6 +144,7 @@
                 <p class="truncate text-xs text-slate-600 sm:text-sm">
                   {{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}
                 </p>
+                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ bookingStatusSummary(booking) }}</p>
               </div>
               <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white sm:px-3">€{{ booking.cost || 0 }}</span>
               <span class="text-slate-400" aria-hidden="true">{{ isCompletedBookingOpen(booking.id) ? '−' : '+' }}</span>
@@ -160,7 +162,7 @@
               </div>
               <div class="rounded border border-slate-200 bg-slate-50 p-3">
                 <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</div>
-                <div class="mt-1 text-sm font-semibold capitalize text-slate-900">{{ booking.invoice?.status || 'Not started' }}</div>
+                <div class="mt-1 text-sm font-semibold text-slate-900">{{ bookingStatusSummary(booking) }}</div>
               </div>
             </div>
 
@@ -268,20 +270,31 @@
           </div>
       </div>
 
-      <div class="grid gap-4 lg:grid-cols-2">
-        <article v-for="booking in upcomingBookings" :key="booking.id" class="sub-card space-y-4 p-4">
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h3>
-              <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
-            </div>
-            <div class="flex gap-2">
-              <button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit</button>
-              <button class="btn-purple" @click.stop="createInvoice(booking.id)">Invoice</button>
-              <button class="btn-muted" @click.stop="deleteBooking(booking)">Delete</button>
-            </div>
-          </div>
-          <div class="space-y-3 border-t border-slate-100 pt-4">
+      <div class="space-y-4">
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">Upcoming bookings</h3>
+          <p class="section-copy">Bookings still to be played. Expand a booking to edit attendance, details, or invoices.</p>
+        </div>
+        <div class="grid gap-4 lg:grid-cols-2">
+          <article v-for="booking in upcomingBookings" :key="booking.id" class="sub-card overflow-hidden p-0">
+            <button type="button" class="flex w-full items-start justify-between gap-3 p-4 text-left transition hover:bg-slate-50" :aria-expanded="isBookingOpen(booking.id)" @click="toggleBooking(booking.id)">
+              <div>
+                <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
+                <p class="text-sm text-slate-600">{{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ participantStatusCounts(booking).attending }} attending · {{ participantStatusCounts(booking).tentative }} tentative · {{ bookingStatusSummary(booking) }}</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
+                <span class="text-slate-400" aria-hidden="true">{{ isBookingOpen(booking.id) ? '−' : '+' }}</span>
+              </div>
+            </button>
+            <div v-if="isBookingOpen(booking.id)" class="space-y-3 border-t border-slate-100 p-4">
+              <div class="flex flex-wrap justify-end gap-2">
+                <button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit booking details</button>
+                <button class="btn-purple" @click.stop="createInvoice(booking.id)">Invoice</button>
+                <button class="btn-muted" @click.stop="deleteBooking(booking)">Delete</button>
+              </div>
+
             <h4 class="text-sm font-semibold text-slate-900">Attendance</h4>
             <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
               <select class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
@@ -313,8 +326,10 @@
               </select>
               <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
             </div>
-          </div>
-        </article>
+
+            </div>
+          </article>
+        </div>
       </div>
 
 
@@ -328,8 +343,8 @@
             <button type="button" class="flex w-full items-start justify-between gap-3 p-4 text-left transition hover:bg-slate-50" :aria-expanded="isCompletedBookingOpen(booking.id)" @click="toggleCompletedBooking(booking.id)">
               <div>
                 <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
-                <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
-                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ booking.invoice?.status || 'Not started' }}</p>
+                <p class="text-sm text-slate-600">{{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ bookingStatusSummary(booking) }}</p>
               </div>
               <div class="flex items-center gap-2">
                 <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
@@ -582,7 +597,7 @@
           <div v-if="invoiceDetailTab === 'booking'" class="space-y-2 text-sm">
             <h4 class="font-semibold text-slate-900">Booking cost details</h4>
             <div v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="flex flex-col justify-between gap-1 rounded bg-indigo-50 px-3 py-2 sm:flex-row">
-              <span>{{ item.date }} · {{ item.court }} · {{ item.start_time }}-{{ item.end_time }} · {{ item.total_people_played }} players</span>
+              <span>{{ item.date }} · {{ item.court }} · {{ item.start_time }}-{{ item.end_time }} · {{ item.total_people_played }} players · {{ bookingItemStatusSummary(item) }}</span>
               <span class="font-semibold">Your share €{{ item.amount }}</span>
             </div>
             <p v-if="!monthlyInvoice.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
@@ -727,8 +742,8 @@
             <div class="flex items-start justify-between gap-3">
               <div>
                 <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
-                <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
-                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ booking.invoice?.status || 'Not started' }}</p>
+                <p class="text-sm text-slate-600">{{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ bookingStatusSummary(booking) }}</p>
               </div>
               <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
             </div>
@@ -982,6 +997,7 @@ export default {
     const whatsappLogs = ref([])
     const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
     const archivedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
+    const openBookingIds = ref(new Set())
     const openCompletedBookingIds = ref(new Set())
     const loading = ref(false)
     const errorMsg = ref('')
@@ -1137,6 +1153,38 @@ export default {
     function bookingDateLabel(dateValue) {
       const date = parseBookingDate(dateValue)
       return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    }
+
+    function statusLabel(value, fallback = 'Not started') {
+      const rawStatus = (value || '').toString().trim()
+      if (!rawStatus) return fallback
+      return rawStatus
+        .split('_')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ')
+    }
+
+    function invoiceStatusLabel(value) {
+      return statusLabel(value, 'Not started')
+    }
+
+    function bookingStatusSummary(booking) {
+      return `${statusLabel(booking?.status, 'Confirmed')} · ${invoiceStatusLabel(booking?.invoice?.status)}`
+    }
+
+    function bookingItemStatusSummary(item) {
+      return `${statusLabel(item?.booking_status, 'Completed')} · ${invoiceStatusLabel(item?.invoice_status)}`
+    }
+
+    function isBookingOpen(bookingId) {
+      return openBookingIds.value.has(bookingId)
+    }
+
+    function toggleBooking(bookingId) {
+      const nextOpenIds = new Set(openBookingIds.value)
+      if (nextOpenIds.has(bookingId)) nextOpenIds.delete(bookingId)
+      else nextOpenIds.add(bookingId)
+      openBookingIds.value = nextOpenIds
     }
 
     function isCompletedBookingOpen(bookingId) {
@@ -2168,6 +2216,9 @@ export default {
       bookingInterest,
       bookingDateLabel,
       bookingDayLabel,
+      bookingStatusSummary,
+      bookingItemStatusSummary,
+      invoiceStatusLabel,
       bookings,
       upcomingBookings,
       completedBookings,
@@ -2191,6 +2242,8 @@ export default {
       whatsappLogs,
       isLoggedIn,
       isAdmin,
+      isBookingOpen,
+      toggleBooking,
       isCompletedBookingOpen,
       toggleCompletedBooking,
       loading,

@@ -653,10 +653,8 @@ def create_family_member():
         name=name,
     )
     db.session.add(member)
-    after = _snapshot_fields(member, ['name', 'relationship', 'is_club_member'])
-    changes = _changed_fields(before, after)
-    if changes:
-        _record_admin_audit(user, 'update', 'family_member', member.id, f'Updated family member {member.name}', {'changes': changes})
+    db.session.flush()
+    _record_admin_audit(user, 'create', 'family_member', member.id, f'Created family member {member.name}', {'family_member': member.to_dict()})
     db.session.commit()
     return jsonify(member.to_dict())
 

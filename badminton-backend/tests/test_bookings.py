@@ -624,6 +624,38 @@ def test_booking_rsvp_admin_attendance_and_cost_split(client, app):
     assert settle_resp.get_json()['status'] == 'settled'
 
 
+def test_booking_cost_split_distributes_rounding_remainder(client, app):
+    with app.app_context():
+        court = Court(name='Rounding Court', hourly_rate=10.0, is_active=True)
+        booking = Booking(
+            court=court,
+            booking_date='2030-05-01',
+            start_time='18:00',
+            end_time='19:00',
+            cost=10.00,
+            status='confirmed',
+        )
+        db.session.add_all([court, booking])
+        db.session.flush()
+        db.session.add_all([
+            BookingParticipant(booking_id=booking.id, phone='round-1', name='Round One', status='attending'),
+            BookingParticipant(booking_id=booking.id, phone='round-2', name='Round Two', status='attending'),
+            BookingParticipant(booking_id=booking.id, phone='round-3', name='Round Three', status='attending'),
+        ])
+        db.session.commit()
+        booking_id = booking.id
+
+    resp = client.get('/api/bookings')
+    assert resp.status_code == 200
+    booking = next(item for item in resp.get_json()['bookings'] if item['id'] == booking_id)
+    shares = [participant['cost_share'] for participant in booking['participants'] if participant['status'] == 'attending']
+    assert shares == [3.34, 3.33, 3.33]
+    assert round(sum(shares), 2) == booking['cost_split']['total_cost']
+    assert booking['cost_split']['cost_per_person'] == 3.33
+    assert booking['cost_split']['rounded_total'] == 10.0
+    assert booking['cost_split']['rounding_adjustment'] == 0.0
+    assert booking['cost_split']['remainder_cents'] == 1
+
 def test_member_can_set_family_attendance_for_booking(client, app):
     with app.app_context():
         admin = User(phone='+31100000009', email='family-att-admin@example.com', name='Family Admin', role='admin')
@@ -769,13 +801,17 @@ def test_monthly_invoice_summary_for_member_and_admin(client, app):
     assert member_invoice['booking_total'] == 30.0
     assert member_invoice['misc_total'] == 10.0
     assert member_invoice['total'] == 40.0
+    assert member_invoice['booking_items'][0]['booking_status'] == 'completed'
     assert member_invoice['booking_items'][0]['invoice_status'] == 'generated'
 
     admin_resp = client.get('/api/admin/invoices/monthly?month=2026-05', headers={'Authorization': f'Bearer {admin_token}'})
     assert admin_resp.status_code == 200
     admin_data = admin_resp.get_json()
     assert admin_data['month'] == '2026-05'
-    assert any(invoice['user']['email'] == 'invoice-member@example.com' and invoice['total'] == 40.0 for invoice in admin_data['invoices'])
+    member_admin_invoice = next(invoice for invoice in admin_data['invoices'] if invoice['user']['email'] == 'invoice-member@example.com')
+    assert member_admin_invoice['total'] == 40.0
+    assert member_admin_invoice['booking_items'][0]['booking_status'] == 'completed'
+    assert member_admin_invoice['booking_items'][0]['invoice_status'] == 'generated'
 
 
 def test_monthly_invoice_includes_completed_booking_on_current_day_without_mixing_misc(client, app):

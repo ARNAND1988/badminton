@@ -258,6 +258,7 @@ def _monthly_invoice_summary(user, month_value):
             'cost_per_person': per_person,
             'participants': [participant_labels.get(participant.phone, participant.name or participant.phone or 'Player') for participant in matching_participants],
             'amount': amount,
+            'booking_status': booking.status,
             'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
         })
 
@@ -1425,6 +1426,7 @@ def admin_monthly_invoices():
                 'cost_per_person': per_person,
                 'participants': [subject['display_name']],
                 'amount': participant_amount,
+                'booking_status': booking.status,
                 'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
             })
 

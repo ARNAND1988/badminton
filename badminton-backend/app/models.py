@@ -129,7 +129,10 @@ class Booking(db.Model):
     def to_dict(self):
         attended = [participant for participant in self.participants if participant.status in {'attending', 'participated'}]
         split_count = len(attended)
-        cost_per_person = round(float(self.cost or 0.0) / split_count, 2) if split_count else 0.0
+        total_cost = round(float(self.cost or 0.0), 2)
+        cost_per_person = round(total_cost / split_count, 2) if split_count else 0.0
+        rounded_total = round(cost_per_person * split_count, 2)
+        rounding_adjustment = round(total_cost - rounded_total, 2) if split_count else 0.0
         return {
             'id': self.id,
             'court': self.court.to_dict() if self.court else None,
@@ -143,6 +146,9 @@ class Booking(db.Model):
             'cost_split': {
                 'attended_count': split_count,
                 'cost_per_person': cost_per_person,
+                'total_cost': total_cost,
+                'rounded_total': rounded_total,
+                'rounding_adjustment': rounding_adjustment,
             },
             'invoice': self.invoice[0].to_dict() if self.invoice else None,
         }

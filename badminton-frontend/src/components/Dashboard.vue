@@ -227,8 +227,17 @@
             </div>
             <div>
               <label class="form-label">💶 Cost</label>
-              <input :value="calculatedBookingCost" type="number" min="0" step="0.01" class="form-input" readonly />
-              <p class="mt-1 text-xs text-slate-500">Calculated from court rates and duration.</p>
+              <input v-if="editingBookingId" v-model="bookingCost" type="number" min="0" step="0.01" class="form-input" />
+              <input v-else :value="calculatedBookingCost" type="number" min="0" step="0.01" class="form-input" readonly />
+              <p class="mt-1 text-xs text-slate-500">{{ editingBookingId ? 'Override the saved booking cost.' : 'Calculated from court rates and duration.' }}</p>
+            </div>
+            <div v-if="editingBookingId">
+              <label class="form-label">📌 Status</label>
+              <select v-model="bookingStatus" class="form-input">
+                <option value="confirmed">Confirmed</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
             </div>
             <div v-if="!editingBookingId">
               <label class="form-label">🔁 Recurring</label>
@@ -315,19 +324,20 @@
           <p class="section-copy">Admins can edit completed bookings in the active cost year, including participants, attendance status, booking details, and invoice status.</p>
         </div>
         <div class="grid gap-4 lg:grid-cols-2">
-          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card p-4">
-            <div class="flex items-start justify-between gap-3">
+          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card overflow-hidden p-0">
+            <button type="button" class="flex w-full items-start justify-between gap-3 p-4 text-left transition hover:bg-slate-50" :aria-expanded="isCompletedBookingOpen(booking.id)" @click="toggleCompletedBooking(booking.id)">
               <div>
                 <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
                 <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
                 <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ booking.invoice?.status || 'Not started' }}</p>
               </div>
-              <div class="flex flex-col gap-2 sm:flex-row">
-                <button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit booking</button>
+              <div class="flex items-center gap-2">
                 <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
+                <span class="text-slate-400" aria-hidden="true">{{ isCompletedBookingOpen(booking.id) ? '−' : '+' }}</span>
               </div>
-            </div>
-            <div class="mt-3 space-y-3 border-t border-slate-100 pt-3">
+            </button>
+            <div v-if="isCompletedBookingOpen(booking.id)" class="space-y-3 border-t border-slate-100 p-4">
+              <div class="flex justify-end"><button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit booking details</button></div>
               <h5 class="text-sm font-semibold text-slate-900">Attendance</h5>
               <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
                 <select class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
@@ -359,10 +369,10 @@
                 </select>
                 <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
               </div>
-            </div>
-            <div class="mt-3 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
-              <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
-              <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
+              <div class="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
+                <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
+                <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
+              </div>
             </div>
           </article>
         </div>
@@ -709,63 +719,10 @@
 
       <div v-if="adminCostTab === 'booking'" class="mt-8 space-y-4">
         <div>
-          <h3 class="text-lg font-semibold text-slate-900">Completed booking settlement</h3>
-          <p class="section-copy">Generate or settle booking invoices based on attending members. Completed bookings stay editable for attendance updates; bookings from previous July-June cost years are in Archive.</p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button class="btn-secondary" :class="completedBookingTab === 'completed' ? 'bg-emerald-100 text-emerald-800' : ''" @click="completedBookingTab = 'completed'">Recent completed</button>
-            <button class="btn-secondary" :class="completedBookingTab === 'archive' ? 'bg-emerald-100 text-emerald-800' : ''" @click="completedBookingTab = 'archive'">Archive</button>
-          </div>
+          <h3 class="text-lg font-semibold text-slate-900">Booking settlement archive</h3>
+          <p class="section-copy">Completed booking editing and settlement is handled on Manage Bookings. This page only keeps the older archive for cost reference.</p>
         </div>
-        <div v-if="completedBookingTab === 'completed'" class="grid gap-4 lg:grid-cols-2">
-          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
-                <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
-                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ booking.invoice?.status || 'Not started' }}</p>
-              </div>
-              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
-            </div>
-            <div class="mt-3 space-y-3 border-t border-slate-100 pt-3">
-              <h5 class="text-sm font-semibold text-slate-900">Attendance</h5>
-              <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
-                <select class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
-                  <option value="">Keep / ad hoc player</option>
-                  <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
-                </select>
-                <input v-model="participant.name" class="form-input" placeholder="Player name" />
-                <select v-model="participant.status" class="form-input">
-                  <option value="attending">Attending</option>
-                  <option value="participated">Participated</option>
-                  <option value="not_attending">Not attending</option>
-                  <option value="tentative">Tentative</option>
-                </select>
-                <button class="btn-secondary" @click.stop="updateParticipant(booking, participant)">Save</button>
-                <button class="btn-muted" @click.stop="deleteParticipant(booking, participant)">Remove</button>
-              </div>
-              <div class="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
-                <select v-model="newParticipantMember[booking.id]" class="form-input">
-                  <option value="">New player (not a member)</option>
-                  <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
-                </select>
-                <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="New player name" :disabled="!!newParticipantMember[booking.id]" />
-                <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" :disabled="!!newParticipantMember[booking.id]" />
-                <select v-model="newParticipantStatus[booking.id]" class="form-input">
-                  <option value="attending">Attending</option>
-                  <option value="participated">Participated</option>
-                  <option value="not_attending">Not attending</option>
-                  <option value="tentative">Tentative</option>
-                </select>
-                <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
-              </div>
-            </div>
-            <div class="mt-3 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
-              <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
-              <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
-            </div>
-          </article>
-        </div>
-        <div v-if="completedBookingTab === 'archive'" class="grid gap-4 lg:grid-cols-2">
+        <div class="grid gap-4 lg:grid-cols-2">
           <article v-for="booking in archivedBookings" :key="booking.id" class="sub-card p-4">
             <div class="flex items-start justify-between gap-3">
               <div>
@@ -777,7 +734,7 @@
             </div>
           </article>
         </div>
-        <div v-if="completedBookingTab === 'archive' && archivedBookingPagination.pages > 1" class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <div v-if="archivedBookingPagination.pages > 1" class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <span class="text-slate-600">Page {{ archivedBookingPagination.page }} of {{ archivedBookingPagination.pages }} · {{ archivedBookingPagination.total }} archived bookings</span>
           <div class="flex gap-2">
             <button class="btn-secondary" :disabled="archivedBookingPagination.page <= 1" @click="changeArchivedBookingPage(archivedBookingPagination.page - 1)">Previous</button>
@@ -946,11 +903,11 @@
         </div>
         <div class="mt-4 grid gap-3 sm:grid-cols-4">
           <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
-            <div class="text-xs font-semibold uppercase text-indigo-600">Playing days</div>
+            <div class="text-xs font-semibold uppercase text-indigo-600">{{ verificationDetails.itemLabel }}</div>
             <div class="mt-1 text-xl font-bold text-indigo-900">{{ verificationDetails.items.length }}</div>
           </div>
           <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
-            <div class="text-xs font-semibold uppercase text-emerald-600">Total people</div>
+            <div class="text-xs font-semibold uppercase text-emerald-600">{{ verificationDetails.peopleLabel }}</div>
             <div class="mt-1 text-xl font-bold text-emerald-900">{{ verificationDetails.totalPeople }}</div>
           </div>
           <div class="rounded border border-slate-200 bg-slate-50 p-3">
@@ -965,14 +922,14 @@
         <div class="mt-4 overflow-x-auto rounded border border-slate-200">
           <table class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <tr><th class="px-3 py-2">Playing day</th><th class="px-3 py-2">Players</th><th class="px-3 py-2">Total cost</th><th class="px-3 py-2">Per share</th><th class="px-3 py-2">Member share</th></tr>
+              <tr><th class="px-3 py-2">Item</th><th class="px-3 py-2">Split count</th><th class="px-3 py-2">Total cost</th><th class="px-3 py-2">Per share</th><th class="px-3 py-2">Member share</th></tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
               <tr v-for="item in verificationDetails.items" :key="item.booking_id || item.date">
-                <td class="px-3 py-2 font-medium text-slate-900">{{ item.date }}<div class="text-xs font-normal text-slate-500">{{ item.court }} · {{ item.start_time }}-{{ item.end_time }}</div></td>
-                <td class="px-3 py-2">{{ item.total_people_played }}</td>
-                <td class="px-3 py-2">€{{ item.total_cost }}</td>
-                <td class="px-3 py-2">€{{ item.cost_per_person }}</td>
+                <td class="px-3 py-2 font-medium text-slate-900">{{ item.date || item.purchase_date }}<div class="text-xs font-normal text-slate-500">{{ item.detail || `${item.court || item.title || 'Cost'} · ${item.start_time || ''}${item.end_time ? '-' + item.end_time : ''}` }}</div></td>
+                <td class="px-3 py-2">{{ item.total_people_played || item.split_count }}</td>
+                <td class="px-3 py-2">€{{ item.total_cost || item.amount_total }}</td>
+                <td class="px-3 py-2">€{{ item.cost_per_person || item.amount }}</td>
                 <td class="px-3 py-2 font-semibold">€{{ item.amount }}<div v-if="item.participants?.length" class="text-xs font-normal text-slate-500">{{ item.participants.join(', ') }}</div></td>
               </tr>
             </tbody>
@@ -1033,6 +990,7 @@ export default {
     const startTime = ref('18:00')
     const endTime = ref('19:00')
     const bookingCost = ref('0')
+    const bookingStatus = ref('confirmed')
     const bookingNotes = ref('')
     const selectedCourtId = ref('')
     const recurringMode = ref(false)
@@ -1247,14 +1205,25 @@ export default {
       return attendees.map((attendee) => attendee.name).filter(Boolean)
     }
 
-    function showVerificationDetails(invoice, title = 'Booking verification') {
-      const items = invoice?.booking_items || []
+    function showVerificationDetails(invoice, title = 'Cost verification') {
+      const bookingItems = invoice?.booking_items || []
+      const miscItems = (invoice?.misc_items || []).map((item) => ({
+        ...item,
+        date: item.purchase_date || 'No purchase date',
+        detail: `${item.title || 'Misc cost'} · ${item.status || 'open'}`,
+        amount_total: Number(item.amount || 0) * Number(item.split_count || 1),
+        cost_per_person: item.amount,
+        total_people_played: item.split_count,
+      }))
+      const items = [...bookingItems, ...miscItems]
       verificationDetails.value = {
         title,
         items,
-        totalPeople: items.reduce((sum, item) => sum + Number(item.total_people_played || 0), 0),
-        totalCost: items.reduce((sum, item) => sum + Number(item.total_cost || 0), 0).toFixed(2),
-        shareCost: Number(invoice?.booking_total || 0).toFixed(2)
+        itemLabel: 'Cost items',
+        peopleLabel: 'Split entries',
+        totalPeople: items.reduce((sum, item) => sum + Number(item.total_people_played || item.split_count || 0), 0),
+        totalCost: items.reduce((sum, item) => sum + Number(item.total_cost ?? item.amount_total ?? 0), 0).toFixed(2),
+        shareCost: Number(invoice?.total ?? ((invoice?.booking_total || 0) + (invoice?.misc_total || 0))).toFixed(2)
       }
     }
 
@@ -1675,6 +1644,7 @@ export default {
       startTime.value = '18:00'
       endTime.value = '19:00'
       bookingCost.value = '0'
+      bookingStatus.value = 'confirmed'
       bookingNotes.value = ''
       recurringMode.value = false
       recurringIntervalWeeks.value = 1
@@ -1692,6 +1662,7 @@ export default {
       startTime.value = booking.start_time
       endTime.value = booking.end_time
       bookingCost.value = String(booking.cost || 0)
+      bookingStatus.value = booking.status || 'confirmed'
       bookingNotes.value = booking.notes || ''
       recurringMode.value = false
       msg.value = ''
@@ -1751,8 +1722,10 @@ export default {
             booking_date: bookingDate.value,
             start_time: startTime.value,
             end_time: endTime.value,
+            manual_cost: true,
+            cost: parseFloat(bookingCost.value || 0),
             notes: bookingNotes.value,
-            status: 'confirmed'
+            status: bookingStatus.value
           })
         })
         msg.value = 'Booking updated successfully.'
@@ -2233,6 +2206,7 @@ export default {
       startTime,
       endTime,
       bookingCost,
+      bookingStatus,
       bookingNotes,
       selectedCourtId,
       recurringMode,

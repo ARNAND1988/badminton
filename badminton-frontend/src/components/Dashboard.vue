@@ -274,8 +274,12 @@
           </div>
           <div class="space-y-3 border-t border-slate-100 pt-4">
             <h4 class="text-sm font-semibold text-slate-900">Attendance</h4>
-            <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1fr_1fr_auto]">
-              <input v-model="participant.name" class="form-input" placeholder="Name" />
+            <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
+              <select class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
+                <option value="">Keep / ad hoc player</option>
+                <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
+              </select>
+              <input v-model="participant.name" class="form-input" placeholder="Player name" />
               <select v-model="participant.status" class="form-input">
                 <option value="attending">Attending</option>
                 <option value="participated">Participated</option>
@@ -283,10 +287,15 @@
                 <option value="tentative">Tentative</option>
               </select>
               <button class="btn-secondary" @click.stop="updateParticipant(booking, participant)">Save</button>
+              <button class="btn-muted" @click.stop="deleteParticipant(booking, participant)">Remove</button>
             </div>
-            <div class="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
-              <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="Ad hoc name" />
-              <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" />
+            <div class="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
+              <select v-model="newParticipantMember[booking.id]" class="form-input">
+                <option value="">New player (not a member)</option>
+                <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
+              </select>
+              <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="New player name" :disabled="!!newParticipantMember[booking.id]" />
+              <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" :disabled="!!newParticipantMember[booking.id]" />
               <select v-model="newParticipantStatus[booking.id]" class="form-input">
                 <option value="attending">Attending</option>
                 <option value="participated">Participated</option>
@@ -297,6 +306,66 @@
             </div>
           </div>
         </article>
+      </div>
+
+
+      <div class="mt-8 space-y-4">
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">Completed bookings</h3>
+          <p class="section-copy">Admins can edit completed bookings in the active cost year, including participants, attendance status, booking details, and invoice status.</p>
+        </div>
+        <div class="grid gap-4 lg:grid-cols-2">
+          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4 class="font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
+                <p class="text-sm text-slate-600">{{ booking.booking_date }} · {{ booking.start_time }} - {{ booking.end_time }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ booking.cost_split.attended_count }} attending · €{{ booking.cost_split.cost_per_person }} each · {{ booking.invoice?.status || 'Not started' }}</p>
+              </div>
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit booking</button>
+                <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ booking.cost || 0 }}</span>
+              </div>
+            </div>
+            <div class="mt-3 space-y-3 border-t border-slate-100 pt-3">
+              <h5 class="text-sm font-semibold text-slate-900">Attendance</h5>
+              <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
+                <select class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
+                  <option value="">Keep / ad hoc player</option>
+                  <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
+                </select>
+                <input v-model="participant.name" class="form-input" placeholder="Player name" />
+                <select v-model="participant.status" class="form-input">
+                  <option value="attending">Attending</option>
+                  <option value="participated">Participated</option>
+                  <option value="not_attending">Not attending</option>
+                  <option value="tentative">Tentative</option>
+                </select>
+                <button class="btn-secondary" @click.stop="updateParticipant(booking, participant)">Save</button>
+                <button class="btn-muted" @click.stop="deleteParticipant(booking, participant)">Remove</button>
+              </div>
+              <div class="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
+                <select v-model="newParticipantMember[booking.id]" class="form-input">
+                  <option value="">New player (not a member)</option>
+                  <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
+                </select>
+                <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="New player name" :disabled="!!newParticipantMember[booking.id]" />
+                <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" :disabled="!!newParticipantMember[booking.id]" />
+                <select v-model="newParticipantStatus[booking.id]" class="form-input">
+                  <option value="attending">Attending</option>
+                  <option value="participated">Participated</option>
+                  <option value="not_attending">Not attending</option>
+                  <option value="tentative">Tentative</option>
+                </select>
+                <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
+              </div>
+            </div>
+            <div class="mt-3 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-3">
+              <button class="btn-secondary" @click="createInvoice(booking.id)">Generate</button>
+              <button class="btn-dark" @click="settleBookingCost(booking)">Mark settled</button>
+            </div>
+          </article>
+        </div>
       </div>
     </section>
 
@@ -595,32 +664,6 @@
             </table>
           </div>
 
-          <div class="rounded border border-slate-200 bg-white p-3">
-            <div class="mb-3 flex flex-wrap gap-2">
-              <button class="btn-secondary" :class="invoiceDetailTab === 'booking' ? 'bg-indigo-100 text-indigo-800' : ''" @click="invoiceDetailTab = 'booking'">Booking cost details</button>
-              <button class="btn-secondary" :class="invoiceDetailTab === 'misc' ? 'bg-emerald-100 text-emerald-800' : ''" @click="invoiceDetailTab = 'misc'">Misc cost details</button>
-            </div>
-            <div v-if="invoiceDetailTab === 'booking'" class="space-y-2 text-sm">
-              <div v-for="invoice in adminMonthlyInvoices.invoices" :key="`booking-${invoice.id || invoice.user.id}`" class="rounded bg-indigo-50 p-3">
-                <h4 class="font-semibold text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }} · €{{ invoice.booking_total }}</h4>
-                <div v-for="item in invoice.booking_items" :key="`${invoice.id || invoice.user.id}-${item.booking_id}`" class="mt-2 flex flex-col justify-between gap-1 rounded bg-white px-3 py-2 sm:flex-row">
-                  <span>{{ item.date }} · {{ item.court }} · {{ item.start_time }}-{{ item.end_time }} · {{ item.participants?.join(', ') }}</span>
-                  <span class="font-semibold">{{ item.total_people_played }} players · member share €{{ item.amount }}</span>
-                </div>
-                <p v-if="!invoice.booking_items?.length" class="mt-2 text-slate-600">No booking costs for this member.</p>
-              </div>
-            </div>
-            <div v-if="invoiceDetailTab === 'misc'" class="space-y-2 text-sm">
-              <div v-for="invoice in adminMonthlyInvoices.invoices" :key="`misc-${invoice.id || invoice.user.id}`" class="rounded bg-emerald-50 p-3">
-                <h4 class="font-semibold text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }} · €{{ invoice.misc_total }}</h4>
-                <div v-for="item in invoice.misc_items" :key="`${invoice.id || invoice.user.id}-${item.cost_id}`" class="mt-2 flex flex-col justify-between gap-1 rounded bg-white px-3 py-2 sm:flex-row">
-                  <span>{{ item.purchase_date || 'No purchase date' }} · {{ item.title }} · {{ item.status }}</span>
-                  <span class="font-semibold">Split by {{ item.split_count }} members · €{{ item.amount }}</span>
-                </div>
-                <p v-if="!invoice.misc_items?.length" class="mt-2 text-slate-600">No misc costs for this member.</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -685,8 +728,12 @@
             </div>
             <div class="mt-3 space-y-3 border-t border-slate-100 pt-3">
               <h5 class="text-sm font-semibold text-slate-900">Attendance</h5>
-              <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1fr_1fr_auto_auto]">
-                <input v-model="participant.name" class="form-input" placeholder="Name" />
+              <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
+                <select class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
+                  <option value="">Keep / ad hoc player</option>
+                  <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
+                </select>
+                <input v-model="participant.name" class="form-input" placeholder="Player name" />
                 <select v-model="participant.status" class="form-input">
                   <option value="attending">Attending</option>
                   <option value="participated">Participated</option>
@@ -696,9 +743,13 @@
                 <button class="btn-secondary" @click.stop="updateParticipant(booking, participant)">Save</button>
                 <button class="btn-muted" @click.stop="deleteParticipant(booking, participant)">Remove</button>
               </div>
-              <div class="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
-                <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="Ad hoc name" />
-                <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" />
+              <div class="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
+                <select v-model="newParticipantMember[booking.id]" class="form-input">
+                  <option value="">New player (not a member)</option>
+                  <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
+                </select>
+                <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="New player name" :disabled="!!newParticipantMember[booking.id]" />
+                <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" :disabled="!!newParticipantMember[booking.id]" />
                 <select v-model="newParticipantStatus[booking.id]" class="form-input">
                   <option value="attending">Attending</option>
                   <option value="participated">Participated</option>
@@ -1006,6 +1057,7 @@ export default {
     const newParticipantName = ref({})
     const newParticipantPhone = ref({})
     const newParticipantStatus = ref({})
+    const newParticipantMember = ref({})
     const newAdminFamilyName = ref({})
     const newAdminFamilyRelationship = ref({})
     const newMiscTitle = ref('')
@@ -1068,6 +1120,26 @@ export default {
       ]
     })
     const availabilityPeople = computed(() => familyAttendancePeople.value)
+    const memberOptions = computed(() => adminUsers.value.flatMap((member) => {
+      const ownerLabel = member.name || member.email || member.phone || 'Member'
+      const options = [{
+        key: `user:${member.id}`,
+        label: ownerLabel,
+        name: ownerLabel,
+        phone: member.phone || member.email || ownerLabel,
+        is_adhoc: false
+      }]
+      for (const familyMember of member.family_members || []) {
+        options.push({
+          key: `family:${familyMember.id}`,
+          label: `${familyMember.name} (${ownerLabel})`,
+          name: familyMember.name,
+          phone: `family:${familyMember.id}`,
+          is_adhoc: false
+        })
+      }
+      return options
+    }))
     const playTotalsByDate = computed(() => {
       return playDays.value.reduce((totals, day) => {
         totals[day.date] = day.totals || defaultPlayTotals()
@@ -1304,6 +1376,7 @@ export default {
       newParticipantName.value = {}
       newParticipantPhone.value = {}
       newParticipantStatus.value = {}
+      newParticipantMember.value = {}
       errorMsg.value = ''
       msg.value = ''
     }
@@ -1457,8 +1530,10 @@ export default {
           }
           await Promise.all([
             loadBookings({ status: 'upcoming', perPage: 100 }),
+            loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
             loadPlayAvailability(),
-            loadCourts()
+            loadCourts(),
+            loadAdminUsers()
           ])
         } else if (activeView.value === 'admin-courts') {
           if (!loggedIn) {
@@ -1485,7 +1560,8 @@ export default {
           await Promise.all([
             loadMiscCosts(),
             loadAdminMonthlyInvoices(),
-            loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
+            loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page }),
+            loadAdminUsers()
           ])
         } else if (activeView.value === 'notifications') {
           if (!loggedIn) {
@@ -1680,7 +1756,8 @@ export default {
           })
         })
         msg.value = 'Booking updated successfully.'
-        await loadBookings({ status: 'upcoming', perPage: 100 })
+        if (activeView.value === 'admin-bookings') await loadDashboard()
+        else await loadBookings({ status: 'upcoming', perPage: 100 })
         resetBookingForm()
       } catch (err) {
         msg.value = err.message
@@ -1697,8 +1774,8 @@ export default {
         msg.value = 'Booking deleted successfully.'
         if (editingBookingId.value === booking.id) resetBookingForm()
         await loadBookings({ status: 'upcoming', perPage: 100 })
-        if (activeView.value === 'admin-costs') {
-          await loadCompletedBookings()
+        if (activeView.value === 'admin-bookings' || activeView.value === 'admin-costs') {
+          await loadDashboard()
         }
       } catch (err) {
         msg.value = err.message
@@ -1709,7 +1786,8 @@ export default {
       try {
         const data = await fetchJson(`/api/bookings/${bookingId}/invoice`, { method: 'POST' })
         msg.value = `Invoice generated: €${data.total_amount}`
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        if (activeView.value === 'admin-bookings') await loadDashboard()
+        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1723,7 +1801,8 @@ export default {
           body: JSON.stringify({ status })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        if (activeView.value === 'admin-bookings') await loadDashboard()
+        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1743,27 +1822,43 @@ export default {
           })
         })
         msg.value = 'Attendance updated.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        if (activeView.value === 'admin-bookings') await loadDashboard()
+        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
     }
 
+    function selectedMemberOption(key) {
+      return memberOptions.value.find((member) => member.key === key) || null
+    }
+
+    function applyParticipantMember(participant, key) {
+      const member = selectedMemberOption(key)
+      if (!member) return
+      participant.name = member.name
+      participant.phone = member.phone
+      participant.is_adhoc = member.is_adhoc
+    }
+
     async function addParticipant(booking) {
-      const name = newParticipantName.value[booking.id] || ''
-      const phone = newParticipantPhone.value[booking.id] || name
+      const member = selectedMemberOption(newParticipantMember.value[booking.id])
+      const name = member?.name || newParticipantName.value[booking.id] || ''
+      const phone = member?.phone || newParticipantPhone.value[booking.id] || name
       const status = newParticipantStatus.value[booking.id] || 'attending'
       try {
         await fetchJson(`/api/bookings/${booking.id}/participants`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, phone, status, is_adhoc: true })
+          body: JSON.stringify({ name, phone, status, is_adhoc: !member })
         })
+        newParticipantMember.value[booking.id] = ''
         newParticipantName.value[booking.id] = ''
         newParticipantPhone.value[booking.id] = ''
         newParticipantStatus.value[booking.id] = 'attending'
         msg.value = 'Participant added.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        if (activeView.value === 'admin-bookings') await loadDashboard()
+        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1777,7 +1872,8 @@ export default {
           body: JSON.stringify(participant)
         })
         msg.value = 'Participant updated.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        if (activeView.value === 'admin-bookings') await loadDashboard()
+        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1791,7 +1887,8 @@ export default {
       try {
         await fetchJson(`/api/bookings/${booking.id}/participants/${participant.id}`, { method: 'DELETE' })
         msg.value = 'Participant removed.'
-        await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
+        if (activeView.value === 'admin-bookings') await loadDashboard()
+        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
       } catch (err) {
         msg.value = err.message
       }
@@ -1962,7 +2059,8 @@ export default {
       try {
         await fetchJson(`/api/bookings/${booking.id}/settle`, { method: 'POST' })
         msg.value = 'Booking cost settled.'
-        await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
+        if (activeView.value === 'admin-bookings') await loadDashboard()
+        else await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
       } catch (err) {
         msg.value = err.message
       }
@@ -2113,6 +2211,7 @@ export default {
       availabilityPeople,
       miscCosts,
       monthlyInvoice,
+      memberOptions,
       adminMonthlyInvoices,
       monthlyInvoiceMonth,
       whatsappSettings,
@@ -2156,6 +2255,7 @@ export default {
       newParticipantName,
       newParticipantPhone,
       newParticipantStatus,
+      newParticipantMember,
       newMiscTitle,
       newMiscDescription,
       newMiscAmount,
@@ -2165,6 +2265,7 @@ export default {
       attendanceStatuses,
       availabilityStatuses,
       addParticipant,
+      applyParticipantMember,
       createCourt,
       createFreezePeriod,
       createAdminFamilyMember,

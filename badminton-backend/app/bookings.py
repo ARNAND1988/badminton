@@ -279,6 +279,7 @@ def _monthly_invoice_summary(user, month_value):
             'purchase_date': cost.purchase_date,
             'status': cost.status,
             'split_count': split_count,
+            'amount_total': round(float(cost.amount or 0.0), 2),
             'amount': amount,
         })
 

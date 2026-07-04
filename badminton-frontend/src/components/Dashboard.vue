@@ -1156,8 +1156,19 @@ export default {
     }
 
     function statusLabel(value, fallback = 'Not started') {
-      const rawStatus = (value || '').toString().trim()
+      const rawStatus = (value || '').toString().trim().toLowerCase()
       if (!rawStatus) return fallback
+      const labels = {
+        confirmed: 'Created',
+        generated: 'Created',
+        pending: 'Created',
+        not_generated: 'Created',
+        deleted: 'Cancelled',
+        cancelled: 'Cancelled',
+        completed: 'Completed',
+        settled: 'Settled',
+      }
+      if (labels[rawStatus]) return labels[rawStatus]
       return rawStatus
         .split('_')
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -1165,15 +1176,21 @@ export default {
     }
 
     function invoiceStatusLabel(value) {
-      return statusLabel(value, 'Not started')
+      return statusLabel(value, 'Created')
+    }
+
+    function bookingLifecycleStatus(booking) {
+      if (booking?.invoice?.status === 'settled') return 'Settled'
+      return statusLabel(booking?.status, 'Created')
     }
 
     function bookingStatusSummary(booking) {
-      return `${statusLabel(booking?.status, 'Confirmed')} · ${invoiceStatusLabel(booking?.invoice?.status)}`
+      return bookingLifecycleStatus(booking)
     }
 
     function bookingItemStatusSummary(item) {
-      return `${statusLabel(item?.booking_status, 'Completed')} · ${invoiceStatusLabel(item?.invoice_status)}`
+      if (item?.invoice_status === 'settled') return 'Settled'
+      return statusLabel(item?.booking_status, 'Completed')
     }
 
     function isBookingOpen(bookingId) {

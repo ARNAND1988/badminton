@@ -217,7 +217,7 @@ def _monthly_invoice_summary(user, month_value):
         .filter(
             Booking.booking_date >= start_date,
             Booking.booking_date < end_date,
-            Booking.status == 'completed',
+            Booking.status.in_(COMPLETED_BOOKING_STATUSES),
         )
         .order_by(Booking.booking_date.asc(), Booking.start_time.asc())
         .all()
@@ -365,14 +365,33 @@ def _booking_has_ended(booking_date, end_time=None, today_value=None, current_ti
     return booking_date == today_value and bool(end_time) and end_time <= current_time
 
 
+BOOKING_STATUSES = {'confirmed', 'completed', 'settled', 'cancelled'}
+COMPLETED_BOOKING_STATUSES = {'completed', 'settled'}
+TERMINAL_BOOKING_STATUSES = {'settled', 'cancelled'}
+
+
+def _normalize_booking_status(status, fallback='confirmed'):
+    status = (status or fallback or 'confirmed').strip().lower()
+    if status == 'created':
+        status = 'confirmed'
+    if status not in BOOKING_STATUSES:
+        raise ValueError('invalid_status')
+    return status
+
+
 def _booking_status_for_date(booking_date, status='confirmed', today_value=None, end_time=None, current_time=None):
-    return 'completed' if _booking_has_ended(booking_date, end_time, today_value, current_time) else (status or 'confirmed')
+    status = _normalize_booking_status(status)
+    if status in TERMINAL_BOOKING_STATUSES:
+        return status
+    return 'completed' if _booking_has_ended(booking_date, end_time, today_value, current_time) else status
 
 
 def _is_completed_booking(booking, today_value=None, current_time=None):
+    if booking.status == 'cancelled':
+        return False
     if not today_value or not current_time:
         today_value, current_time = _current_booking_cutoff_values()
-    return booking.status == 'completed' or _booking_has_ended(booking.booking_date, booking.end_time, today_value, current_time)
+    return booking.status in COMPLETED_BOOKING_STATUSES or _booking_has_ended(booking.booking_date, booking.end_time, today_value, current_time)
 
 
 def _mark_past_bookings_completed(today_value=None, current_time=None):
@@ -383,7 +402,7 @@ def _mark_past_bookings_completed(today_value=None, current_time=None):
             Booking.booking_date < today_value,
             db.and_(Booking.booking_date == today_value, Booking.end_time <= current_time),
         ),
-        Booking.status != 'completed'
+        ~Booking.status.in_(COMPLETED_BOOKING_STATUSES | {'cancelled'})
     ).all()
     for booking in completed_bookings:
         booking.status = 'completed'
@@ -441,7 +460,7 @@ def _ensure_upcoming_booking_data():
     today_value = today.strftime('%Y-%m-%d')
     upcoming_exists = Booking.query.filter(
         Booking.booking_date >= today_value,
-        Booking.status != 'completed'
+        ~Booking.status.in_(COMPLETED_BOOKING_STATUSES | {'cancelled'})
     ).first()
     if upcoming_exists:
         return
@@ -612,6 +631,7 @@ def _ensure_historical_booking_data():
         invoice.total_amount = cost
         invoice.split_count = 1
         invoice.status = 'settled'
+    booking.status = 'settled'
     db.session.commit()
 
 
@@ -965,17 +985,18 @@ def update_booking(booking_id):
     booking.end_time = end_time
     booking.cost = float(data.get('cost', booking.cost) or 0.0) if data.get('manual_cost') else calculated_cost
     booking.notes = data.get('notes', booking.notes)
-    requested_status = data.get('status', booking.status or 'confirmed')
-    requested_invoice_status = requested_status if requested_status in {'generated', 'settled'} else None
-    requested_booking_status = 'completed' if requested_invoice_status else requested_status
-    booking.status = _booking_status_for_date(booking.booking_date, requested_booking_status, end_time=booking.end_time)
+    try:
+        requested_status = _normalize_booking_status(data.get('status', booking.status or 'confirmed'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    booking.status = _booking_status_for_date(booking.booking_date, requested_status, end_time=booking.end_time)
     _sync_participation_for_booking_status(booking)
-    if requested_invoice_status:
+    if booking.status == 'settled':
         invoice = Invoice.query.filter_by(booking_id=booking.id).first()
         if not invoice:
             invoice = Invoice(booking_id=booking.id)
             db.session.add(invoice)
-        invoice.status = requested_invoice_status
+        invoice.status = 'settled'
     _sync_booking_invoice(booking)
     db.session.commit()
 
@@ -1016,18 +1037,20 @@ def list_bookings():
             return error
         _ensure_historical_booking_data()
         completed_filter = db.or_(
-            Booking.status == 'completed',
+            Booking.status.in_(COMPLETED_BOOKING_STATUSES),
             Booking.booking_date < today_value,
             db.and_(Booking.booking_date == today_value, Booking.end_time <= current_time),
         )
         if status_filter == 'archive':
             query = Booking.query.filter(
                 completed_filter,
+                Booking.status != 'cancelled',
                 Booking.booking_date < _archive_cutoff_date()
             ).order_by(Booking.booking_date.desc(), Booking.start_time.desc())
         else:
             query = Booking.query.filter(
                 completed_filter,
+                Booking.status != 'cancelled',
                 Booking.booking_date >= _archive_cutoff_date()
             )
             month_value = (request.args.get('month') or '').strip()
@@ -1039,7 +1062,7 @@ def list_bookings():
             query = query.order_by(Booking.booking_date.desc(), Booking.start_time.desc())
     elif status_filter == 'upcoming':
         query = Booking.query.filter(
-            Booking.status != 'completed',
+            ~Booking.status.in_(COMPLETED_BOOKING_STATUSES | {'cancelled'}),
             db.or_(
                 Booking.booking_date > today_value,
                 db.and_(Booking.booking_date == today_value, Booking.end_time > current_time),
@@ -1253,6 +1276,7 @@ def settle_booking_cost(booking_id):
     invoice.total_amount = float(booking.cost or 0.0)
     invoice.split_count = max(1, attended_count or 1)
     invoice.status = 'settled'
+    booking.status = 'settled'
     db.session.commit()
     return jsonify(invoice.to_dict())
 
@@ -1419,7 +1443,7 @@ def admin_monthly_invoices():
         .filter(
             Booking.booking_date >= start_date,
             Booking.booking_date < end_date,
-            Booking.status == 'completed',
+            Booking.status.in_(COMPLETED_BOOKING_STATUSES),
         )
         .order_by(Booking.booking_date.asc(), Booking.start_time.asc())
         .all()
@@ -1898,7 +1922,7 @@ def _send_due_booking_reminders(now=None):
     today_value = now.date().strftime('%Y-%m-%d')
     bookings = Booking.query.filter(
         Booking.booking_date == today_value,
-        Booking.status != 'completed'
+        ~Booking.status.in_(COMPLETED_BOOKING_STATUSES | {'cancelled'})
     ).order_by(Booking.start_time.asc()).all()
     sent_logs = []
     for booking in bookings:

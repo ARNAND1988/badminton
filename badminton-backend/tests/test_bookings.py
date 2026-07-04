@@ -131,7 +131,7 @@ def test_completed_booking_participant_write_normalizes_attending_to_participate
     assert add_resp.get_json()['status'] == 'participated'
 
 
-def test_update_booking_status_dropdown_can_generate_and_settle_invoice(client, app):
+def test_update_booking_status_dropdown_can_complete_settle_and_reject_old_invoice_status(client, app):
     with app.app_context():
         admin = User(phone='+31100002003', email='status-invoice-admin@example.com', name='Status Invoice Admin', role='admin')
         court = Court(name='Status Invoice Court', hourly_rate=30.0, is_active=True)
@@ -150,21 +150,25 @@ def test_update_booking_status_dropdown_can_generate_and_settle_invoice(client, 
         'booking_date': '2030-06-03',
         'start_time': '18:00',
         'end_time': '19:00',
-        'status': 'generated',
+        'status': 'completed',
     }
-    generated_resp = client.put(f'/api/bookings/{booking_id}', json=payload, headers=headers)
+    completed_resp = client.put(f'/api/bookings/{booking_id}', json=payload, headers=headers)
 
-    assert generated_resp.status_code == 200
-    generated_data = generated_resp.get_json()
-    assert generated_data['status'] == 'completed'
-    assert generated_data['invoice']['status'] == 'generated'
+    assert completed_resp.status_code == 200
+    completed_data = completed_resp.get_json()
+    assert completed_data['status'] == 'completed'
+
+    payload['status'] = 'generated'
+    generated_resp = client.put(f'/api/bookings/{booking_id}', json=payload, headers=headers)
+    assert generated_resp.status_code == 400
+    assert generated_resp.get_json()['error'] == 'invalid_status'
 
     payload['status'] = 'settled'
     settled_resp = client.put(f'/api/bookings/{booking_id}', json=payload, headers=headers)
 
     assert settled_resp.status_code == 200
     settled_data = settled_resp.get_json()
-    assert settled_data['status'] == 'completed'
+    assert settled_data['status'] == 'settled'
     assert settled_data['invoice']['status'] == 'settled'
 
 def test_admin_can_delete_booking_with_participants_invoice_and_cancel_notification(client, app, monkeypatch):

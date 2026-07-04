@@ -236,10 +236,9 @@
             <div v-if="editingBookingId">
               <label class="form-label">📌 Status</label>
               <select v-model="bookingStatus" class="form-input">
-                <option value="confirmed">Confirmed</option>
+                <option value="confirmed">Created</option>
                 <option value="completed">Completed</option>
-                <option value="generated">Completed · Generated</option>
-                <option value="settled">Completed · Settled</option>
+                <option value="settled">Settled</option>
                 <option value="cancelled">Cancelled</option>
               </select>
             </div>
@@ -556,20 +555,32 @@
 
     <section v-if="activeView === 'costs'" class="space-y-6">
       <div>
-        <h2 class="section-title">My Invoices</h2>
-        <p class="section-copy mt-1">Review shared expenses and your portion of completed court booking invoices.</p>
+        <h2 class="section-title">My Costs</h2>
+        <p class="section-copy mt-1">Review booking splits, misc shared costs, and your monthly invoice separately.</p>
+        <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
+          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'invoice' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="costViewTab = 'invoice'">Invoices</button>
+          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'booking' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="costViewTab = 'booking'">Booking splits</button>
+          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'misc' ? 'bg-white text-emerald-800 shadow-sm' : ''" @click="costViewTab = 'misc'">Misc splits</button>
+        </div>
       </div>
 
       <div class="panel-card">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h3 class="text-lg font-semibold text-slate-900">Monthly summary</h3>
-            <p class="section-copy">Your booking and shared-cost total for the selected month.</p>
+            <h3 class="text-lg font-semibold text-slate-900">Monthly period</h3>
+            <p class="section-copy">Choose the month used for invoice and split details.</p>
           </div>
           <label class="block sm:w-48">
             <span class="form-label">Month</span>
             <input v-model="monthlyInvoiceMonth" type="month" class="form-input" @change="loadMonthlyInvoice" />
           </label>
+        </div>
+      </div>
+
+      <div v-if="costViewTab === 'invoice'" class="panel-card">
+        <div class="flex flex-col gap-1">
+          <h3 class="text-lg font-semibold text-slate-900">Invoice summary</h3>
+          <p class="section-copy">Your booking total, misc total, and grand total for the selected month.</p>
         </div>
         <div v-if="monthlyInvoice" class="mt-4 grid gap-3 sm:grid-cols-3">
           <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
@@ -577,101 +588,89 @@
             <div class="mt-1 text-2xl font-bold text-indigo-900">€{{ monthlyInvoice.booking_total }}</div>
           </div>
           <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
-            <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Shared Costs</div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Misc costs</div>
             <div class="mt-1 text-2xl font-bold text-emerald-900">€{{ monthlyInvoice.misc_total }}</div>
           </div>
           <div class="rounded border border-slate-200 bg-slate-50 p-3">
-            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total</div>
+            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total due</div>
             <div class="mt-1 text-2xl font-bold text-slate-900">€{{ monthlyInvoice.total }}</div>
           </div>
         </div>
-        <div v-if="monthlyInvoice" class="mt-4 rounded border border-slate-200 bg-white p-3">
-          <div class="mb-3 flex flex-wrap gap-2">
-            <button class="btn-secondary" :class="invoiceDetailTab === 'booking' ? 'bg-indigo-100 text-indigo-800' : ''" @click="invoiceDetailTab = 'booking'">Booking costs</button>
-            <button class="btn-secondary" :class="invoiceDetailTab === 'misc' ? 'bg-emerald-100 text-emerald-800' : ''" @click="invoiceDetailTab = 'misc'">Misc costs</button>
-          </div>
+      </div>
 
-          <div v-if="invoiceDetailTab === 'booking'" class="space-y-2 text-sm">
-            <h4 class="font-semibold text-slate-900">Booking cost details</h4>
-            <div v-if="monthlyInvoice.booking_items?.length" class="overflow-x-auto rounded border border-slate-200">
-              <table class="min-w-[760px] divide-y divide-slate-200 text-sm sm:min-w-full">
-                <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th class="px-3 py-2">Booking</th>
-                    <th class="px-3 py-2">Players</th>
-                    <th class="px-3 py-2">Total cost</th>
-                    <th class="px-3 py-2">Each</th>
-                    <th class="px-3 py-2">Status</th>
-                    <th class="px-3 py-2 text-right">Your share</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100 bg-white">
-                  <tr v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="align-top">
-                    <td class="px-3 py-2 font-medium text-slate-900">
-                      {{ item.date }}
-                      <div class="text-xs font-normal text-slate-500">{{ item.court }} · {{ item.start_time }}-{{ item.end_time }}</div>
-                    </td>
-                    <td class="px-3 py-2">
-                      {{ item.total_people_played }}
-                      <div v-if="item.participants?.length" class="max-w-48 truncate text-xs text-slate-500">{{ item.participants.join(', ') }}</div>
-                    </td>
-                    <td class="px-3 py-2">€{{ item.total_cost }}</td>
-                    <td class="px-3 py-2">€{{ item.cost_per_person }}</td>
-                    <td class="px-3 py-2">
-                      <span class="inline-flex rounded-full bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">{{ bookingItemStatusSummary(item) }}</span>
-                    </td>
-                    <td class="px-3 py-2 text-right font-semibold text-slate-900">€{{ item.amount }}</td>
-                  </tr>
-                </tbody>
-              </table>
+      <div v-if="costViewTab === 'booking'" class="panel-card space-y-3 text-sm">
+        <h3 class="text-lg font-semibold text-slate-900">Booking split details</h3>
+        <div v-if="monthlyInvoice?.booking_items?.length" class="grid gap-3 lg:grid-cols-2">
+          <article v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h4 class="font-semibold text-slate-900">{{ item.court || 'Court booking' }}</h4>
+                <p class="text-slate-600">{{ item.date }} · {{ item.start_time }}-{{ item.end_time }}</p>
+              </div>
+              <span class="rounded-full bg-indigo-100 px-2 py-1 text-xs font-semibold text-indigo-700">{{ bookingItemStatusSummary(item) }}</span>
             </div>
-            <p v-if="!monthlyInvoice.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
-          </div>
+            <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Players</div><div class="font-semibold">{{ item.total_people_played }}</div></div>
+              <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Total</div><div class="font-semibold">€{{ item.total_cost }}</div></div>
+              <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Each</div><div class="font-semibold">€{{ item.cost_per_person }}</div></div>
+              <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Your share</div><div class="font-semibold">€{{ item.amount }}</div></div>
+            </div>
+            <p v-if="item.participants?.length" class="mt-2 text-xs text-slate-500">Players: {{ item.participants.join(', ') }}</p>
+          </article>
+        </div>
+        <p v-if="!monthlyInvoice?.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
+      </div>
 
-          <div v-if="invoiceDetailTab === 'misc'" class="space-y-2 text-sm">
-            <h4 class="font-semibold text-slate-900">Misc cost details</h4>
-            <div v-for="item in monthlyInvoice.misc_items" :key="item.cost_id" class="flex flex-col justify-between gap-1 rounded bg-emerald-50 px-3 py-2 sm:flex-row">
-              <span>{{ item.purchase_date || 'No purchase date' }} · {{ item.title }} · {{ item.status }}</span>
-              <span class="font-semibold">Split by {{ item.split_count }} members · €{{ item.amount }}</span>
-            </div>
-            <p v-if="!monthlyInvoice.misc_items?.length" class="text-sm text-slate-600">No misc costs for this month.</p>
+      <div v-if="costViewTab === 'misc'" class="space-y-4">
+        <div class="panel-card space-y-3 text-sm">
+          <h3 class="text-lg font-semibold text-slate-900">Misc split details</h3>
+          <div v-if="monthlyInvoice?.misc_items?.length" class="grid gap-3 lg:grid-cols-2">
+            <article v-for="item in monthlyInvoice.misc_items" :key="item.cost_id" class="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h4 class="font-semibold text-slate-900">{{ item.title }}</h4>
+                  <p class="text-slate-600">{{ item.purchase_date || 'No purchase date' }} · {{ item.status }}</p>
+                </div>
+                <span class="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">€{{ item.amount }} each</span>
+              </div>
+              <p class="mt-2 text-sm text-slate-700">Split by {{ item.split_count }} members · Total €{{ item.amount_total || item.total_cost || 0 }}</p>
+            </article>
           </div>
+          <p v-if="!monthlyInvoice?.misc_items?.length" class="text-sm text-slate-600">No misc costs for this month.</p>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <article v-for="cost in miscCosts" :key="cost.id" class="sub-card space-y-3 p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
+                <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
+              </div>
+              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
+            </div>
+            <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">
+              Split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each
+            </div>
+            <p class="text-sm text-slate-600">
+              Paid by {{ cost.paid_by || 'Not set' }} · {{ cost.purchase_date || 'No purchase date' }} · {{ cost.status }}
+            </p>
+          </article>
         </div>
       </div>
-
-      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <article v-for="cost in miscCosts" :key="cost.id" class="sub-card space-y-3 p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
-              <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
-            </div>
-            <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
-          </div>
-          <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">
-            Split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each
-          </div>
-          <p class="text-sm text-slate-600">
-            Paid by {{ cost.paid_by || 'Not set' }} · {{ cost.purchase_date || 'No purchase date' }} · {{ cost.status }}
-          </p>
-
-        </article>
-      </div>
-
-
     </section>
 
     <section v-if="activeView === 'admin-costs'" class="space-y-6">
       <div>
         <h2 class="section-title">Split Costs</h2>
         <p class="section-copy mt-1">Create and maintain shared expenses, then settle completed court booking invoices.</p>
-        <div class="mt-3 flex flex-wrap gap-2">
-          <button class="btn-secondary" :class="adminCostTab === 'misc' ? 'bg-emerald-100 text-emerald-800' : ''" @click="adminCostTab = 'misc'">Misc costs</button>
-          <button class="btn-secondary" :class="adminCostTab === 'booking' ? 'bg-emerald-100 text-emerald-800' : ''" @click="adminCostTab = 'booking'">Booking costs</button>
+        <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
+          <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'invoices' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'invoices'">Invoices</button>
+          <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'misc' ? 'bg-white text-emerald-800 shadow-sm' : ''" @click="adminCostTab = 'misc'">Misc costs</button>
+          <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'booking' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'booking'">Booking costs</button>
         </div>
       </div>
 
-      <div class="panel-card">
+      <div v-if="adminCostTab === 'invoices'" class="panel-card">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h3 class="text-lg font-semibold text-slate-900">Monthly cost per person</h3>
@@ -717,44 +716,54 @@
         </div>
       </div>
 
-      <div v-if="adminCostTab === 'misc'" class="panel-card">
-        <h3 class="mb-3 text-lg font-semibold">Add shared cost</h3>
-        <div class="grid gap-3 md:grid-cols-2">
-          <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
-          <input v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
-          <input v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
-          <input v-model="newMiscPurchaseDate" type="date" class="form-input" />
-          <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" />
-          <input v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
-        </div>
-        <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
-      </div>
+      <div v-if="adminCostTab === 'misc'" class="space-y-4">
+        <details class="panel-card" open>
+          <summary class="cursor-pointer text-lg font-semibold text-slate-900">Add shared misc cost</summary>
+          <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
+            <input v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
+            <input v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
+            <input v-model="newMiscPurchaseDate" type="date" class="form-input" />
+            <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" />
+            <input v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
+          </div>
+          <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
+        </details>
 
-      <div v-if="adminCostTab === 'misc'" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <article v-for="cost in miscCosts" :key="cost.id" class="sub-card space-y-3 p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div>
-              <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
-              <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
+        <div class="grid gap-4 lg:grid-cols-2">
+          <article v-for="cost in miscCosts" :key="cost.id" class="sub-card overflow-hidden p-0">
+            <button type="button" class="flex w-full items-start justify-between gap-3 p-4 text-left transition hover:bg-slate-50" :aria-expanded="isMiscCostOpen(cost.id)" @click="toggleMiscCost(cost.id)">
+              <div>
+                <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
+                <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
+                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }} · {{ cost.purchase_date || 'No date' }} · split {{ cost.split_count }}</p>
+              </div>
+              <div class="flex shrink-0 items-center gap-3">
+                <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
+                <span class="text-slate-400" aria-hidden="true">{{ isMiscCostOpen(cost.id) ? '−' : '+' }}</span>
+              </div>
+            </button>
+            <div v-if="isMiscCostOpen(cost.id)" class="space-y-3 border-t border-slate-100 p-4">
+              <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">Split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each</div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <input v-model="cost.title" class="form-input" placeholder="Title" />
+                <input v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
+                <input v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
+                <input v-model="cost.purchase_date" type="date" class="form-input" />
+                <input v-model.number="cost.split_count" type="number" min="1" class="form-input" />
+                <select v-model="cost.status" class="form-input">
+                  <option value="open">Open</option>
+                  <option value="settled">Settled</option>
+                </select>
+                <textarea v-model="cost.description" class="form-input sm:col-span-2" placeholder="Description"></textarea>
+              </div>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <button class="btn-secondary" @click="updateMiscCost(cost)">Save changes</button>
+                <button class="btn-muted" @click="deleteMiscCost(cost)">Delete</button>
+              </div>
             </div>
-            <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
-          </div>
-          <div class="space-y-2 border-t border-slate-100 pt-3">
-            <input v-model="cost.title" class="form-input" />
-            <input v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
-            <input v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
-            <input v-model="cost.purchase_date" type="date" class="form-input" />
-            <input v-model.number="cost.split_count" type="number" min="1" class="form-input" />
-            <select v-model="cost.status" class="form-input">
-              <option value="open">Open</option>
-              <option value="settled">Settled</option>
-            </select>
-            <div class="grid grid-cols-2 gap-2">
-              <button class="btn-secondary" @click="updateMiscCost(cost)">Save</button>
-              <button class="btn-muted" @click="deleteMiscCost(cost)">Delete</button>
-            </div>
-          </div>
-        </article>
+          </article>
+        </div>
       </div>
 
       <div v-if="adminCostTab === 'booking'" class="mt-8 space-y-4">
@@ -1024,6 +1033,7 @@ export default {
     const archivedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
     const openBookingIds = ref(new Set())
     const openCompletedBookingIds = ref(new Set())
+    const openMiscCostIds = ref(new Set())
     const loading = ref(false)
     const errorMsg = ref('')
     const editingBookingId = ref(null)
@@ -1039,8 +1049,9 @@ export default {
     const recurringCount = ref(1)
     const recurringEndDate = ref(localIsoDate())
     const adminBookingTab = ref('bookings')
-    const adminCostTab = ref('misc')
+    const adminCostTab = ref('invoices')
     const completedBookingTab = ref('completed')
+    const costViewTab = ref('invoice')
     const invoiceDetailTab = ref('booking')
     const newCourtName = ref('')
     const newCourtLocation = ref('')
@@ -1185,7 +1196,6 @@ export default {
       if (!rawStatus) return fallback
       const labels = {
         confirmed: 'Created',
-        generated: 'Created',
         pending: 'Created',
         not_generated: 'Created',
         deleted: 'Cancelled',
@@ -1205,11 +1215,7 @@ export default {
     }
 
     function bookingLifecycleStatus(booking) {
-      const bookingLabel = statusLabel(booking?.status, 'Created')
-      const invoiceStatus = booking?.invoice?.status
-      if (invoiceStatus === 'settled') return `${bookingLabel} · Settled`
-      if (invoiceStatus === 'generated') return `${bookingLabel} · Generated`
-      return bookingLabel
+      return statusLabel(booking?.status, 'Created')
     }
 
     function bookingStatusSummary(booking) {
@@ -1217,10 +1223,7 @@ export default {
     }
 
     function bookingItemStatusSummary(item) {
-      const bookingLabel = statusLabel(item?.booking_status, 'Completed')
-      if (item?.invoice_status === 'settled') return `${bookingLabel} · Settled`
-      if (item?.invoice_status === 'generated') return `${bookingLabel} · Generated`
-      return bookingLabel
+      return statusLabel(item?.booking_status, 'Completed')
     }
 
     function isBookingOpen(bookingId) {
@@ -1243,6 +1246,17 @@ export default {
       if (nextOpenIds.has(bookingId)) nextOpenIds.delete(bookingId)
       else nextOpenIds.add(bookingId)
       openCompletedBookingIds.value = nextOpenIds
+    }
+
+    function isMiscCostOpen(costId) {
+      return openMiscCostIds.value.has(costId)
+    }
+
+    function toggleMiscCost(costId) {
+      const nextOpenIds = new Set(openMiscCostIds.value)
+      if (nextOpenIds.has(costId)) nextOpenIds.delete(costId)
+      else nextOpenIds.add(costId)
+      openMiscCostIds.value = nextOpenIds
     }
 
     function participantStatusCounts(booking) {
@@ -1761,7 +1775,7 @@ export default {
       startTime.value = booking.start_time
       endTime.value = booking.end_time
       bookingCost.value = String(booking.cost || 0)
-      bookingStatus.value = ['generated', 'settled'].includes(booking.invoice?.status) ? booking.invoice.status : (booking.status || 'confirmed')
+      bookingStatus.value = booking.status || 'confirmed'
       bookingNotes.value = booking.notes || ''
       recurringMode.value = false
       msg.value = ''
@@ -2277,6 +2291,7 @@ export default {
       completedBookingPagination,
       archivedBookingPagination,
       completedBookingTab,
+      costViewTab,
       invoiceDetailTab,
       courts,
       calculatedBookingCost,
@@ -2297,6 +2312,8 @@ export default {
       toggleBooking,
       isCompletedBookingOpen,
       toggleCompletedBooking,
+      isMiscCostOpen,
+      toggleMiscCost,
       participantCompletedStatusLabel,
       loading,
       errorMsg,

@@ -106,12 +106,17 @@ def _is_cost_split_status(status):
     return status in {'attending', 'participated'}
 
 
+def _participant_status_for_booking(booking, status):
+    if booking and booking.status == 'completed' and status == 'attending':
+        return 'participated'
+    return status
+
+
 def _sync_participation_for_booking_status(booking):
     if booking.status != 'completed':
         return
     for participant in booking.participants:
-        if participant.status == 'attending':
-            participant.status = 'participated'
+        participant.status = _participant_status_for_booking(booking, participant.status)
 
 
 def _normalize_person_name(value):
@@ -626,7 +631,7 @@ def _upsert_participant(booking, phone, name=None, status='tentative', is_adhoc=
         db.session.add(participant)
 
     participant.name = (name or participant.name or '').strip() or None
-    participant.status = status
+    participant.status = _participant_status_for_booking(booking, status)
     participant.is_adhoc = bool(is_adhoc)
     return participant
 
@@ -961,8 +966,16 @@ def update_booking(booking_id):
     booking.cost = float(data.get('cost', booking.cost) or 0.0) if data.get('manual_cost') else calculated_cost
     booking.notes = data.get('notes', booking.notes)
     requested_status = data.get('status', booking.status or 'confirmed')
-    booking.status = _booking_status_for_date(booking.booking_date, requested_status, end_time=booking.end_time)
+    requested_invoice_status = requested_status if requested_status in {'generated', 'settled'} else None
+    requested_booking_status = 'completed' if requested_invoice_status else requested_status
+    booking.status = _booking_status_for_date(booking.booking_date, requested_booking_status, end_time=booking.end_time)
     _sync_participation_for_booking_status(booking)
+    if requested_invoice_status:
+        invoice = Invoice.query.filter_by(booking_id=booking.id).first()
+        if not invoice:
+            invoice = Invoice(booking_id=booking.id)
+            db.session.add(invoice)
+        invoice.status = requested_invoice_status
     _sync_booking_invoice(booking)
     db.session.commit()
 
@@ -1171,7 +1184,7 @@ def update_booking_participant(booking_id, participant_id):
 
     participant.name = (data.get('name', participant.name) or '').strip() or None
     participant.phone = (data.get('phone', participant.phone) or '').strip()
-    participant.status = status
+    participant.status = _participant_status_for_booking(booking, status)
     if 'is_adhoc' in data:
         participant.is_adhoc = bool(data.get('is_adhoc'))
     _sync_booking_invoice(booking)

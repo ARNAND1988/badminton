@@ -1,6 +1,38 @@
 from datetime import datetime
+from decimal import Decimal, ROUND_CEILING
 import json
 from . import db
+
+
+def _money_decimal(value):
+    return Decimal(str(value or 0)).quantize(Decimal('0.01'))
+
+
+def rounded_up_cost_split(total_cost, split_count):
+    split_count = int(split_count or 0)
+    total = _money_decimal(total_cost)
+    if split_count <= 0:
+        return {
+            'attended_count': 0,
+            'cost_per_person': 0.0,
+            'participant_shares': [],
+            'total_cost': float(total),
+            'rounded_total': 0.0,
+            'rounding_adjustment': 0.0,
+            'rounding_tolerance': 0.01,
+        }
+    share = (total / Decimal(split_count)).quantize(Decimal('0.01'), rounding=ROUND_CEILING)
+    shares = [float(share)] * split_count
+    rounded_total = (share * split_count).quantize(Decimal('0.01'))
+    return {
+        'attended_count': split_count,
+        'cost_per_person': float(share),
+        'participant_shares': shares,
+        'total_cost': float(total),
+        'rounded_total': float(rounded_total),
+        'rounding_adjustment': float((total - rounded_total).quantize(Decimal('0.01'))),
+        'rounding_tolerance': 0.01,
+    }
 
 
 class User(db.Model):
@@ -129,15 +161,11 @@ class Booking(db.Model):
     def to_dict(self):
         attended = [participant for participant in self.participants if participant.status in {'attending', 'participated'}]
         split_count = len(attended)
-        total_cost = round(float(self.cost or 0.0), 2)
-        total_cents = int(round(total_cost * 100))
-        base_cents, remainder_cents = divmod(total_cents, split_count or 1)
-        cost_per_person = round(base_cents / 100, 2) if split_count else 0.0
-        participant_cost_shares = {}
-        for index, participant in enumerate(attended):
-            participant_cost_shares[participant.id] = round((base_cents + (1 if index < remainder_cents else 0)) / 100, 2)
-        rounded_total = round(sum(participant_cost_shares.values()), 2) if split_count else 0.0
-        rounding_adjustment = round(total_cost - rounded_total, 2) if split_count else 0.0
+        split = rounded_up_cost_split(self.cost, split_count)
+        participant_cost_shares = {
+            participant.id: split['participant_shares'][index]
+            for index, participant in enumerate(attended)
+        }
         return {
             'id': self.id,
             'court': self.court.to_dict() if self.court else None,
@@ -149,12 +177,12 @@ class Booking(db.Model):
             'status': self.status,
             'participants': [participant.to_dict(participant_cost_shares.get(participant.id, 0.0)) for participant in self.participants],
             'cost_split': {
-                'attended_count': split_count,
-                'cost_per_person': cost_per_person,
-                'total_cost': total_cost,
-                'rounded_total': rounded_total,
-                'rounding_adjustment': rounding_adjustment,
-                'remainder_cents': remainder_cents if split_count else 0,
+                'attended_count': split['attended_count'],
+                'cost_per_person': split['cost_per_person'],
+                'total_cost': split['total_cost'],
+                'rounded_total': split['rounded_total'],
+                'rounding_adjustment': split['rounding_adjustment'],
+                'rounding_tolerance': split['rounding_tolerance'],
             },
             'invoice': self.invoice[0].to_dict() if self.invoice else None,
         }

@@ -64,6 +64,36 @@ def test_booking_availability_and_invoice(client, app):
     assert update_data['cost'] == 25.0
 
 
+
+def test_completed_booking_update_converts_attending_members_to_participated(client, app):
+    with app.app_context():
+        admin = User(phone='+31100002001', email='participated-admin@example.com', name='Participated Admin', role='admin')
+        court = Court(name='Participated Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([admin, court])
+        db.session.commit()
+        booking = Booking(court_id=court.id, booking_date='2030-06-01', start_time='18:00', end_time='19:00', cost=20, status='confirmed')
+        db.session.add(booking)
+        db.session.commit()
+        participant = BookingParticipant(booking_id=booking.id, phone='player-1', name='Player One', status='attending')
+        db.session.add(participant)
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        booking_id = booking.id
+        court_id = court.id
+
+    resp = client.put(f'/api/bookings/{booking_id}', json={
+        'court_id': court_id,
+        'booking_date': '2030-06-01',
+        'start_time': '18:00',
+        'end_time': '19:00',
+        'status': 'completed',
+    }, headers={'Authorization': f'Bearer {token}'})
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['status'] == 'completed'
+    assert data['participants'][0]['status'] == 'participated'
+
 def test_admin_can_delete_booking_with_participants_invoice_and_cancel_notification(client, app, monkeypatch):
     import app.bookings as bookings_module
 
@@ -624,7 +654,7 @@ def test_booking_rsvp_admin_attendance_and_cost_split(client, app):
     assert settle_resp.get_json()['status'] == 'settled'
 
 
-def test_booking_cost_split_distributes_rounding_remainder(client, app):
+def test_booking_cost_split_rounds_each_share_up_and_tolerates_cent_difference(client, app):
     with app.app_context():
         court = Court(name='Rounding Court', hourly_rate=10.0, is_active=True)
         booking = Booking(
@@ -649,12 +679,13 @@ def test_booking_cost_split_distributes_rounding_remainder(client, app):
     assert resp.status_code == 200
     booking = next(item for item in resp.get_json()['bookings'] if item['id'] == booking_id)
     shares = [participant['cost_share'] for participant in booking['participants'] if participant['status'] == 'attending']
-    assert shares == [3.34, 3.33, 3.33]
-    assert round(sum(shares), 2) == booking['cost_split']['total_cost']
-    assert booking['cost_split']['cost_per_person'] == 3.33
-    assert booking['cost_split']['rounded_total'] == 10.0
-    assert booking['cost_split']['rounding_adjustment'] == 0.0
-    assert booking['cost_split']['remainder_cents'] == 1
+    assert shares == [3.34, 3.34, 3.34]
+    assert round(sum(shares), 2) == 10.02
+    assert abs(round(sum(shares), 2) - booking['cost_split']['total_cost']) <= 0.02
+    assert booking['cost_split']['cost_per_person'] == 3.34
+    assert booking['cost_split']['rounded_total'] == 10.02
+    assert booking['cost_split']['rounding_adjustment'] == -0.02
+    assert booking['cost_split']['rounding_tolerance'] == 0.01
 
 def test_member_can_set_family_attendance_for_booking(client, app):
     with app.app_context():
@@ -1209,8 +1240,8 @@ def test_admin_monthly_invoice_lists_family_and_name_matched_participants_once(c
     invoices = {invoice['user']['name']: invoice for invoice in data['invoices']}
     assert invoices['Renjith R']['booking_total'] == 26.67
     assert invoices['Reema']['booking_total'] == 26.67
-    assert invoices['Guest']['booking_total'] == 26.66
-    assert data['totals']['booking_total'] == 80.0
+    assert invoices['Guest']['booking_total'] == 26.67
+    assert data['totals']['booking_total'] == 80.01
 
 
 def test_current_user_monthly_invoice_deduplicates_name_matched_participant(client, app):

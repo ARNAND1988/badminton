@@ -5,7 +5,7 @@ from flask import Blueprint, jsonify, request, current_app
 import jwt
 
 from . import db
-from .models import Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User
+from .models import Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, rounded_up_cost_split
 
 bookings_bp = Blueprint('bookings', __name__)
 
@@ -104,6 +104,14 @@ def _valid_participant_status(status):
 
 def _is_cost_split_status(status):
     return status in {'attending', 'participated'}
+
+
+def _sync_participation_for_booking_status(booking):
+    if booking.status != 'completed':
+        return
+    for participant in booking.participants:
+        if participant.status == 'attending':
+            participant.status = 'participated'
 
 
 def _normalize_person_name(value):
@@ -221,9 +229,8 @@ def _monthly_invoice_summary(user, month_value):
         if not matching:
             continue
         split_count = max(1, len(attending) or 1)
-        raw_total_cents = int(round(float(booking.cost or 0.0) * 100))
-        base_cents, remainder_cents = divmod(raw_total_cents, split_count)
-        per_person = round(base_cents / 100, 2)
+        split = rounded_up_cost_split(booking.cost, split_count)
+        per_person = split['cost_per_person']
         matching_ids = set()
         matching_amount = 0.0
         matching_participants = []
@@ -242,7 +249,7 @@ def _monthly_invoice_summary(user, month_value):
             if matched_key in matching_ids:
                 continue
             matching_ids.add(matched_key)
-            matching_amount = round(matching_amount + round((base_cents + (1 if index < remainder_cents else 0)) / 100, 2), 2)
+            matching_amount = round(matching_amount + split['participant_shares'][index], 2)
             matching_participants.append(participant)
         amount = matching_amount
         booking_total += amount
@@ -366,16 +373,20 @@ def _is_completed_booking(booking, today_value=None, current_time=None):
 def _mark_past_bookings_completed(today_value=None, current_time=None):
     if not today_value or not current_time:
         today_value, current_time = _current_booking_cutoff_values()
-    updated = Booking.query.filter(
+    completed_bookings = Booking.query.filter(
         db.or_(
             Booking.booking_date < today_value,
             db.and_(Booking.booking_date == today_value, Booking.end_time <= current_time),
         ),
         Booking.status != 'completed'
-    ).update({'status': 'completed'}, synchronize_session=False)
-    if updated:
+    ).all()
+    for booking in completed_bookings:
+        booking.status = 'completed'
+        _sync_participation_for_booking_status(booking)
+        _sync_booking_invoice(booking)
+    if completed_bookings:
         db.session.commit()
-    return updated
+    return len(completed_bookings)
 
 
 def _archive_cutoff_date(today=None):
@@ -951,6 +962,7 @@ def update_booking(booking_id):
     booking.notes = data.get('notes', booking.notes)
     requested_status = data.get('status', booking.status or 'confirmed')
     booking.status = _booking_status_for_date(booking.booking_date, requested_status, end_time=booking.end_time)
+    _sync_participation_for_booking_status(booking)
     _sync_booking_invoice(booking)
     db.session.commit()
 
@@ -1403,11 +1415,10 @@ def admin_monthly_invoices():
     for booking in bookings:
         attending = [participant for participant in booking.participants if _is_cost_split_status(participant.status)]
         split_count = max(1, len(attending) or 1)
-        raw_total_cents = int(round(float(booking.cost or 0.0) * 100))
-        base_cents, remainder_cents = divmod(raw_total_cents, split_count)
-        per_person = round(base_cents / 100, 2)
+        split = rounded_up_cost_split(booking.cost, split_count)
+        per_person = split['cost_per_person']
         for index, participant in enumerate(attending):
-            participant_amount = round((base_cents + (1 if index < remainder_cents else 0)) / 100, 2)
+            participant_amount = split['participant_shares'][index]
             subject = subject_for_participant(participant)
             item_key = (booking.id, subject['id'])
             if item_key in seen_booking_subjects:

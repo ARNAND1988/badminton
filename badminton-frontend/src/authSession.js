@@ -21,6 +21,9 @@ export function clearAuthSession() {
   SESSION_KEYS.forEach((key) => {
     clearSessionValue(key)
   })
+  if (typeof window !== 'undefined' && window.history?.replaceState) {
+    window.history.replaceState(null, document.title, window.location.href)
+  }
   emitAuthChanged()
 }
 

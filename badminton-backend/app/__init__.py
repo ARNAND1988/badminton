@@ -64,6 +64,14 @@ def create_app():
     def health():
         return {"status": "ok"}
 
+    @app.after_request
+    def add_no_store_for_api(response):
+        if request.path.startswith('/api/'):
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+        return response
+
     @app.route("/docs")
     @app.route("/swagger")
     @app.route("/swagger/")

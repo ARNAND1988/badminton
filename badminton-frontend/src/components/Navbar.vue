@@ -176,7 +176,7 @@ export default {
       isAccountMenuOpen.value = false
       clearAuthSession()
       refreshSessionSnapshot()
-      router.replace('/availability')
+      router.replace('/login')
     }
 
     function toggleAccountMenu() {

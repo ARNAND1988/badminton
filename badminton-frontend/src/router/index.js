@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Register from '../components/Register.vue'
 import Dashboard from '../components/Dashboard.vue'
 import NotFound from '../components/NotFound.vue'
-import { hasAuthSession } from '../authSession'
+import { clearAuthSession, getSessionValue, hasAuthSession } from '../authSession'
 
 const routes = [
   {
@@ -103,8 +103,20 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to) => {
-  if (to.meta.requiresAuth && !hasAuthSession()) {
+router.beforeEach(async (to) => {
+  if (!to.meta.requiresAuth) return true
+  if (!hasAuthSession()) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  try {
+    const token = getSessionValue('auth_token')
+    const res = await fetch('/api/auth/me', {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store'
+    })
+    if (!res.ok) throw new Error('invalid_session')
+  } catch (err) {
+    clearAuthSession()
     return { path: '/login', query: { redirect: to.fullPath } }
   }
   return true

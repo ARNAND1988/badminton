@@ -518,6 +518,12 @@
               <div class="rounded-xl border border-emerald-100 bg-white/80 p-3 text-emerald-700">✅ {{ day.totals.available_count || 0 }} available</div>
               <div class="flex items-center gap-2 rounded-xl border border-amber-100 bg-white/80 p-3 text-amber-700"><TentativeIcon class="h-4 w-4 shrink-0" /> <span>{{ day.totals.tentative_count || 0 }} tentative</span></div>
             </div>
+            <div v-if="isLoggedIn && availabilityVoterNames(day).length" class="mt-3 rounded-xl border border-white/70 bg-white/80 p-3 text-sm text-slate-700">
+              <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Players who voted</div>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <span v-for="name in availabilityVoterNames(day)" :key="name" class="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">{{ name }}</span>
+              </div>
+            </div>
           </div>
 
           <div v-if="isLoggedIn" class="space-y-3 p-4">
@@ -556,11 +562,11 @@
     <section v-if="activeView === 'costs'" class="space-y-6">
       <div>
         <h2 class="section-title">My Costs</h2>
-        <p class="section-copy mt-1">Review booking splits, misc shared costs, and your monthly invoice separately.</p>
+        <p class="section-copy mt-1">Review your monthly invoice with booking and miscellaneous splits in one simple view.</p>
         <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
-          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'invoice' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="costViewTab = 'invoice'">Invoices</button>
-          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'booking' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="costViewTab = 'booking'">Booking splits</button>
-          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'misc' ? 'bg-white text-emerald-800 shadow-sm' : ''" @click="costViewTab = 'misc'">Misc splits</button>
+          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'summary' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="costViewTab = 'summary'">Summary / Total</button>
+          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'booking' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="costViewTab = 'booking'">Bookings</button>
+          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'misc' ? 'bg-white text-emerald-800 shadow-sm' : ''" @click="costViewTab = 'misc'">Miscellaneous</button>
         </div>
       </div>
 
@@ -577,7 +583,7 @@
         </div>
       </div>
 
-      <div v-if="costViewTab === 'invoice'" class="panel-card">
+      <div v-if="costViewTab === 'summary'" class="panel-card space-y-4">
         <div class="flex flex-col gap-1">
           <h3 class="text-lg font-semibold text-slate-900">Invoice summary</h3>
           <p class="section-copy">Your booking total, misc total, and grand total for the selected month.</p>
@@ -595,6 +601,28 @@
             <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total due</div>
             <div class="mt-1 text-2xl font-bold text-slate-900">€{{ monthlyInvoice.total }}</div>
           </div>
+        </div>
+        <div v-if="monthlyInvoice" class="grid gap-3 lg:grid-cols-2">
+          <article v-for="section in personalInvoiceSections" :key="section.key" class="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4 class="font-semibold text-slate-900">{{ section.title }}</h4>
+                <p class="text-sm text-slate-600">{{ section.count }} items</p>
+              </div>
+              <span class="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-900">€{{ section.total }}</span>
+            </div>
+            <details class="mt-3 rounded-lg bg-white p-3">
+              <summary class="cursor-pointer text-sm font-semibold text-indigo-700">Show detailed breakdown</summary>
+              <div class="mt-3 space-y-2 text-sm">
+                <div v-for="item in section.items" :key="`${section.key}-${item.booking_id || item.cost_id}`" class="rounded border border-slate-100 p-2">
+                  <div class="font-medium text-slate-900">{{ item.court || item.title || 'Cost item' }}</div>
+                  <div class="text-slate-600">{{ item.date || item.purchase_date }} <span v-if="item.start_time">· {{ item.start_time }}-{{ item.end_time }}</span></div>
+                  <div class="mt-1 text-xs text-slate-500">Split {{ item.total_people_played || item.split_count }} ways · Your share €{{ item.amount }}</div>
+                </div>
+                <p v-if="!section.items.length" class="text-sm text-slate-500">No items in this section.</p>
+              </div>
+            </details>
+          </article>
         </div>
       </div>
 
@@ -696,21 +724,47 @@
               <div class="mt-1 text-2xl font-bold text-slate-900">€{{ adminMonthlyInvoices.totals.total }}</div>
             </div>
           </div>
-          <div class="overflow-x-auto rounded border border-slate-200 bg-white">
-            <table class="min-w-full divide-y divide-slate-200 text-sm">
-              <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <tr><th class="px-3 py-2">Member</th><th class="px-3 py-2">Bookings</th><th class="px-3 py-2">Shared costs</th><th class="px-3 py-2">Total</th><th class="px-3 py-2">Verify</th></tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                <tr v-for="invoice in adminMonthlyInvoices.invoices" :key="invoice.id || invoice.user.id">
-                  <td class="px-3 py-2 font-medium text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }}</td>
-                  <td class="px-3 py-2">€{{ invoice.booking_total }}</td>
-                  <td class="px-3 py-2">€{{ invoice.misc_total }}</td>
-                  <td class="px-3 py-2 font-semibold text-slate-900">€{{ invoice.total }}</td>
-                  <td class="px-3 py-2"><button class="text-sm font-semibold text-indigo-700 hover:text-indigo-900" @click="showVerificationDetails(invoice, invoice.user.name || invoice.user.email || invoice.user.phone)">Details</button></td>
-                </tr>
-              </tbody>
-            </table>
+          <div class="grid gap-3">
+            <details v-for="invoice in adminMonthlyInvoices.invoices" :key="invoice.id || invoice.user.id" class="rounded-xl border border-slate-200 bg-white p-4">
+              <summary class="cursor-pointer list-none">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 class="font-semibold text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }}</h4>
+                    <p class="text-sm text-slate-600">{{ adminMonthlyInvoices.month }} · {{ (invoice.booking_items || []).length }} booking costs · {{ (invoice.misc_items || []).length }} misc costs</p>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                    <div class="rounded bg-slate-50 p-2"><div class="text-xs text-slate-500">Total cost</div><div class="font-bold">€{{ invoice.total }}</div></div>
+                    <div class="rounded bg-emerald-50 p-2"><div class="text-xs text-slate-500">Amount paid</div><div class="font-bold text-emerald-800">€{{ invoice.paid_amount || 0 }}</div></div>
+                    <div class="rounded bg-amber-50 p-2"><div class="text-xs text-slate-500">Balance</div><div class="font-bold text-amber-800">€{{ invoice.balance_amount ?? invoice.total }}</div></div>
+                    <div class="rounded bg-indigo-50 p-2"><div class="text-xs text-slate-500">Paid count</div><div class="font-bold text-indigo-800">{{ invoice.paid_count || 0 }}</div></div>
+                  </div>
+                </div>
+              </summary>
+              <div class="mt-4 grid gap-3 lg:grid-cols-2">
+                <div class="rounded-lg border border-indigo-100 bg-indigo-50/60 p-3">
+                  <h5 class="font-semibold text-indigo-900">Bookings</h5>
+                  <div class="mt-2 space-y-2 text-sm">
+                    <div v-for="item in invoice.booking_items" :key="item.booking_id" class="rounded bg-white p-2">
+                      <div class="font-medium text-slate-900">{{ item.date }} · {{ item.start_time }}-{{ item.end_time }}</div>
+                      <div class="text-slate-600">{{ item.court }} · {{ item.participants?.join(', ') }}</div>
+                      <div class="text-xs text-slate-500">Total €{{ item.total_cost }} · {{ item.total_people_played }} players · Share €{{ item.amount }}</div>
+                    </div>
+                    <p v-if="!invoice.booking_items?.length" class="text-sm text-slate-500">No booking costs.</p>
+                  </div>
+                </div>
+                <div class="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
+                  <h5 class="font-semibold text-emerald-900">Miscellaneous</h5>
+                  <div class="mt-2 space-y-2 text-sm">
+                    <div v-for="item in invoice.misc_items" :key="item.cost_id" class="rounded bg-white p-2">
+                      <div class="font-medium text-slate-900">{{ item.purchase_date || 'No date' }} · {{ item.title }}</div>
+                      <div class="text-xs text-slate-500">Total €{{ item.amount_total }} · split {{ item.split_count }} ways · Share €{{ item.amount }}</div>
+                    </div>
+                    <p v-if="!invoice.misc_items?.length" class="text-sm text-slate-500">No misc costs.</p>
+                  </div>
+                </div>
+                <button class="btn-secondary lg:col-span-2" @click="showVerificationDetails(invoice, invoice.user.name || invoice.user.email || invoice.user.phone)">Open verification popup</button>
+              </div>
+            </details>
           </div>
 
         </div>
@@ -911,7 +965,7 @@
                 <td class="px-3 py-3"><span class="rounded-full bg-indigo-50 px-2 py-1 text-xs font-bold uppercase text-indigo-700">{{ log.event_type }}</span></td>
                 <td class="px-3 py-3 text-slate-700">{{ log.entity_type }}<div v-if="log.entity_id" class="text-xs text-slate-500">#{{ log.entity_id }}</div></td>
                 <td class="px-3 py-3 text-slate-800">{{ log.summary }}</td>
-                <td class="px-3 py-3"><pre class="max-w-md whitespace-pre-wrap rounded bg-slate-950 p-2 text-xs text-slate-100">{{ auditLogDetails(log.details) }}</pre></td>
+                <td class="px-3 py-3"><ul class="max-w-md space-y-1 text-xs text-slate-700"><li v-for="line in auditLogDetails(log.details)" :key="line" class="rounded bg-slate-50 px-2 py-1">{{ line }}</li></ul></td>
               </tr>
             </tbody>
           </table>
@@ -1043,7 +1097,7 @@
 <script>
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { getAuthSessionVersion, getSessionValue, hasAuthSession, setSessionValue } from '../authSession'
+import { clearAuthSession, getAuthSessionVersion, getSessionValue, hasAuthSession, setSessionValue } from '../authSession'
 
 const TentativeIcon = (props) => h('svg', {
   ...props,
@@ -1103,7 +1157,7 @@ export default {
     const adminBookingTab = ref('bookings')
     const adminCostTab = ref('invoices')
     const completedBookingTab = ref('completed')
-    const costViewTab = ref('invoice')
+    const costViewTab = ref('summary')
     const invoiceDetailTab = ref('booking')
     const newCourtName = ref('')
     const newCourtLocation = ref('')
@@ -1207,6 +1261,13 @@ export default {
         totals[day.date] = day.totals || defaultPlayTotals()
         return totals
       }, {})
+    })
+    const personalInvoiceSections = computed(() => {
+      const invoice = monthlyInvoice.value || {}
+      return [
+        { key: 'booking', title: 'Bookings', count: (invoice.booking_items || []).length, total: Number(invoice.booking_total || 0).toFixed(2), items: invoice.booking_items || [] },
+        { key: 'misc', title: 'Miscellaneous', count: (invoice.misc_items || []).length, total: Number(invoice.misc_total || 0).toFixed(2), items: invoice.misc_items || [] },
+      ]
     })
     const attendanceStatuses = [
       { value: 'attending', label: 'Attending' },
@@ -1370,6 +1431,15 @@ export default {
       return attendees.map((attendee) => attendee.name).filter(Boolean)
     }
 
+    function availabilityVoterNames(day) {
+      const totals = day?.totals || defaultPlayTotals()
+      const names = [
+        ...(totals.available_attendees || []),
+        ...(totals.tentative_attendees || [])
+      ].map((attendee) => attendee.name).filter(Boolean)
+      return [...new Set(names)].slice(0, 12)
+    }
+
     function showVerificationDetails(invoice, title = 'Cost verification') {
       const bookingItems = invoice?.booking_items || []
       const miscItems = (invoice?.misc_items || []).map((item) => ({
@@ -1400,7 +1470,7 @@ export default {
       const headers = { Accept: 'application/json', ...(options.headers || {}) }
       if (token()) headers.Authorization = `Bearer ${token()}`
       const fullUrl = /^https?:\/\//.test(url) ? url : `${apiBase}${url}`
-      const res = await fetch(fullUrl, { ...options, headers })
+      const res = await fetch(fullUrl, { ...options, headers, cache: 'no-store' })
       const text = await res.text()
       let data = {}
       if (text) {
@@ -1417,6 +1487,7 @@ export default {
           : res.status === 404
             ? 'The requested service was not found.'
             : `Request failed (${res.status})`
+        if (res.status === 401) clearAuthSession()
         throw new Error(data.error || fallback)
       }
       return data
@@ -1604,8 +1675,18 @@ export default {
     }
 
     function auditLogDetails(details) {
-      if (!details || (typeof details === 'object' && !Object.keys(details).length)) return 'No structured details'
-      return JSON.stringify(details, null, 2)
+      if (!details || (typeof details === 'object' && !Object.keys(details).length)) return ['No additional details']
+      const lines = []
+      const source = details.booking || details.court || details.user || details.family_member || details.cost || details.invoice || details.freeze_period || details
+      if (source.name || source.title) lines.push(`Name: ${source.name || source.title}`)
+      if (source.booking_date || source.date) lines.push(`Date: ${source.booking_date || source.date}${source.start_time ? ` ${source.start_time}-${source.end_time || ''}` : ''}`)
+      if (source.court?.name || source.court) lines.push(`Court: ${source.court?.name || source.court}`)
+      if (source.amount || source.total_amount || source.cost) lines.push(`Amount: €${source.amount || source.total_amount || source.cost}`)
+      if (details.owner_id) lines.push(`Owner user: #${details.owner_id}`)
+      if (details.changes) {
+        Object.entries(details.changes).forEach(([field, change]) => lines.push(`${field.replaceAll('_', ' ')}: ${change.from ?? 'blank'} → ${change.to ?? 'blank'}`))
+      }
+      return lines.length ? lines : Object.entries(source).slice(0, 6).map(([key, value]) => `${key.replaceAll('_', ' ')}: ${typeof value === 'object' ? 'updated' : value}`)
     }
 
     async function changeAdminAuditPage(page) {
@@ -2367,6 +2448,7 @@ export default {
       adminAuditPagination,
       auditLogDate,
       auditLogDetails,
+      availabilityVoterNames,
       bookingInterest,
       bookingDateLabel,
       bookingDayLabel,
@@ -2390,6 +2472,7 @@ export default {
       availabilityPeople,
       miscCosts,
       monthlyInvoice,
+      personalInvoiceSections,
       memberOptions,
       adminMonthlyInvoices,
       monthlyInvoiceMonth,

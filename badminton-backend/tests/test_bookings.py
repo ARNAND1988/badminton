@@ -1399,3 +1399,37 @@ def test_current_user_monthly_invoice_deduplicates_name_matched_participant(clie
     assert data['booking_total'] == 20.0
     assert data['booking_items'][0]['attendee_count'] == 1
     assert data['booking_items'][0]['participants'] == ['Renjith R']
+
+
+def test_deleted_court_is_hidden_from_active_list_and_booking_creation(client, app):
+    with app.app_context():
+        admin = User(phone='+31100001004', email='court-delete@example.com', name='Court Admin', role='admin')
+        court = Court(name='Delete Me Court', hourly_rate=30.0, is_active=True)
+        db.session.add_all([admin, court])
+        db.session.commit()
+        court_id = court.id
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    headers = {'Authorization': f'Bearer {token}'}
+    delete_resp = client.delete(f'/api/admin/courts/{court_id}', headers=headers)
+    assert delete_resp.status_code == 200
+    assert delete_resp.get_json()['is_active'] is False
+
+    active_resp = client.get('/api/admin/courts?include_inactive=0', headers=headers)
+    assert active_resp.status_code == 200
+    assert court_id not in {court['id'] for court in active_resp.get_json()['courts']}
+
+    booking_resp = client.post('/api/bookings', json={
+        'court_id': court_id,
+        'booking_date': '2030-01-01',
+        'start_time': '18:00',
+        'end_time': '19:00',
+    }, headers=headers)
+    assert booking_resp.status_code == 404
+
+
+def test_api_responses_disable_cache_for_session_safety(client):
+    resp = client.get('/api/health')
+    assert resp.status_code == 200
+    assert 'no-store' in resp.headers['Cache-Control']
+    assert resp.headers['Pragma'] == 'no-cache'

@@ -325,6 +325,8 @@ def _monthly_invoice_summary(user, month_value):
         })
 
     total = round(booking_total + misc_total, 2)
+    paid_count = len([item for item in booking_items if item.get('invoice_status') == 'settled'])
+    paid_amount = round(sum(float(item.get('amount') or 0.0) for item in booking_items if item.get('invoice_status') == 'settled'), 2)
     return {
         'user': user.to_dict(),
         'month': month_value,
@@ -333,6 +335,9 @@ def _monthly_invoice_summary(user, month_value):
         'booking_total': round(booking_total, 2),
         'misc_total': round(misc_total, 2),
         'total': total,
+        'paid_amount': paid_amount,
+        'balance_amount': round(total - paid_amount, 2),
+        'paid_count': paid_count,
     }
 
 
@@ -836,7 +841,7 @@ def create_booking():
         return jsonify({'error': 'court_id, booking_date, start_time and end_time are required'}), 400
 
     court = Court.query.get(court_id)
-    if not court:
+    if not court or court.is_active is False:
         return jsonify({'error': 'court_not_found'}), 404
     try:
         calculated_cost = _calculated_booking_cost(court, start_time, end_time)
@@ -923,7 +928,7 @@ def update_booking(booking_id):
         return jsonify({'error': 'court_id, booking_date, start_time and end_time are required'}), 400
 
     court = Court.query.get(court_id)
-    if not court:
+    if not court or court.is_active is False:
         return jsonify({'error': 'court_not_found'}), 404
 
     if _slot_overlaps(court_id, booking_date, start_time, end_time, exclude_booking_id=booking.id):
@@ -1377,6 +1382,9 @@ def admin_monthly_invoices():
             'booking_total': 0.0,
             'misc_total': 0.0,
             'total': 0.0,
+            'paid_amount': 0.0,
+            'balance_amount': 0.0,
+            'paid_count': 0,
         }
         subjects.append(subject)
         for key in subject['participant_keys']:
@@ -1459,6 +1467,9 @@ def admin_monthly_invoices():
             subject['misc_total'] = summary['misc_total']
         subject['total'] = round(subject['booking_total'] + subject['misc_total'], 2)
         subject['booking_total'] = round(subject['booking_total'], 2)
+        subject['paid_count'] = len([item for item in subject['booking_items'] if item.get('invoice_status') == 'settled'])
+        subject['paid_amount'] = round(sum(float(item.get('amount') or 0.0) for item in subject['booking_items'] if item.get('invoice_status') == 'settled'), 2)
+        subject['balance_amount'] = round(subject['total'] - subject['paid_amount'], 2)
 
     visible = [subject for subject in subjects if subject['booking_items'] or subject['misc_items'] or subject['user'].get('id')]
     for subject in visible:
@@ -1678,7 +1689,11 @@ def list_courts():
     if error:
         return error
 
-    courts = Court.query.order_by(Court.name.asc()).all()
+    include_inactive = (request.args.get('include_inactive') or '1').lower() not in {'0', 'false', 'no'}
+    query = Court.query
+    if not include_inactive:
+        query = query.filter_by(is_active=True)
+    courts = query.order_by(Court.name.asc()).all()
     return jsonify({'courts': [court.to_dict() for court in courts]})
 
 

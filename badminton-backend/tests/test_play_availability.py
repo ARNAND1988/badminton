@@ -128,3 +128,9 @@ def test_play_availability_public_totals_without_login(client, app):
     assert days[0]['vote'] is None
     assert days[0]['totals']['available_families'] == 1
     assert days[0]['totals']['attendee_count'] == 3
+
+
+def test_startup_backfills_family_member_link_column(client, app):
+    with app.app_context():
+        columns = {column['name'] for column in db.inspect(db.engine).get_columns('family_members')}
+    assert 'linked_user_id' in columns

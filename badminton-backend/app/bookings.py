@@ -741,6 +741,8 @@ def list_play_availability():
             if attendee.get('status') == 'tentative'
         ]
         vote_status = vote.status or ('available' if vote.available else 'not_available')
+        fallback_name = vote.user.name or vote.user.email or vote.user.phone if vote.user else None
+        fallback_attendee = {'name': fallback_name or 'Member', 'status': vote_status}
         if available_attendees:
             totals[vote.play_date]['available_families'] += 1
             totals[vote.play_date]['attendee_count'] += len(available_attendees)
@@ -750,6 +752,7 @@ def list_play_availability():
             totals[vote.play_date]['available_families'] += 1
             totals[vote.play_date]['attendee_count'] += vote.attendee_count or 0
             totals[vote.play_date]['available_count'] += vote.attendee_count or 0
+            totals[vote.play_date]['available_attendees'].append(fallback_attendee)
         if tentative_attendees:
             totals[vote.play_date]['tentative_families'] += 1
             totals[vote.play_date]['tentative_count'] += len(tentative_attendees)
@@ -757,6 +760,7 @@ def list_play_availability():
         elif vote_status == 'tentative':
             totals[vote.play_date]['tentative_families'] += 1
             totals[vote.play_date]['tentative_count'] += vote.attendee_count or 0
+            totals[vote.play_date]['tentative_attendees'].append(fallback_attendee)
 
     days_payload = []
     for date_value in date_values:

@@ -41,6 +41,10 @@ def test_seeded_admin_login_credentials(client):
     assert data.get('status') == 'ok'
     assert data.get('user', {}).get('role') == 'admin'
 
+    phone_resp = client.post('/api/auth/login', json={'username': '+10000000000', 'password': 'admin123'})
+    assert phone_resp.status_code == 200
+    assert phone_resp.get_json().get('user', {}).get('role') == 'admin'
+
 
 def test_register_and_login_with_email_password(client):
     register_resp = client.post('/api/auth/register', json={
@@ -84,3 +88,31 @@ def test_register_without_whatsapp(client):
     data = resp.get_json()
     assert data.get('user', {}).get('phone') == 'email:plain.member@example.com'
     assert data.get('user', {}).get('whatsapp_number') is None
+
+
+def test_seeded_member_login_credentials(client):
+    resp = client.post('/api/auth/login', json={'username': 'user', 'password': 'user123'})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data.get('status') == 'ok'
+    assert data.get('user', {}).get('role') == 'member'
+
+
+def test_anand_parasuraman_is_seeded_as_super_admin(client):
+    resp = client.post('/api/auth/login', json={
+        'username': 'Anand Parasuraman',
+        'password': 'admin123',
+    })
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data.get('status') == 'ok'
+    assert data.get('user', {}).get('name') == 'Anand Parasuraman'
+    assert data.get('user', {}).get('email') == 'arnand0413@gmail.com'
+    assert data.get('user', {}).get('role') == 'super_admin'
+
+    email_resp = client.post('/api/auth/login', json={
+        'username': 'arnand0413@gmail.com',
+        'password': 'admin123',
+    })
+    assert email_resp.status_code == 200
+    assert email_resp.get_json().get('user', {}).get('role') == 'super_admin'

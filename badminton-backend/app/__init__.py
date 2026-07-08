@@ -15,7 +15,8 @@ limiter = Limiter(key_func=get_remote_address)
 def create_app():
     app = Flask(__name__)
 
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get("DATABASE_URL")
+    database_url = os.environ.get("DATABASE_URL") or "sqlite:///db.sqlite"
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY") or "dev-secret"
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -106,6 +107,33 @@ def create_app():
         db.create_all()
         from sqlalchemy import inspect
         from app.models import User, WhatsAppNotificationSetting
+
+        def upsert_login_user(phone, email, name, role, password, is_club_member=True, aliases=()):
+            normalized_email = (email or '').strip().lower() or None
+            user = None
+            lookup_filters = []
+            if phone:
+                lookup_filters.append(User.phone == phone)
+            if normalized_email:
+                lookup_filters.append(User.email == normalized_email)
+            for alias in [name, *aliases]:
+                if alias and alias.strip():
+                    lookup_filters.append(User.name.ilike(alias.strip()))
+            if lookup_filters:
+                from sqlalchemy import or_
+                user = User.query.filter(or_(*lookup_filters)).first()
+            if not user:
+                user = User(phone=phone or f"email:{normalized_email}")
+                db.session.add(user)
+            user.email = normalized_email
+            user.name = name
+            user.role = role
+            user.is_club_member = is_club_member
+            if not user.whatsapp_number and phone and not phone.startswith('email:'):
+                user.whatsapp_number = phone
+            if password and (not user.password_hash or os.environ.get('RESET_SEEDED_PASSWORDS', '').lower() in ('1', 'true', 'yes')):
+                user.password_hash = pbkdf2_sha256.hash(password)
+            return user
         inspector = inspect(db.engine)
         user_columns = {col['name'] for col in inspector.get_columns('users')}
         if 'email' not in user_columns:
@@ -180,15 +208,36 @@ def create_app():
             or os.environ.get('FLASK_ENV', '').lower() == 'development'
         )
         if should_seed_default_admin:
-            admin_user = User.query.filter_by(phone='+10000000000').first()
-            if not admin_user:
-                admin_user = User(phone='+10000000000')
-                db.session.add(admin_user)
-            admin_user.email = 'admin@example.com'
-            admin_user.password_hash = pbkdf2_sha256.hash('admin123')
-            admin_user.name = 'admin'
-            admin_user.role = 'admin'
-            admin_user.is_club_member = True
+            upsert_login_user(
+                phone='+10000000000',
+                email='admin@example.com',
+                name='admin',
+                role='admin',
+                password=os.environ.get('DEFAULT_ADMIN_PASSWORD', 'admin123'),
+                aliases=('Demo Admin',),
+            )
+            upsert_login_user(
+                phone='+10000000001',
+                email='user@example.com',
+                name='user',
+                role='member',
+                password=os.environ.get('DEFAULT_MEMBER_PASSWORD', 'user123'),
+                aliases=('Demo User',),
+            )
+
+        anand_password = (
+            os.environ.get('ANAND_SUPER_ADMIN_PASSWORD')
+            or os.environ.get('DEFAULT_SUPER_ADMIN_PASSWORD')
+            or ('admin123' if should_seed_default_admin else None)
+        )
+        upsert_login_user(
+            phone=os.environ.get('ANAND_SUPER_ADMIN_PHONE', 'email:arnand0413@gmail.com'),
+            email=os.environ.get('ANAND_SUPER_ADMIN_EMAIL', 'arnand0413@gmail.com'),
+            name='Anand Parasuraman',
+            role='super_admin',
+            password=anand_password,
+            aliases=('Anand',),
+        )
         db.session.commit()
 
     return app

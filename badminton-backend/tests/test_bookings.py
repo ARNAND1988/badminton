@@ -674,6 +674,7 @@ def test_admin_can_manage_users_and_family_members(client, app):
         'role': 'admin',
         'is_club_member': True,
         'whatsapp_number': '+31600000009',
+        'password': 'newpass123',
     }, headers=headers)
     assert update_resp.status_code == 200
     updated_user = update_resp.get_json()
@@ -681,6 +682,14 @@ def test_admin_can_manage_users_and_family_members(client, app):
     assert updated_user['role'] == 'admin'
     assert updated_user['is_club_member'] is True
     assert updated_user['whatsapp_number'] == '+31600000009'
+
+    login_resp = client.post('/api/auth/login', json={'username': 'club-member@example.com', 'password': 'newpass123'})
+    assert login_resp.status_code == 200
+    assert login_resp.get_json()['user']['role'] == 'admin'
+    phone_login_resp = client.post('/api/auth/login', json={'username': '+31100000009', 'password': 'newpass123'})
+    assert phone_login_resp.status_code == 200
+    whatsapp_login_resp = client.post('/api/auth/login', json={'username': '+31600000009', 'password': 'newpass123'})
+    assert whatsapp_login_resp.status_code == 200
 
     family_resp = client.put(f'/api/admin/family-members/{family_id}', json={
         'relationship': 'Child',

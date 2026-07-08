@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Blueprint, jsonify, request, current_app
 import jwt
+from passlib.hash import pbkdf2_sha256
 
 from . import db
 from .models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, rounded_up_cost_split
@@ -55,6 +56,13 @@ def _snapshot_fields(obj, fields):
 
 def _changed_fields(before, after):
     return {key: {'from': before.get(key), 'to': after.get(key)} for key in before if before.get(key) != after.get(key)}
+
+
+def _normalize_password(value):
+    password = value or ''
+    if password and len(password) < 6:
+        raise ValueError('password_too_short')
+    return password
 
 
 def _record_admin_audit(user, event_type, entity_type, entity_id=None, summary='', details=None):
@@ -1563,11 +1571,16 @@ def create_admin_user():
             return jsonify({'error': 'invalid_role'}), 400
         if role == 'super_admin' and (admin.role or '').lower() != 'super_admin':
             return jsonify({'error': 'super_admin_required_for_role_changes'}), 403
+        try:
+            password = _normalize_password(data.get('password'))
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
         user = User(
             phone=phone,
-            email=data.get('email'),
-            name=data.get('name'),
-            whatsapp_number=data.get('whatsapp_number'),
+            email=(data.get('email') or '').strip().lower() or None,
+            name=(data.get('name') or '').strip() or None,
+            whatsapp_number=(data.get('whatsapp_number') or '').strip() or None,
+            password_hash=pbkdf2_sha256.hash(password) if password else None,
             role=role,
             is_club_member=bool(data.get('is_club_member', False))
         )
@@ -1587,6 +1600,7 @@ def update_admin_user(user_id):
     target_user = User.query.get_or_404(user_id)
     before = _snapshot_fields(target_user, ['email', 'phone', 'name', 'whatsapp_number', 'role', 'is_club_member'])
     data = request.get_json() or {}
+    password_changed = False
 
     if 'email' in data:
         email = (data.get('email') or '').strip().lower() or None
@@ -1620,9 +1634,18 @@ def update_admin_user(user_id):
         if target_user.role == 'super_admin' and role != 'super_admin' and (admin.role or '').lower() != 'super_admin':
             return jsonify({'error': 'super_admin_required_for_role_changes'}), 403
         target_user.role = role
+    if 'password' in data and data.get('password'):
+        try:
+            password = _normalize_password(data.get('password'))
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+        target_user.password_hash = pbkdf2_sha256.hash(password)
+        password_changed = True
 
     after = _snapshot_fields(target_user, ['email', 'phone', 'name', 'whatsapp_number', 'role', 'is_club_member'])
     changes = _changed_fields(before, after)
+    if password_changed:
+        changes['password'] = {'from': 'unchanged', 'to': 'reset'}
     if changes:
         _record_admin_audit(admin, 'update', 'user', target_user.id, f'Updated user {_public_user_label(target_user)}', {'changes': changes})
     db.session.commit()

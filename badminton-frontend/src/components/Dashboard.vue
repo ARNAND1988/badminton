@@ -955,7 +955,17 @@
             </div>
           </div>
 
-          <div class="grid gap-3 md:grid-cols-3">
+          <div class="grid gap-3 md:grid-cols-4">
+            <div>
+              <label class="form-label">Reset password</label>
+              <input
+                v-model="newAdminUserPassword[member.id]"
+                type="password"
+                minlength="6"
+                class="form-input"
+                placeholder="Leave blank to keep"
+              />
+            </div>
             <label class="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
               <input v-model="member.is_club_member" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
               Club member
@@ -1265,6 +1275,7 @@ export default {
     const newParticipantPhone = ref({})
     const newParticipantStatus = ref({})
     const newParticipantMember = ref({})
+    const newAdminUserPassword = ref({})
     const newAdminFamilyName = ref({})
     const newAdminFamilyRelationship = ref({})
     const newAdminFamilyLinkedUser = ref({})
@@ -2501,19 +2512,23 @@ export default {
 
     async function updateAdminUser(member) {
       try {
+        const payload = {
+          name: member.name,
+          email: member.email,
+          phone: member.phone,
+          whatsapp_number: member.whatsapp_number,
+          role: member.role,
+          is_club_member: member.is_club_member
+        }
+        const password = (newAdminUserPassword.value[member.id] || '').trim()
+        if (password) payload.password = password
         const data = await fetchJson(`/api/admin/users/${member.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: member.name,
-            email: member.email,
-            phone: member.phone,
-            whatsapp_number: member.whatsapp_number,
-            role: member.role,
-            is_club_member: member.is_club_member
-          })
+          body: JSON.stringify(payload)
         })
         Object.assign(member, data)
+        newAdminUserPassword.value[member.id] = ''
         msg.value = `Updated ${data.name || data.email || data.phone}.`
       } catch (err) {
         msg.value = err.message
@@ -2711,6 +2726,7 @@ export default {
       newFreezeEndDate,
       newFreezeReason,
       newFamilyName,
+      newAdminUserPassword,
       newAdminFamilyName,
       newAdminFamilyRelationship,
       newAdminFamilyLinkedUser,

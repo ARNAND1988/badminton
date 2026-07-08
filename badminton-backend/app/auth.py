@@ -22,6 +22,23 @@ def _normalize_whatsapp(number):
     return (number or '').strip()
 
 
+def _find_login_user(identifier):
+    identifier = (identifier or '').strip()
+    if not identifier:
+        return None
+    normalized = identifier.lower()
+    user = User.query.filter_by(email=normalized).first()
+    if user:
+        return user
+    user = User.query.filter(func.lower(User.name) == normalized).first()
+    if user:
+        return user
+    user = User.query.filter_by(phone=identifier).first()
+    if user:
+        return user
+    return User.query.filter_by(whatsapp_number=identifier).first()
+
+
 def _validate_email(email):
     return bool(re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email or ''))
 
@@ -168,12 +185,10 @@ def register():
 @auth_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json() or {}
-    username = (data.get('username') or data.get('email') or '').strip().lower()
+    username = data.get('username') or data.get('email') or data.get('phone') or data.get('whatsapp_number') or ''
     password = data.get('password') or ''
 
-    user = User.query.filter_by(email=username).first()
-    if not user:
-        user = User.query.filter(func.lower(User.name) == username).first()
+    user = _find_login_user(username)
     if user and user.password_hash and pbkdf2_sha256.verify(password, user.password_hash):
         return _issue_token(user)
 

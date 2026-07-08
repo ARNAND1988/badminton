@@ -121,6 +121,8 @@ def create_app():
         family_columns = {col['name'] for col in inspector.get_columns('family_members')}
         if 'is_club_member' not in family_columns:
             db.session.execute(db.text('ALTER TABLE family_members ADD COLUMN is_club_member BOOLEAN DEFAULT FALSE'))
+        if 'linked_user_id' not in family_columns:
+            db.session.execute(db.text('ALTER TABLE family_members ADD COLUMN linked_user_id INTEGER'))
         court_columns = {col['name'] for col in inspector.get_columns('courts')}
         if 'location' not in court_columns:
             db.session.execute(db.text('ALTER TABLE courts ADD COLUMN location VARCHAR(255)'))

@@ -594,15 +594,6 @@
       </div>
 
       <div class="panel-card space-y-5">
-        <div class="flex flex-col gap-1">
-          <h3 class="text-lg font-semibold text-slate-900">Summary / Total</h3>
-          <p class="section-copy">Everything for this month is shown below in one view.</p>
-        </div>
-        <div v-if="monthlyInvoice" class="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-          <span class="text-slate-600">Month status</span>
-          <span :class="monthStatusClass(monthlyInvoice.month_status?.status)" class="rounded-full px-3 py-1 text-xs font-bold">{{ monthStatusLabel(monthlyInvoice.month_status?.status) }}</span>
-          <span class="text-slate-500">{{ monthlyInvoice.family_title || monthlyInvoice.family_owner?.name || 'Family invoice' }}</span>
-        </div>
         <div v-if="monthlyInvoice" class="mt-4 grid gap-3 sm:grid-cols-3">
           <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
             <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Bookings</div>
@@ -623,56 +614,46 @@
           <div v-if="currentPaymentInvoice.is_test_invoice" class="alert-warning">TEST MODE - This invoice is for testing only</div>
           <div class="grid gap-4 md:grid-cols-[180px_1fr]"><img v-if="currentPaymentInvoice.qr_code_data_url" :src="currentPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p><strong>Total amount due:</strong> €{{ currentPaymentInvoice.amount_due }}</p><p><strong>Due date:</strong> {{ currentPaymentInvoice.due_date }}</p><p><strong>IBAN:</strong> {{ currentPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ currentPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ currentPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.payment_reference)">Copy payment reference</button></p></div></div>
         </div>
-        <div v-else-if="monthlyInvoice" class="rounded-xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-900">
-          Payment QR and bank details will appear here when an admin marks {{ monthName(monthlyInvoice.month) }} as ready for payment.
-        </div>
 
         <div v-if="monthlyInvoice" class="space-y-5">
-          <section class="space-y-3">
-            <div class="flex flex-col gap-1">
-              <h4 class="font-semibold text-slate-900">Bookings included</h4>
-              <p class="text-sm text-slate-600">Each booking shows the family members counted in your family share.</p>
-            </div>
-            <div v-if="monthlyInvoice.booking_items?.length" class="grid gap-3 lg:grid-cols-2">
-              <article v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-sm">
-                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <h5 class="font-semibold text-slate-900">{{ item.court || 'Court booking' }}</h5>
-                    <p class="text-slate-600">{{ item.date }} · {{ item.start_time }}-{{ item.end_time }}</p>
-                  </div>
-                  <span class="rounded-full bg-indigo-100 px-2 py-1 text-xs font-semibold text-indigo-700">{{ bookingItemStatusSummary(item) }}</span>
-                </div>
-                <div v-if="(item.family_members || item.participants)?.length" class="mt-3 rounded-lg border border-indigo-100 bg-white p-2">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Family members in this booking</div>
-                  <div class="mt-1 font-medium text-slate-900">{{ (item.family_members || item.participants).join(' & ') }}</div>
-                </div>
-                <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Players</div><div class="font-semibold">{{ item.total_people_played }}</div></div>
-                  <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Total</div><div class="font-semibold">€{{ item.total_cost }}</div></div>
-                  <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Each</div><div class="font-semibold">€{{ item.cost_per_person }}</div></div>
-                  <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Family share</div><div class="font-semibold">€{{ item.amount }}</div></div>
-                </div>
-              </article>
-            </div>
-            <p v-if="!monthlyInvoice.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
-          </section>
-
-          <section class="space-y-3">
-            <h4 class="font-semibold text-slate-900">Miscellaneous costs</h4>
-            <div v-if="monthlyInvoice.misc_items?.length" class="grid gap-3 lg:grid-cols-2">
-              <article v-for="item in monthlyInvoice.misc_items" :key="item.cost_id" class="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3 text-sm">
-              <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <h5 class="font-semibold text-slate-900">{{ item.title }}</h5>
-                  <p class="text-slate-600">{{ item.purchase_date || 'No purchase date' }} · {{ item.status }}</p>
-                </div>
-                <span class="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">€{{ item.amount }} each</span>
-              </div>
-              <p class="mt-2 text-sm text-slate-700">Split by {{ item.split_count }} members · Total €{{ item.amount_total || item.total_cost || 0 }}</p>
-              </article>
-            </div>
-            <p v-if="!monthlyInvoice.misc_items?.length" class="text-sm text-slate-600">No misc costs for this month.</p>
-          </section>
+          <div class="overflow-x-auto rounded-lg border border-slate-200">
+            <table class="min-w-full divide-y divide-slate-200 text-sm">
+              <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th class="px-3 py-2">Type</th>
+                  <th class="px-3 py-2">Date</th>
+                  <th class="px-3 py-2">Details</th>
+                  <th class="px-3 py-2">Members</th>
+                  <th class="px-3 py-2 text-right">Total</th>
+                  <th class="px-3 py-2 text-right">Split</th>
+                  <th class="px-3 py-2 text-right">Share</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100 bg-white">
+                <tr v-for="item in monthlyInvoice.booking_items" :key="`my-booking-${item.booking_id}`" class="align-top">
+                  <td class="whitespace-nowrap px-3 py-2 font-medium text-indigo-800">Booking</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ item.date }}<span class="block text-xs text-slate-500">{{ item.start_time }}-{{ item.end_time }}</span></td>
+                  <td class="px-3 py-2 text-slate-700">{{ item.court || 'Court booking' }}</td>
+                  <td class="px-3 py-2 text-slate-700">{{ (item.family_members || item.participants || []).join(' & ') }}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">€{{ item.total_cost }}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">{{ item.total_people_played }} players</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ item.amount }}</td>
+                </tr>
+                <tr v-for="item in monthlyInvoice.misc_items" :key="`my-misc-${item.cost_id}`" class="align-top">
+                  <td class="whitespace-nowrap px-3 py-2 font-medium text-emerald-800">Misc</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ item.purchase_date || 'No date' }}</td>
+                  <td class="px-3 py-2 text-slate-700">{{ item.title }}</td>
+                  <td class="px-3 py-2 text-slate-500">Family split</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">€{{ item.amount_total || item.total_cost || 0 }}</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">{{ item.split_count }} ways</td>
+                  <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ item.amount }}</td>
+                </tr>
+                <tr v-if="!monthlyInvoice.booking_items?.length && !monthlyInvoice.misc_items?.length">
+                  <td colspan="7" class="px-3 py-4 text-center text-slate-500">No booking or misc costs for this month.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
@@ -685,6 +666,29 @@
         <div class="grid gap-3 sm:grid-cols-2"><label><span class="form-label">Account holder name</span><input v-model="paymentSettings.account_holder_name" class="form-input" /></label><label><span class="form-label">Business bank name</span><input v-model="paymentSettings.bank_name" class="form-input" /></label><label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input" /></label><label><span class="form-label">BIC optional</span><input v-model="paymentSettings.bic" class="form-input" /></label><label><span class="form-label">Payment description prefix</span><input v-model="paymentSettings.description_prefix" class="form-input" /></label><label><span class="form-label">Default due days</span><input v-model.number="paymentSettings.default_due_days" type="number" min="1" class="form-input" /></label></div>
         <label class="flex gap-2"><input v-model="paymentSettings.qr_enabled" type="checkbox" /> Enable QR payment feature</label><label class="flex gap-2"><input v-model="paymentSettings.test_mode" type="checkbox" /> Test mode</label>
         <div class="flex flex-wrap gap-2"><button class="btn-dark" @click="savePaymentSettings">Save settings</button><button class="btn-secondary" @click="generateTestInvoice">Generate Test Invoice</button></div>
+        <div v-if="selectedPaymentInvoice?.is_test_invoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
+          <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 class="font-semibold text-slate-900">Test invoice QR</h3>
+              <p class="text-sm text-slate-600">{{ selectedPaymentInvoice.invoice_number }} · {{ paymentStatusLabel(selectedPaymentInvoice.payment_status) }}</p>
+            </div>
+            <button class="btn-muted" @click="selectedPaymentInvoice = null">Close</button>
+          </div>
+          <div class="grid gap-3 md:grid-cols-[140px_1fr]">
+            <img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="w-32 rounded border bg-white p-2" />
+            <div class="overflow-x-auto rounded border border-white/70 bg-white">
+              <table class="min-w-full text-sm">
+                <tbody class="divide-y divide-slate-100">
+                  <tr><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Amount due</th><td class="px-3 py-2 font-semibold text-slate-900">€{{ selectedPaymentInvoice.amount_due }}</td></tr>
+                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Due date</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.due_date }}</td></tr>
+                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">IBAN</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.iban }}</td></tr>
+                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Account holder</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.account_holder_name }}</td></tr>
+                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Reference</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.payment_reference }}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -815,10 +819,6 @@
                 </div>
               </div>
             </details>
-          </div>
-
-          <div v-if="adminMonthlyInvoices.month_status?.status === 'OPEN'" class="rounded-lg border border-amber-100 bg-amber-50/70 p-3 text-sm text-amber-900">
-            Payment QR codes and bank details become available after the month status is changed to Ready for payment.
           </div>
 
           <div v-if="selectedPaymentInvoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
@@ -1583,6 +1583,9 @@ export default {
 
     async function fetchJson(url, options = {}) {
       const headers = { Accept: 'application/json', ...(options.headers || {}) }
+      if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json'
+      }
       if (token()) headers.Authorization = `Bearer ${token()}`
       const fullUrl = /^https?:\/\//.test(url) ? url : `${apiBase}${url}`
       const res = await fetch(fullUrl, { ...options, headers, cache: 'no-store' })

@@ -2542,8 +2542,14 @@ def _payment_settings():
 def _next_payment_reference():
     year = datetime.utcnow().year
     prefix = f'INV-{year}-'
-    latest = PaymentInvoice.query.filter(PaymentInvoice.invoice_number.like(f'{prefix}%')).order_by(PaymentInvoice.id.desc()).first()
-    next_id = (latest.id + 1) if latest else 1
+    latest_numbers = PaymentInvoice.query.with_entities(PaymentInvoice.invoice_number).filter(PaymentInvoice.invoice_number.like(f'{prefix}%')).all()
+    latest_suffix = 0
+    for (invoice_number,) in latest_numbers:
+        try:
+            latest_suffix = max(latest_suffix, int((invoice_number or '').replace(prefix, '', 1)))
+        except ValueError:
+            continue
+    next_id = latest_suffix + 1
     return f'{prefix}{next_id:05d}'
 
 
@@ -2593,6 +2599,7 @@ def _create_payment_invoice_for_summary(user, month_value, summary, settings, is
         invoice.invoice_number = _next_payment_reference()
         invoice.payment_reference = invoice.invoice_number
         invoice.due_date = (datetime.utcnow().date() + timedelta(days=int(settings.default_due_days or 14))).strftime('%Y-%m-%d')
+        invoice.is_test_invoice = bool(is_test)
         db.session.add(invoice)
         db.session.flush()
     invoice.amount_due = round(float(summary.get('total') or 0.0), 2)
@@ -2792,8 +2799,6 @@ def generate_test_payment_invoice():
         'misc_items': [{'title': 'Dummy miscellaneous cost', 'amount': 5.00, 'purchase_date': datetime.utcnow().strftime('%Y-%m-%d')}],
     }
     invoice = _create_payment_invoice_for_summary(target, datetime.utcnow().strftime('%Y-%m'), summary, settings, True)
-    invoice.invoice_number = _next_payment_reference()
-    invoice.payment_reference = invoice.invoice_number
     invoice.payment_status = 'UNPAID'
     _attach_payment_details(invoice, settings)
     db.session.add(PaymentAuditLog(invoice_id=invoice.id, old_status=None, new_status='UNPAID', amount=invoice.amount_due, note='Generated test invoice', updated_by=user.id))

@@ -1917,6 +1917,7 @@ WHATSAPP_NOTIFICATION_DEFAULTS = [
         'title': 'Availability overview',
         'description': 'Share a holistic availability overview for the next few playable days.',
         'template': '{{overview}}',
+        'is_enabled': True,
     },
     {
         'event_key': 'cost_settled',

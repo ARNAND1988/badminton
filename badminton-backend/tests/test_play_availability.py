@@ -123,6 +123,32 @@ def test_admin_can_send_availability_overview_notification(client, app, monkeypa
         log = WhatsAppNotificationLog.query.filter_by(event_key='availability_summary').first()
         assert log.status == 'sent'
 
+
+def test_availability_overview_notification_is_enabled_by_default(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent_messages = []
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', lambda message, recipient=None: sent_messages.append(message) or ('sent', 'ok'))
+
+    with app.app_context():
+        admin = User(phone='+31100001010', email='availability-default-admin@example.com', name='Default Admin', role='admin')
+        db.session.add(admin)
+        db.session.commit()
+        headers = _auth_headers(app, admin)
+
+    resp = client.post('/api/admin/availability-summary/send', json={'days': 1}, headers=headers)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['sent'] == 1
+    assert data['log']['status'] == 'sent'
+    assert sent_messages
+
+    with app.app_context():
+        setting = WhatsAppNotificationSetting.query.filter_by(event_key='availability_summary').first()
+        assert setting is not None
+        assert setting.is_enabled is True
+
+
 def test_play_availability_defaults_to_today_and_clamps_past_start_date(client):
     today = datetime.utcnow().date()
     yesterday = (today - timedelta(days=1)).strftime('%Y-%m-%d')

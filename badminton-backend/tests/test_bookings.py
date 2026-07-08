@@ -1467,3 +1467,49 @@ def test_api_responses_disable_cache_for_session_safety(client):
     assert resp.status_code == 200
     assert 'no-store' in resp.headers['Cache-Control']
     assert resp.headers['Pragma'] == 'no-cache'
+
+
+def test_admin_can_save_test_whatsapp_number_and_send_direct_test(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent = []
+
+    def fake_send(message, recipient=None):
+        sent.append({'message': message, 'recipient': recipient})
+        return 'sent', 'ok'
+
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', fake_send)
+
+    with app.app_context():
+        admin = User(phone='+31100009991', email='whatsapp-admin@example.com', name='WhatsApp Admin', role='admin')
+        db.session.add(admin)
+        db.session.commit()
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    headers = {'Authorization': f'Bearer {token}'}
+    list_resp = client.get('/api/admin/whatsapp-notifications', headers=headers)
+    assert list_resp.status_code == 200
+    setting_id = next(item['id'] for item in list_resp.get_json()['settings'] if item['event_key'] == 'booking_created')
+    update_resp = client.put(
+        f'/api/admin/whatsapp-notifications/{setting_id}',
+        json={'test_recipient_number': '+31 6 1234 5678'},
+        headers=headers,
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.get_json()['test_recipient_number'] == '+31 6 1234 5678'
+
+    test_resp = client.post(
+        f'/api/admin/whatsapp-notifications/{setting_id}/test',
+        json={},
+        headers=headers,
+    )
+    assert test_resp.status_code == 200
+    payload = test_resp.get_json()
+    assert payload['log']['status'] == 'sent'
+    assert payload['log']['recipient'] == '31612345678@c.us'
+    assert sent[-1]['recipient'] == '31612345678@c.us'
+    assert 'Sample court' in sent[-1]['message']

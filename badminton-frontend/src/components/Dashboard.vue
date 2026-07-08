@@ -1022,7 +1022,7 @@
           <div>
             <p class="text-xs font-bold uppercase tracking-[0.24em] text-emerald-700">WhatsApp bot</p>
             <h2 class="mt-1 text-2xl font-black text-slate-950">Group notification admin</h2>
-            <p class="mt-2 max-w-2xl text-sm text-slate-600">Choose which app events can notify the group, edit message templates, and send a safe test message from your phone-sized admin workflow.</p>
+            <p class="mt-2 max-w-2xl text-sm text-slate-600">Choose which app events can notify the group, edit message templates, and send a safe test message to your WhatsApp number before enabling a template.</p>
           </div>
           <button class="btn-dark w-full sm:w-auto" @click="loadWhatsAppNotifications">Refresh</button>
         </div>
@@ -1050,6 +1050,11 @@
               <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
                 <input v-model="setting.send_to_group" type="checkbox" class="h-5 w-5 accent-emerald-600" />
                 Send to group by default
+              </label>
+              <label class="block sm:col-span-2">
+                <span class="form-label">Test WhatsApp number</span>
+                <input v-model="setting.test_recipient_number" class="form-input" placeholder="+31612345678 (test sends only)" />
+                <span class="mt-1 block text-xs text-slate-500">Send test uses this number instead of the group. Use international format; it will be sent as a direct WhatsApp chat.</span>
               </label>
               <label class="block sm:col-span-2">
                 <span class="form-label">Message template</span>
@@ -1765,9 +1770,9 @@ export default {
       const data = await fetchJson(`/api/admin/whatsapp-notifications/${setting.id}/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipient: setting.group_id || '' })
+        body: JSON.stringify({ recipient: setting.test_recipient_number || '' })
       })
-      msg.value = `Test prepared: ${data.log.status}`
+      msg.value = `Test sent to ${data.log.recipient || 'configured group'}: ${data.log.status}`
       await loadWhatsAppNotifications()
     }
 

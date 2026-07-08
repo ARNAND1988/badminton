@@ -148,6 +148,9 @@ def create_app():
             db.session.execute(db.text("UPDATE play_availability_votes SET status = CASE WHEN available THEN 'available' ELSE 'not_available' END"))
         if 'attendee_details' not in play_vote_columns:
             db.session.execute(db.text('ALTER TABLE play_availability_votes ADD COLUMN attendee_details TEXT'))
+        whatsapp_setting_columns = {col['name'] for col in inspector.get_columns('whatsapp_notification_settings')}
+        if 'test_recipient_number' not in whatsapp_setting_columns:
+            db.session.execute(db.text('ALTER TABLE whatsapp_notification_settings ADD COLUMN test_recipient_number VARCHAR(64)'))
         play_vote_user_id = next((col for col in inspector.get_columns('play_availability_votes') if col['name'] == 'user_id'), None)
         if play_vote_user_id and not play_vote_user_id.get('nullable') and db.engine.dialect.name != 'sqlite':
             db.session.execute(db.text('ALTER TABLE play_availability_votes ALTER COLUMN user_id DROP NOT NULL'))

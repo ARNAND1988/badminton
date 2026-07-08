@@ -333,6 +333,7 @@ class WhatsAppNotificationSetting(db.Model):
     is_enabled = db.Column(db.Boolean, default=False)
     send_to_group = db.Column(db.Boolean, default=True)
     group_id = db.Column(db.String(255), nullable=True)
+    test_recipient_number = db.Column(db.String(64), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def to_dict(self):
@@ -345,6 +346,7 @@ class WhatsAppNotificationSetting(db.Model):
             'is_enabled': self.is_enabled,
             'send_to_group': self.send_to_group,
             'group_id': self.group_id,
+            'test_recipient_number': self.test_recipient_number,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 

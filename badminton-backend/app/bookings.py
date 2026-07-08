@@ -1964,6 +1964,18 @@ def _fallback_whatsapp_group_id(exclude_event_key=None):
     return setting.group_id if setting else None
 
 
+def _normalize_whatsapp_test_recipient(recipient):
+    recipient = (recipient or '').strip()
+    if not recipient:
+        return None
+    if '@' in recipient:
+        return recipient
+    digits = ''.join(ch for ch in recipient if ch.isdigit())
+    if not digits:
+        return recipient
+    return f'{digits}@c.us'
+
+
 def _send_whatsapp_bot_message(message, recipient=None):
     import os
     import requests
@@ -2224,7 +2236,7 @@ def update_whatsapp_notification(setting_id):
         return error
     from .models import WhatsAppNotificationSetting
     setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
-    before = _snapshot_fields(setting, ['title', 'description', 'template', 'is_enabled', 'send_to_group', 'group_id'])
+    before = _snapshot_fields(setting, ['title', 'description', 'template', 'is_enabled', 'send_to_group', 'group_id', 'test_recipient_number'])
     data = request.get_json() or {}
     if 'title' in data:
         setting.title = (data.get('title') or '').strip() or setting.title
@@ -2241,7 +2253,9 @@ def update_whatsapp_notification(setting_id):
         setting.send_to_group = bool(data.get('send_to_group'))
     if 'group_id' in data:
         setting.group_id = (data.get('group_id') or '').strip() or None
-    after = _snapshot_fields(setting, ['title', 'description', 'template', 'is_enabled', 'send_to_group', 'group_id'])
+    if 'test_recipient_number' in data:
+        setting.test_recipient_number = (data.get('test_recipient_number') or '').strip() or None
+    after = _snapshot_fields(setting, ['title', 'description', 'template', 'is_enabled', 'send_to_group', 'group_id', 'test_recipient_number'])
     changes = _changed_fields(before, after)
     if changes:
         _record_admin_audit(user, 'update', 'whatsapp_notification', setting.id, f'Updated WhatsApp notification {setting.title}', {'changes': changes})
@@ -2256,7 +2270,6 @@ def test_whatsapp_notification(setting_id):
         return error
     from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
     setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
-    before = _snapshot_fields(setting, ['title', 'description', 'template', 'is_enabled', 'send_to_group', 'group_id'])
     data = request.get_json() or {}
     sample_context = {
         'court': data.get('court', data.get('court_name', 'Sample court')),
@@ -2275,7 +2288,9 @@ def test_whatsapp_notification(setting_id):
         'amount': data.get('amount', '25.00'),
     }
     message = _render_template(setting.template, sample_context)
-    recipient = (data.get('recipient') or setting.group_id or '').strip() or None
+    recipient = _normalize_whatsapp_test_recipient(data.get('recipient') or setting.test_recipient_number)
+    if not recipient:
+        recipient = (setting.group_id or '').strip() or None
     status, response_text = _send_whatsapp_bot_message(message, recipient)
     log = WhatsAppNotificationLog(setting_id=setting.id, event_key=setting.event_key, recipient=recipient, message=message, status=status, response=response_text)
     db.session.add(log)

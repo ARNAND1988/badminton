@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta
 
 from app import db
-from app.models import FamilyMember, User
+from app.models import FamilyMember, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting
 
 
 def _auth_headers(app, user):
@@ -85,6 +85,43 @@ def test_family_members_and_play_availability_vote(client, app):
     assert list_resp.status_code == 200
     assert len(list_resp.get_json()['members']) == 1
 
+
+
+def test_admin_can_send_availability_overview_notification(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent_messages = []
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', lambda message, recipient=None: sent_messages.append({'message': message, 'recipient': recipient}) or ('sent', 'ok'))
+
+    with app.app_context():
+        admin = User(phone='+31100001000', email='availability-admin@example.com', name='Availability Admin', role='admin')
+        member = User(phone='+31100001001', email='availability-member@example.com', name='Availability Member', role='member')
+        db.session.add_all([admin, member])
+        db.session.commit()
+        today = bookings_module._amsterdam_now().date()
+        tomorrow = today + timedelta(days=1)
+        db.session.add_all([
+            PlayAvailabilityVote(user_id=member.id, play_date=today.strftime('%Y-%m-%d'), available=True, status='available', attendee_count=1, attendee_details='[{"name":"Alex","status":"available"}]'),
+            PlayAvailabilityVote(user_id=member.id, play_date=tomorrow.strftime('%Y-%m-%d'), available=False, status='tentative', attendee_count=0, attendee_details='[{"name":"Sam","status":"tentative"}]'),
+            WhatsAppNotificationSetting(event_key='availability_summary', title='Availability overview', template='{{overview}}', is_enabled=True, send_to_group=True, group_id='group-availability'),
+        ])
+        db.session.commit()
+        headers = _auth_headers(app, admin)
+
+    resp = client.post('/api/admin/availability-summary/send', json={'days': 2}, headers=headers)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['sent'] == 1
+    assert 'Availability overview' in data['message']
+    assert 'Alex' in data['message']
+    assert 'Sam' in data['message']
+    assert sent_messages[0]['recipient'] == 'group-availability'
+    assert '✅ Available (1): Alex' in sent_messages[0]['message']
+    assert '🤔 Tentative (1): Sam' in sent_messages[0]['message']
+
+    with app.app_context():
+        log = WhatsAppNotificationLog.query.filter_by(event_key='availability_summary').first()
+        assert log.status == 'sent'
 
 def test_play_availability_defaults_to_today_and_clamps_past_start_date(client):
     today = datetime.utcnow().date()

@@ -1,5 +1,5 @@
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app import db
 from app.models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting
@@ -396,11 +396,45 @@ def test_due_booking_reminder_sends_once_when_enabled(client, app, monkeypatch):
         logs = bookings_module._send_due_booking_reminders(now=reminder_now)
         assert len(logs) == 1
         assert sent_messages == [{'message': 'Reminder for Reminder Court at 18:00', 'recipient': 'group-1'}]
-        assert f'booking_reminder:{booking_id}:2026-07-03:18:00' in logs[0].response
+        assert f'booking_reminder:{booking_id}:2026-07-03:18:00:Europe/Amsterdam' in logs[0].response
 
         assert bookings_module._send_due_booking_reminders(now=reminder_now) == []
         assert len(sent_messages) == 1
 
+
+
+def test_due_booking_reminder_uses_amsterdam_timezone_for_utc_scheduler(app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent_messages = []
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', lambda message, recipient=None: sent_messages.append(message) or ('sent', 'ok'))
+
+    with app.app_context():
+        court = Court(name='Amsterdam Reminder Court', hourly_rate=20.0, is_active=True)
+        db.session.add(court)
+        db.session.commit()
+        db.session.add(Booking(
+            court_id=court.id,
+            booking_date='2026-07-03',
+            start_time='18:00',
+            end_time='19:00',
+            cost=20,
+            status='confirmed',
+        ))
+        db.session.add(WhatsAppNotificationSetting(
+            event_key='booking_reminder',
+            title='Booking reminder',
+            description='Reminder',
+            template='Amsterdam reminder for {{court}} at {{start_time}}',
+            is_enabled=True,
+            send_to_group=True,
+            group_id='group-ams',
+        ))
+        db.session.commit()
+
+        logs = bookings_module._send_due_booking_reminders(now=datetime(2026, 7, 3, 15, 0, tzinfo=timezone.utc))
+        assert len(logs) == 1
+        assert sent_messages == ['Amsterdam reminder for Amsterdam Reminder Court at 18:00']
 
 def test_due_booking_reminder_respects_send_to_group_flag(app, monkeypatch):
     from app import bookings as bookings_module

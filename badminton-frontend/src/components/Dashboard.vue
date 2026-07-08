@@ -469,9 +469,14 @@
     </section>
 
     <section v-if="activeView === 'availability'" class="space-y-6">
-      <div>
-        <h2 class="section-title">Availability</h2>
-        <p class="section-copy mt-1">Next 7 days are always visible. Log in to cast or update your family vote.</p>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 class="section-title">Availability</h2>
+          <p class="section-copy mt-1">Next 7 days are always visible. Log in to cast or update your family vote.</p>
+        </div>
+        <button v-if="isAdmin" type="button" class="btn-dark w-full sm:w-auto" @click="sendAvailabilitySummary">
+          Send availability overview
+        </button>
       </div>
 
       <div v-if="!isLoggedIn" class="alert-info">
@@ -1766,6 +1771,16 @@ export default {
       await loadWhatsAppNotifications()
     }
 
+    async function sendAvailabilitySummary() {
+      const data = await fetchJson('/api/admin/availability-summary/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 7 })
+      })
+      msg.value = data.log ? `Availability overview sent: ${data.log.status}` : 'Availability overview was not sent. Check the WhatsApp availability setting is enabled.'
+      await loadPlayAvailability()
+    }
+
     async function loadDashboard() {
       loading.value = true
       errorMsg.value = ''
@@ -2620,6 +2635,7 @@ export default {
       saveBookingRsvp,
       saveFamilyPersonAttendance,
       saveWhatsAppNotification,
+      sendAvailabilitySummary,
       testWhatsAppNotification,
       setAvailabilityPersonStatus,
       startEditBooking,

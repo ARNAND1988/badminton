@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import json
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, jsonify, request, current_app
 import jwt
@@ -413,6 +414,7 @@ def _booking_has_ended(booking_date, end_time=None, today_value=None, current_ti
 
 
 BOOKING_STATUSES = {'confirmed', 'completed', 'settled', 'cancelled'}
+AMSTERDAM_TZ = ZoneInfo('Europe/Amsterdam')
 COMPLETED_BOOKING_STATUSES = {'completed', 'settled'}
 TERMINAL_BOOKING_STATUSES = {'settled', 'cancelled'}
 
@@ -1912,9 +1914,9 @@ WHATSAPP_NOTIFICATION_DEFAULTS = [
     },
     {
         'event_key': 'availability_summary',
-        'title': 'Availability summary',
-        'description': 'Share current availability totals for a play date.',
-        'template': '📋 Availability for {{date}}\nAvailable: {{available_count}}\nTentative: {{tentative_count}}\nOpen the app to update your status.',
+        'title': 'Availability overview',
+        'description': 'Share a holistic availability overview for the next few playable days.',
+        'template': '{{overview}}',
     },
     {
         'event_key': 'cost_settled',
@@ -1931,6 +1933,12 @@ def _ensure_whatsapp_notification_settings():
     changed = False
     for spec in WHATSAPP_NOTIFICATION_DEFAULTS:
         if spec['event_key'] in existing:
+            setting = existing[spec['event_key']]
+            if spec['event_key'] == 'availability_summary' and '{{overview}}' not in (setting.template or ''):
+                setting.title = spec['title']
+                setting.description = spec['description']
+                setting.template = spec['template']
+                changed = True
             continue
         setting_data = {key: value for key, value in spec.items() if key != 'is_enabled'}
         db.session.add(WhatsAppNotificationSetting(**setting_data, is_enabled=spec.get('is_enabled', False), send_to_group=True))
@@ -2008,26 +2016,96 @@ def _send_whatsapp_event(event_key, context, dedupe_key=None):
 
 
 
+def _amsterdam_now(now=None):
+    if now is None:
+        return datetime.now(AMSTERDAM_TZ)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=AMSTERDAM_TZ)
+    return now.astimezone(AMSTERDAM_TZ)
+
+
 def _send_due_booking_reminders(now=None):
-    now = now or datetime.utcnow()
-    today_value = now.date().strftime('%Y-%m-%d')
+    amsterdam_now = _amsterdam_now(now)
+    today_value = amsterdam_now.date().strftime('%Y-%m-%d')
     bookings = Booking.query.filter(
         Booking.booking_date == today_value,
-        ~Booking.status.in_(COMPLETED_BOOKING_STATUSES | {'cancelled'})
+        Booking.status.in_({'confirmed'})
     ).order_by(Booking.start_time.asc()).all()
     sent_logs = []
     for booking in bookings:
         start_minutes = _time_to_minutes(booking.start_time)
         if start_minutes is None:
             continue
-        start_at = datetime.combine(now.date(), datetime.min.time()) + timedelta(minutes=start_minutes)
-        seconds_until_start = (start_at - now).total_seconds()
+        start_at = datetime.combine(amsterdam_now.date(), datetime.min.time(), tzinfo=AMSTERDAM_TZ) + timedelta(minutes=start_minutes)
+        seconds_until_start = (start_at - amsterdam_now).total_seconds()
         if 0 < seconds_until_start <= 3600:
-            dedupe_key = f'booking_reminder:{booking.id}:{booking.booking_date}:{booking.start_time}'
+            dedupe_key = f'booking_reminder:{booking.id}:{booking.booking_date}:{booking.start_time}:Europe/Amsterdam'
             log = _send_whatsapp_event('booking_reminder', _booking_notification_context(booking), dedupe_key=dedupe_key)
             if log:
                 sent_logs.append(log)
     return sent_logs
+
+
+def _availability_summary_context(days_payload):
+    included_days = []
+    lines = ['🏸 Availability overview (next few playable days)']
+    for day in days_payload:
+        totals = day.get('totals') or {}
+        available = [item.get('name') or 'Member' for item in totals.get('available_attendees') or []]
+        tentative = [item.get('name') or 'Member' for item in totals.get('tentative_attendees') or []]
+        if not available and not tentative:
+            continue
+        included_days.append(day)
+        lines.append(f"\n{day.get('weekday')} {day.get('date')}")
+        lines.append(f"✅ Available ({len(available)}): {', '.join(available) if available else 'None'}")
+        lines.append(f"🤔 Tentative ({len(tentative)}): {', '.join(tentative) if tentative else 'None'}")
+    if not included_days:
+        lines.append('\nNo available or tentative votes yet for the next few playable days.')
+    lines.append('\nOpen the app to update your status.')
+    overview = '\n'.join(lines)
+    return {
+        'overview': overview,
+        'days_overview': overview,
+        'date_range': f"{days_payload[0]['date']} to {days_payload[-1]['date']}" if days_payload else '',
+        'days_count': len(included_days),
+        'available_count': sum((day.get('totals') or {}).get('available_count', 0) for day in days_payload),
+        'tentative_count': sum((day.get('totals') or {}).get('tentative_count', 0) for day in days_payload),
+    }
+
+
+def _availability_days_payload(days=7, start=None):
+    start = start or _amsterdam_now().date()
+    dates = _next_playable_dates(days, start=start)
+    date_values = [date_value.strftime('%Y-%m-%d') for date_value in dates]
+    votes = PlayAvailabilityVote.query.filter(PlayAvailabilityVote.play_date.in_(date_values)).all()
+    totals = {}
+    for vote in votes:
+        if vote.play_date not in totals:
+            totals[vote.play_date] = {
+                'available_count': 0,
+                'tentative_count': 0,
+                'available_attendees': [],
+                'tentative_attendees': [],
+            }
+        vote_payload = vote.to_dict()
+        attendees = vote_payload.get('attendee_details') or []
+        status = vote.status or ('available' if vote.available else 'not_available')
+        fallback_name = vote.user.name or vote.user.email or vote.user.phone if vote.user else 'Member'
+        if not attendees and status in {'available', 'tentative'}:
+            attendees = [{'name': fallback_name, 'status': status}]
+        for attendee in attendees:
+            attendee_status = attendee.get('status', status)
+            if attendee_status == 'available':
+                totals[vote.play_date]['available_count'] += 1
+                totals[vote.play_date]['available_attendees'].append(attendee)
+            elif attendee_status == 'tentative':
+                totals[vote.play_date]['tentative_count'] += 1
+                totals[vote.play_date]['tentative_attendees'].append(attendee)
+    return [{
+        'date': date_value,
+        'weekday': datetime.strptime(date_value, '%Y-%m-%d').strftime('%A'),
+        'totals': totals.get(date_value, {'available_count': 0, 'tentative_count': 0, 'available_attendees': [], 'tentative_attendees': []}),
+    } for date_value in date_values]
 
 def _booking_notification_context(booking):
     court = booking.court or Court.query.get(booking.court_id)
@@ -2077,6 +2155,21 @@ def run_booking_reminders():
         return error
     logs = _send_due_booking_reminders()
     return jsonify({'sent': len(logs), 'logs': [log.to_dict() for log in logs]})
+
+
+@bookings_bp.route('/admin/availability-summary/send', methods=['POST'])
+def send_availability_summary():
+    user, error = _require_admin()
+    if error:
+        return error
+    data = request.get_json() or {}
+    days = min(max(int(data.get('days', 7) or 7), 1), 14)
+    days_payload = _availability_days_payload(days=days)
+    context = _availability_summary_context(days_payload)
+    log = _send_whatsapp_event('availability_summary', context)
+    if log:
+        _record_admin_audit(user, 'send', 'whatsapp_notification', log.id, 'Sent availability overview notification', {'days': days, 'status': log.status})
+    return jsonify({'sent': 1 if log else 0, 'message': context['overview'], 'log': log.to_dict() if log else None})
 
 
 @bookings_bp.route('/admin/audit-logs', methods=['GET'])

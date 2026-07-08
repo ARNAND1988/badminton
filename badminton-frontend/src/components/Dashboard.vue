@@ -518,10 +518,20 @@
               <div class="rounded-xl border border-emerald-100 bg-white/80 p-3 text-emerald-700">✅ {{ day.totals.available_count || 0 }} available</div>
               <div class="flex items-center gap-2 rounded-xl border border-amber-100 bg-white/80 p-3 text-amber-700"><TentativeIcon class="h-4 w-4 shrink-0" /> <span>{{ day.totals.tentative_count || 0 }} tentative</span></div>
             </div>
-            <div v-if="isLoggedIn && availabilityVoterNames(day).length" class="mt-3 rounded-xl border border-white/70 bg-white/80 p-3 text-sm text-slate-700">
-              <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Players who voted</div>
-              <div class="mt-2 flex flex-wrap gap-1.5">
-                <span v-for="name in availabilityVoterNames(day)" :key="name" class="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">{{ name }}</span>
+            <div v-if="isLoggedIn && (availabilityNamesByStatus(day, 'available').length || availabilityNamesByStatus(day, 'tentative').length)" class="mt-3 grid gap-2 rounded-xl border border-white/70 bg-white/80 p-3 text-sm text-slate-700 sm:grid-cols-2">
+              <div>
+                <div class="text-xs font-bold uppercase tracking-wide text-emerald-600">Available</div>
+                <div class="mt-2 flex flex-wrap gap-1.5">
+                  <span v-for="name in availabilityNamesByStatus(day, 'available')" :key="`available-${day.date}-${name}`" class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">{{ name }}</span>
+                  <span v-if="!availabilityNamesByStatus(day, 'available').length" class="text-xs text-slate-500">No available votes yet</span>
+                </div>
+              </div>
+              <div>
+                <div class="text-xs font-bold uppercase tracking-wide text-amber-600">Tentative</div>
+                <div class="mt-2 flex flex-wrap gap-1.5">
+                  <span v-for="name in availabilityNamesByStatus(day, 'tentative')" :key="`tentative-${day.date}-${name}`" class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">{{ name }}</span>
+                  <span v-if="!availabilityNamesByStatus(day, 'tentative').length" class="text-xs text-slate-500">No tentative votes yet</span>
+                </div>
               </div>
             </div>
           </div>
@@ -762,7 +772,19 @@
                     <p v-if="!invoice.misc_items?.length" class="text-sm text-slate-500">No misc costs.</p>
                   </div>
                 </div>
-                <button class="btn-secondary lg:col-span-2" @click="showVerificationDetails(invoice, invoice.user.name || invoice.user.email || invoice.user.phone)">Open verification popup</button>
+                <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 lg:col-span-2">
+                  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h5 class="font-semibold text-slate-900">Readable member cost summary</h5>
+                      <p class="text-sm text-slate-600">All verification details are shown here after opening the member row—no separate popup needed.</p>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-center text-sm">
+                      <div class="rounded bg-white px-3 py-2"><div class="text-xs text-slate-500">Bookings</div><div class="font-bold text-indigo-800">€{{ invoice.booking_total }}</div></div>
+                      <div class="rounded bg-white px-3 py-2"><div class="text-xs text-slate-500">Misc</div><div class="font-bold text-emerald-800">€{{ invoice.misc_total }}</div></div>
+                      <div class="rounded bg-white px-3 py-2"><div class="text-xs text-slate-500">Due</div><div class="font-bold text-slate-900">€{{ invoice.total }}</div></div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </details>
           </div>
@@ -1449,13 +1471,18 @@ export default {
       return attendees.map((attendee) => attendee.name).filter(Boolean)
     }
 
-    function availabilityVoterNames(day) {
+    function availabilityNamesByStatus(day, status) {
       const totals = day?.totals || defaultPlayTotals()
-      const names = [
-        ...(totals.available_attendees || []),
-        ...(totals.tentative_attendees || [])
-      ].map((attendee) => attendee.name).filter(Boolean)
-      return [...new Set(names)].slice(0, 12)
+      const attendees = status === 'tentative' ? totals.tentative_attendees || [] : totals.available_attendees || []
+      const names = attendees.map((attendee) => attendee.name).filter(Boolean)
+      return [...new Set(names)].slice(0, 18)
+    }
+
+    function availabilityVoterNames(day) {
+      return [
+        ...availabilityNamesByStatus(day, 'available'),
+        ...availabilityNamesByStatus(day, 'tentative')
+      ].slice(0, 12)
     }
 
     function showVerificationDetails(invoice, title = 'Cost verification') {
@@ -1633,7 +1660,7 @@ export default {
     }
 
     async function loadCourts() {
-      const courtsData = await fetchJson('/api/admin/courts')
+      const courtsData = await fetchJson('/api/admin/courts?include_inactive=0')
       courts.value = courtsData.courts || []
       if (!selectedCourtId.value && activeCourts.value.length) {
         selectedCourtId.value = activeCourts.value[0].id
@@ -2470,6 +2497,7 @@ export default {
       auditLogDate,
       auditLogDetails,
       availabilityVoterNames,
+      availabilityNamesByStatus,
       bookingInterest,
       bookingDateLabel,
       bookingDayLabel,

@@ -220,10 +220,17 @@ def _calculated_booking_cost(court, start_time, end_time):
     return round((hours * hourly_rate) + (half_hours * half_hour_rate), 2)
 
 
+def _family_owner_for_user(user):
+    link = FamilyMember.query.filter_by(linked_user_id=user.id).order_by(FamilyMember.created_at.asc()).first()
+    return link.user if link and link.user else user
+
+
 def _participant_keys_for_user(user):
     keys = {user.phone}
     for member in user.family_members:
         keys.add(f'family:{member.id}')
+        if member.linked_user and member.linked_user.phone:
+            keys.add(member.linked_user.phone)
     return keys
 
 
@@ -234,10 +241,14 @@ def _monthly_invoice_summary(user, month_value):
 
     _mark_past_bookings_completed()
 
+    requested_user = user
+    user = _family_owner_for_user(user)
     participant_keys = _participant_keys_for_user(user)
     participant_labels = {user.phone: user.name or user.email or user.phone}
     for member in user.family_members:
         participant_labels[f'family:{member.id}'] = member.name
+        if member.linked_user and member.linked_user.phone:
+            participant_labels[member.linked_user.phone] = member.name or member.linked_user.name or member.linked_user.email or member.linked_user.phone
     booking_items = []
     booking_total = 0.0
     bookings = (
@@ -325,10 +336,11 @@ def _monthly_invoice_summary(user, month_value):
         })
 
     total = round(booking_total + misc_total, 2)
-    paid_count = len([item for item in booking_items if item.get('invoice_status') == 'settled'])
-    paid_amount = round(sum(float(item.get('amount') or 0.0) for item in booking_items if item.get('invoice_status') == 'settled'), 2)
+    paid_count = len([item for item in booking_items if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'])
+    paid_amount = round(sum(float(item.get('amount') or 0.0) for item in booking_items if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'), 2)
     return {
-        'user': user.to_dict(),
+        'user': requested_user.to_dict(),
+        'family_owner': user.to_dict(),
         'month': month_value,
         'booking_items': booking_items,
         'misc_items': misc_items,
@@ -371,6 +383,8 @@ def _availability_attendee_payload(user, attendees, default_status='available'):
                 'status': status,
                 'family_member_id': member.id,
                 'name': member.name,
+                'linked_user_id': member.linked_user_id,
+                'phone': member.linked_user.phone if member.linked_user else None,
             })
     return selected
 
@@ -697,7 +711,12 @@ def list_play_availability():
     votes = PlayAvailabilityVote.query.filter(
         PlayAvailabilityVote.play_date.in_(date_values)
     ).all()
-    user_votes = {vote.play_date: vote for vote in votes if user and vote.user_id == user.id}
+    current_family_user_ids = {user.id} if user else set()
+    if user:
+        owner = _family_owner_for_user(user)
+        current_family_user_ids.add(owner.id)
+        current_family_user_ids.update(member.linked_user_id for member in owner.family_members if member.linked_user_id)
+    user_votes = {vote.play_date: vote for vote in votes if user and vote.user_id in current_family_user_ids}
 
     totals = {}
     for vote in votes:
@@ -812,6 +831,19 @@ def save_play_availability():
     vote.attendee_count = attendee_count if vote.available else 0
     vote.attendee_details = json.dumps(attendee_details) if attendee_details else None
     vote.notes = (data.get('notes') or '').strip() or None
+    for attendee in attendee_details:
+        linked_user_id = attendee.get('linked_user_id')
+        if not linked_user_id:
+            continue
+        linked_vote = PlayAvailabilityVote.query.filter_by(user_id=linked_user_id, play_date=play_date).first()
+        if not linked_vote:
+            linked_vote = PlayAvailabilityVote(user_id=linked_user_id, play_date=play_date)
+            db.session.add(linked_vote)
+        linked_vote.status = attendee.get('status') or status
+        linked_vote.available = linked_vote.status == 'available'
+        linked_vote.attendee_count = 1 if linked_vote.available else 0
+        linked_vote.attendee_details = json.dumps([{'type': 'self', 'status': linked_vote.status, 'name': attendee.get('name'), 'phone': attendee.get('phone')}])
+        linked_vote.notes = vote.notes
     db.session.commit()
 
     return jsonify(vote.to_dict())
@@ -1393,15 +1425,20 @@ def admin_monthly_invoices():
 
     for item in users:
         display_name = item.name or item.email or item.phone
-        add_subject(f'user:{item.id}', display_name, item, [item.phone], [item.name, item.email, item.phone])
+        if FamilyMember.query.filter_by(linked_user_id=item.id).first():
+            continue
+        keys = [item.phone]
+        aliases = [item.name, item.email, item.phone]
+        add_subject(f'user:{item.id}', display_name, item, keys, aliases)
+        subject = subjects[-1]
         for family_member in sorted(item.family_members, key=lambda fm: fm.created_at or datetime.min):
-            add_subject(
-                f'family:{family_member.id}',
-                family_member.name,
-                None,
-                [f'family:{family_member.id}'],
-                [family_member.name],
-            )
+            subject['participant_keys'].add(f'family:{family_member.id}')
+            subject['aliases'].append(family_member.name)
+            by_key[f'family:{family_member.id}'] = subject
+            if family_member.linked_user and family_member.linked_user.phone:
+                subject['participant_keys'].add(family_member.linked_user.phone)
+                subject['aliases'].extend([family_member.linked_user.name, family_member.linked_user.email, family_member.linked_user.phone])
+                by_key[family_member.linked_user.phone] = subject
 
     def subject_for_participant(participant):
         if participant.phone in by_key:
@@ -1437,7 +1474,14 @@ def admin_monthly_invoices():
             participant_amount = split['participant_shares'][index]
             subject = subject_for_participant(participant)
             item_key = (booking.id, subject['id'])
-            if item_key in seen_booking_subjects:
+            existing_item = next((item for item in subject['booking_items'] if item['booking_id'] == booking.id), None)
+            if item_key in seen_booking_subjects and existing_item:
+                subject['booking_total'] = round(subject['booking_total'] + participant_amount, 2)
+                existing_item['attendee_count'] += 1
+                existing_item['amount'] = round(float(existing_item['amount'] or 0.0) + participant_amount, 2)
+                participant_label = participant.name or participant.phone or subject['display_name']
+                if participant_label not in existing_item['participants']:
+                    existing_item['participants'].append(participant_label)
                 continue
             seen_booking_subjects.add(item_key)
             subject['booking_total'] = round(subject['booking_total'] + participant_amount, 2)
@@ -1451,7 +1495,7 @@ def admin_monthly_invoices():
                 'total_people_played': split_count,
                 'total_cost': round(float(booking.cost or 0.0), 2),
                 'cost_per_person': per_person,
-                'participants': [subject['display_name']],
+                'participants': [participant.name or participant.phone or subject['display_name']],
                 'amount': participant_amount,
                 'booking_status': booking.status,
                 'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
@@ -1467,8 +1511,8 @@ def admin_monthly_invoices():
             subject['misc_total'] = summary['misc_total']
         subject['total'] = round(subject['booking_total'] + subject['misc_total'], 2)
         subject['booking_total'] = round(subject['booking_total'], 2)
-        subject['paid_count'] = len([item for item in subject['booking_items'] if item.get('invoice_status') == 'settled'])
-        subject['paid_amount'] = round(sum(float(item.get('amount') or 0.0) for item in subject['booking_items'] if item.get('invoice_status') == 'settled'), 2)
+        subject['paid_count'] = len([item for item in subject['booking_items'] if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'])
+        subject['paid_amount'] = round(sum(float(item.get('amount') or 0.0) for item in subject['booking_items'] if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'), 2)
         subject['balance_amount'] = round(subject['total'] - subject['paid_amount'], 2)
 
     visible = [subject for subject in subjects if subject['booking_items'] or subject['misc_items'] or subject['user'].get('id')]
@@ -1584,6 +1628,10 @@ def delete_admin_user(user_id):
 
     _record_admin_audit(user, 'delete', 'user', target_user.id, f'Deleted user {_public_user_label(target_user)}', {'user': user_snapshot})
     FamilyMember.query.filter_by(user_id=target_user.id).delete()
+    FamilyMember.query.filter_by(linked_user_id=target_user.id).update(
+        {FamilyMember.linked_user_id: None},
+        synchronize_session=False
+    )
     PlayAvailabilityVote.query.filter_by(user_id=target_user.id).update(
         {PlayAvailabilityVote.user_id: None},
         synchronize_session=False
@@ -1601,7 +1649,7 @@ def update_admin_family_member(member_id):
         return error
 
     member = FamilyMember.query.get_or_404(member_id)
-    before = _snapshot_fields(member, ['name', 'relationship', 'is_club_member'])
+    before = _snapshot_fields(member, ['name', 'relationship', 'is_club_member', 'linked_user_id'])
     data = request.get_json() or {}
     if 'name' in data:
         name = (data.get('name') or '').strip()
@@ -1612,6 +1660,17 @@ def update_admin_family_member(member_id):
         member.relationship = (data.get('relationship') or '').strip() or None
     if 'is_club_member' in data:
         member.is_club_member = bool(data.get('is_club_member'))
+    if 'linked_user_id' in data:
+        linked_user_id = data.get('linked_user_id')
+        if linked_user_id in ('', None):
+            member.linked_user_id = None
+        else:
+            linked_user = User.query.get(linked_user_id)
+            if not linked_user:
+                return jsonify({'error': 'linked_user_not_found'}), 404
+            if linked_user.id == member.user_id:
+                return jsonify({'error': 'cannot_link_owner_as_family_member'}), 400
+            member.linked_user_id = linked_user.id
 
     db.session.commit()
     return jsonify(member.to_dict())
@@ -1630,11 +1689,21 @@ def create_admin_family_member():
     if not name:
         return jsonify({'error': 'name required'}), 400
 
+    linked_user_id = data.get('linked_user_id') or None
+    if linked_user_id:
+        linked_user = User.query.get(linked_user_id)
+        if not linked_user:
+            return jsonify({'error': 'linked_user_not_found'}), 404
+        if linked_user.id == owner.id:
+            return jsonify({'error': 'cannot_link_owner_as_family_member'}), 400
+        linked_user_id = linked_user.id
+
     member = FamilyMember(
         user_id=owner.id,
         name=name,
         relationship=(data.get('relationship') or '').strip() or None,
-        is_club_member=bool(data.get('is_club_member', False))
+        is_club_member=bool(data.get('is_club_member', False)),
+        linked_user_id=linked_user_id
     )
     db.session.add(member)
     db.session.flush()

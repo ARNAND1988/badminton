@@ -902,18 +902,26 @@
               <h3 class="text-sm font-semibold text-slate-900">Family members</h3>
               <button class="btn-dark" @click="createAdminFamilyMember(member)">Add family member</button>
             </div>
-            <div class="mb-3 grid gap-2 md:grid-cols-2">
+            <div class="mb-3 grid gap-2 md:grid-cols-3">
               <input v-model="newAdminFamilyName[member.id]" class="form-input" placeholder="Family member name" />
               <input v-model="newAdminFamilyRelationship[member.id]" class="form-input" placeholder="Relationship" />
+              <select v-model="newAdminFamilyLinkedUser[member.id]" class="form-input">
+                <option value="">No linked account</option>
+                <option v-for="option in linkableUserOptions(member.id)" :key="option.id" :value="option.id">{{ option.label }}</option>
+              </select>
             </div>
             <div v-if="member.family_members?.length" class="space-y-2">
               <div
                 v-for="familyMember in member.family_members"
                 :key="familyMember.id"
-                class="grid gap-2 rounded border bg-white p-3 md:grid-cols-[1fr_1fr_auto_auto]"
+                class="grid gap-2 rounded border bg-white p-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]"
               >
                 <input v-model="familyMember.name" class="form-input" placeholder="Family member name" />
                 <input v-model="familyMember.relationship" class="form-input" placeholder="Relationship" />
+                <select v-model="familyMember.linked_user_id" class="form-input">
+                  <option :value="null">No linked account</option>
+                  <option v-for="option in linkableUserOptions(member.id)" :key="option.id" :value="option.id">{{ option.label }}</option>
+                </select>
                 <div class="flex items-center gap-2">
                   <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
                     <input v-model="familyMember.is_club_member" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
@@ -1176,6 +1184,7 @@ export default {
     const newParticipantMember = ref({})
     const newAdminFamilyName = ref({})
     const newAdminFamilyRelationship = ref({})
+    const newAdminFamilyLinkedUser = ref({})
     const newMiscTitle = ref('')
     const newMiscDescription = ref('')
     const newMiscAmount = ref('')
@@ -1236,6 +1245,15 @@ export default {
       ]
     })
     const availabilityPeople = computed(() => familyAttendancePeople.value)
+    function linkableUserOptions(ownerId) {
+      return adminUsers.value
+        .filter((candidate) => candidate.id !== ownerId)
+        .map((candidate) => ({
+          id: candidate.id,
+          label: candidate.name || candidate.email || candidate.phone || `User ${candidate.id}`
+        }))
+    }
+
     const memberOptions = computed(() => adminUsers.value.flatMap((member) => {
       const ownerLabel = member.name || member.email || member.phone || 'Member'
       const options = [{
@@ -2358,7 +2376,8 @@ export default {
           body: JSON.stringify({
             name: familyMember.name,
             relationship: familyMember.relationship,
-            is_club_member: familyMember.is_club_member
+            is_club_member: familyMember.is_club_member,
+            linked_user_id: familyMember.linked_user_id || null
           })
         })
         Object.assign(familyMember, data)
@@ -2382,11 +2401,13 @@ export default {
           body: JSON.stringify({
             user_id: owner.id,
             name,
-            relationship: newAdminFamilyRelationship.value[owner.id] || ''
+            relationship: newAdminFamilyRelationship.value[owner.id] || '',
+            linked_user_id: newAdminFamilyLinkedUser.value[owner.id] || null
           })
         })
         newAdminFamilyName.value[owner.id] = ''
         newAdminFamilyRelationship.value[owner.id] = ''
+        newAdminFamilyLinkedUser.value[owner.id] = ''
         msg.value = `Added family member for ${owner.name || owner.email || owner.phone}.`
         await loadAdminUsers()
       } catch (err) {
@@ -2520,6 +2541,7 @@ export default {
       newFamilyName,
       newAdminFamilyName,
       newAdminFamilyRelationship,
+      newAdminFamilyLinkedUser,
       newParticipantName,
       newParticipantPhone,
       newParticipantStatus,
@@ -2551,6 +2573,7 @@ export default {
       deleteFamilyMember,
       deleteMiscCost,
       deleteParticipant,
+      linkableUserOptions,
       loadMonthlyInvoice,
       loadAdminMonthlyInvoices,
       loadPlayAvailability,

@@ -1371,8 +1371,8 @@ def test_admin_monthly_invoice_lists_family_and_name_matched_participants_once(c
     assert resp.status_code == 200
     data = resp.get_json()
     invoices = {invoice['user']['name']: invoice for invoice in data['invoices']}
-    assert invoices['Renjith R']['booking_total'] == 26.67
-    assert invoices['Reema']['booking_total'] == 26.67
+    assert invoices['Renjith R']['booking_total'] == 53.34
+    assert 'Reema' not in invoices
     assert invoices['Guest']['booking_total'] == 26.67
     assert data['totals']['booking_total'] == 80.01
 

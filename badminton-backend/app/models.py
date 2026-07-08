@@ -67,9 +67,11 @@ class FamilyMember(db.Model):
     name = db.Column(db.String(128), nullable=False)
     relationship = db.Column(db.String(64), nullable=True)
     is_club_member = db.Column(db.Boolean, default=False)
+    linked_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    user = db.relationship('User', backref='family_members', lazy=True)
+    user = db.relationship('User', foreign_keys=[user_id], backref='family_members', lazy=True)
+    linked_user = db.relationship('User', foreign_keys=[linked_user_id], lazy=True)
 
     def to_dict(self):
         return {
@@ -78,6 +80,8 @@ class FamilyMember(db.Model):
             'name': self.name,
             'relationship': self.relationship,
             'is_club_member': self.is_club_member,
+            'linked_user_id': self.linked_user_id,
+            'linked_user': self.linked_user.to_dict() if self.linked_user else None,
             'created_at': self.created_at.isoformat()
         }
 

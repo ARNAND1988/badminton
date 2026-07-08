@@ -24,7 +24,7 @@ export default {
     const route = useRoute()
 
     const contentClass = computed(() => {
-      const isDashboardRoute = ['/bookings', '/availability', '/dashboard', '/costs'].includes(route.path) || route.path.startsWith('/admin/')
+      const isDashboardRoute = ['/bookings', '/availability', '/dashboard', '/costs', '/my-invoices'].includes(route.path) || route.path.startsWith('/admin/')
       if (route.path === '/login') {
         return 'mx-auto max-w-6xl'
       }

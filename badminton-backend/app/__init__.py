@@ -184,6 +184,52 @@ def create_app():
             db.session.execute(db.text('ALTER TABLE play_availability_votes ALTER COLUMN user_id DROP NOT NULL'))
 
         payment_invoice_columns = {col['name'] for col in inspector.get_columns('payment_invoices')} if inspector.has_table('payment_invoices') else set()
+        payment_setting_columns = {col['name'] for col in inspector.get_columns('payment_settings')} if inspector.has_table('payment_settings') else set()
+        if payment_setting_columns:
+            if 'payment_provider' not in payment_setting_columns:
+                db.session.execute(db.text("ALTER TABLE payment_settings ADD COLUMN payment_provider VARCHAR(32) DEFAULT 'WISE_API'"))
+            if 'wise_payment_url' not in payment_setting_columns:
+                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_payment_url VARCHAR(1024)'))
+            if 'wise_api_token' not in payment_setting_columns:
+                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_api_token TEXT'))
+            if 'wise_profile_id' not in payment_setting_columns:
+                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_profile_id VARCHAR(64)'))
+            if 'wise_api_base_url' not in payment_setting_columns:
+                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_api_base_url VARCHAR(255)'))
+            if 'wise_redirect_url' not in payment_setting_columns:
+                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_redirect_url VARCHAR(1024)'))
+            if 'wise_client_key' not in payment_setting_columns:
+                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_client_key VARCHAR(128)'))
+            if 'wise_webhook_url' not in payment_setting_columns:
+                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_webhook_url VARCHAR(1024)'))
+            if 'wise_webhook_subscription_id' not in payment_setting_columns:
+                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_webhook_subscription_id VARCHAR(128)'))
+            db.session.execute(db.text("UPDATE payment_settings SET payment_provider = 'WISE_API' WHERE payment_provider IS NULL OR payment_provider != 'WISE_API'"))
+            db.session.execute(db.text("UPDATE payment_settings SET wise_api_base_url = 'https://api.wise.com' WHERE wise_api_base_url IS NULL OR wise_api_base_url = 'https://api.transferwise.com'"))
+        if not inspector.has_table('wise_webhook_events'):
+            webhook_id_type = 'INTEGER' if db.engine.dialect.name == 'sqlite' else 'SERIAL'
+            db.session.execute(db.text("""
+                CREATE TABLE wise_webhook_events (
+                    id """ + webhook_id_type + """ PRIMARY KEY,
+                    event_type VARCHAR(128),
+                    subscription_id VARCHAR(128),
+                    incoming_transfer_id VARCHAR(128) UNIQUE,
+                    invoice_id INTEGER REFERENCES payment_invoices(id),
+                    status VARCHAR(32) DEFAULT 'RECEIVED',
+                    amount FLOAT DEFAULT 0,
+                    currency VARCHAR(8),
+                    reference VARCHAR(255),
+                    sender_name VARCHAR(255),
+                    payload_json TEXT,
+                    fetched_json TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+        if payment_invoice_columns and 'payment_url' not in payment_invoice_columns:
+            db.session.execute(db.text('ALTER TABLE payment_invoices ADD COLUMN payment_url VARCHAR(2048)'))
+        if payment_invoice_columns and 'wise_payment_request_id' not in payment_invoice_columns:
+            db.session.execute(db.text('ALTER TABLE payment_invoices ADD COLUMN wise_payment_request_id VARCHAR(128)'))
         datetime_column_type = 'DATETIME' if db.engine.dialect.name == 'sqlite' else 'TIMESTAMP'
         invoice_payment_columns = {
             "payment_status": "VARCHAR(32) DEFAULT 'UNPAID'",

@@ -41,6 +41,13 @@ const routes = [
     meta: { navLabel: 'My Invoices', requiresAuth: true }
   },
   {
+    path: '/my-invoices',
+    name: 'my-invoices',
+    component: Dashboard,
+    props: { initialView: 'costs' },
+    meta: { navLabel: 'My Invoices', requiresAuth: true }
+  },
+  {
     path: '/admin/bookings',
     name: 'admin-bookings',
     component: Dashboard,

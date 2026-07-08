@@ -281,6 +281,15 @@ class PaymentSettings(db.Model):
     bank_name = db.Column(db.String(128), nullable=True)
     iban = db.Column(db.String(64), nullable=True)
     bic = db.Column(db.String(32), nullable=True)
+    payment_provider = db.Column(db.String(32), default='WISE_API')
+    wise_payment_url = db.Column(db.String(1024), nullable=True)
+    wise_api_token = db.Column(db.Text, nullable=True)
+    wise_profile_id = db.Column(db.String(64), nullable=True)
+    wise_api_base_url = db.Column(db.String(255), nullable=True)
+    wise_redirect_url = db.Column(db.String(1024), nullable=True)
+    wise_client_key = db.Column(db.String(128), nullable=True)
+    wise_webhook_url = db.Column(db.String(1024), nullable=True)
+    wise_webhook_subscription_id = db.Column(db.String(128), nullable=True)
     description_prefix = db.Column(db.String(255), default='Nieuwegein Badminton Invoice')
     default_due_days = db.Column(db.Integer, default=14)
     qr_enabled = db.Column(db.Boolean, default=True)
@@ -310,6 +319,15 @@ class PaymentSettings(db.Model):
             'bank_name': self.bank_name,
             'iban': self.iban,
             'bic': self.bic,
+            'payment_provider': self.payment_provider or 'WISE_API',
+            'wise_payment_url': self.wise_payment_url,
+            'wise_profile_id': self.wise_profile_id,
+            'wise_api_base_url': self.wise_api_base_url,
+            'wise_redirect_url': self.wise_redirect_url,
+            'wise_client_key': self.wise_client_key,
+            'wise_webhook_url': self.wise_webhook_url,
+            'wise_webhook_subscription_id': self.wise_webhook_subscription_id,
+            'wise_api_token_configured': bool(self.wise_api_token),
             'description_prefix': self.description_prefix,
             'default_due_days': self.default_due_days,
             'qr_enabled': self.qr_enabled,
@@ -343,6 +361,8 @@ class PaymentInvoice(db.Model):
     payment_note = db.Column(db.Text, nullable=True)
     qr_payload = db.Column(db.Text, nullable=True)
     qr_code_data_url = db.Column(db.Text, nullable=True)
+    payment_url = db.Column(db.String(2048), nullable=True)
+    wise_payment_request_id = db.Column(db.String(128), nullable=True)
     is_test_invoice = db.Column(db.Boolean, default=False)
     bank_account_holder = db.Column(db.String(128), nullable=True)
     bank_name = db.Column(db.String(128), nullable=True)
@@ -378,6 +398,8 @@ class PaymentInvoice(db.Model):
             'payment_note': self.payment_note,
             'qr_payload': self.qr_payload,
             'qr_code_data_url': self.qr_code_data_url if include_qr else None,
+            'payment_url': self.payment_url,
+            'wise_payment_request_id': self.wise_payment_request_id,
             'is_test_invoice': self.is_test_invoice,
             'account_holder_name': self.bank_account_holder,
             'bank_name': self.bank_name,
@@ -388,6 +410,42 @@ class PaymentInvoice(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'updated_by': self.updated_by,
+        }
+
+
+class WiseWebhookEvent(db.Model):
+    __tablename__ = 'wise_webhook_events'
+    id = db.Column(db.Integer, primary_key=True)
+    event_type = db.Column(db.String(128), nullable=True)
+    subscription_id = db.Column(db.String(128), nullable=True)
+    incoming_transfer_id = db.Column(db.String(128), unique=True, nullable=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey('payment_invoices.id'), nullable=True)
+    status = db.Column(db.String(32), default='RECEIVED')
+    amount = db.Column(db.Float, default=0.0)
+    currency = db.Column(db.String(8), nullable=True)
+    reference = db.Column(db.String(255), nullable=True)
+    sender_name = db.Column(db.String(255), nullable=True)
+    payload_json = db.Column(db.Text, nullable=True)
+    fetched_json = db.Column(db.Text, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    invoice = db.relationship('PaymentInvoice', foreign_keys=[invoice_id], lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'event_type': self.event_type,
+            'subscription_id': self.subscription_id,
+            'incoming_transfer_id': self.incoming_transfer_id,
+            'invoice_id': self.invoice_id,
+            'status': self.status,
+            'amount': round(float(self.amount or 0.0), 2),
+            'currency': self.currency,
+            'reference': self.reference,
+            'sender_name': self.sender_name,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
 

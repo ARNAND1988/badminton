@@ -610,9 +610,9 @@
         </div>
 
         <div v-if="currentPaymentInvoice" class="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
-          <div class="mb-3 flex items-center justify-between gap-3"><div><h4 class="font-semibold text-slate-900">Pay by bank transfer</h4><p class="text-sm text-slate-600">Scan with your banking app or use this reference when paying.</p></div><span class="rounded-full bg-white px-3 py-1 text-sm font-bold text-indigo-800">{{ paymentStatusLabel(currentPaymentInvoice.payment_status) }}</span></div>
+          <div class="mb-3 flex items-center justify-between gap-3"><div><h4 class="font-semibold text-slate-900">Pay with Wise</h4><p class="text-sm text-slate-600">Scan the QR or open the Wise payment link to pay this invoice.</p></div><span class="rounded-full bg-white px-3 py-1 text-sm font-bold text-indigo-800">{{ paymentStatusLabel(currentPaymentInvoice.payment_status) }}</span></div>
           <div v-if="currentPaymentInvoice.is_test_invoice" class="alert-warning">TEST MODE - This invoice is for testing only</div>
-          <div class="grid gap-4 md:grid-cols-[180px_1fr]"><img v-if="currentPaymentInvoice.qr_code_data_url" :src="currentPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p><strong>Total amount due:</strong> €{{ currentPaymentInvoice.amount_due }}</p><p><strong>Due date:</strong> {{ currentPaymentInvoice.due_date }}</p><p><strong>IBAN:</strong> {{ currentPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ currentPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ currentPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.payment_reference)">Copy payment reference</button></p></div></div>
+          <div class="grid gap-4 md:grid-cols-[180px_1fr]"><img v-if="currentPaymentInvoice.qr_code_data_url" :src="currentPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p v-if="currentPaymentInvoice.payment_url"><a :href="currentPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open Wise payment link</a></p><p><strong>Total amount due:</strong> €{{ currentPaymentInvoice.amount_due }}</p><p><strong>Due date:</strong> {{ currentPaymentInvoice.due_date }}</p><p><strong>IBAN:</strong> {{ currentPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ currentPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ currentPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.payment_reference)">Copy payment reference</button></p></div></div>
         </div>
 
         <div v-if="monthlyInvoice" class="space-y-5">
@@ -660,35 +660,53 @@
 
 
     <section v-if="activeView === 'payment-settings'" class="space-y-6">
-      <div><h2 class="section-title">Payment settings</h2><p class="section-copy mt-1">Configure bank-transfer account details and QR code test mode.</p></div>
+      <div><h2 class="section-title">Payment settings</h2><p class="section-copy mt-1">Configure Wise Payment Requests for invoice checkout links and QR codes.</p></div>
       <div v-if="!isSuperAdmin" class="alert-warning">Only Super Admin can manage payment settings.</div>
       <div v-else class="panel-card space-y-4">
-        <div class="grid gap-3 sm:grid-cols-2"><label><span class="form-label">Account holder name</span><input v-model="paymentSettings.account_holder_name" class="form-input" /></label><label><span class="form-label">Business bank name</span><input v-model="paymentSettings.bank_name" class="form-input" /></label><label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input" /></label><label><span class="form-label">BIC optional</span><input v-model="paymentSettings.bic" class="form-input" /></label><label><span class="form-label">Payment description prefix</span><input v-model="paymentSettings.description_prefix" class="form-input" /></label><label><span class="form-label">Default due days</span><input v-model.number="paymentSettings.default_due_days" type="number" min="1" class="form-input" /></label></div>
-        <label class="flex gap-2"><input v-model="paymentSettings.qr_enabled" type="checkbox" /> Enable QR payment feature</label><label class="flex gap-2"><input v-model="paymentSettings.test_mode" type="checkbox" /> Test mode</label>
-        <div class="flex flex-wrap gap-2"><button class="btn-dark" @click="savePaymentSettings">Save settings</button><button class="btn-secondary" @click="generateTestInvoice">Generate Test Invoice</button></div>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label><span class="form-label">Wise API token</span><input v-model="paymentSettings.wise_api_token" type="password" class="form-input" :placeholder="paymentSettings.wise_api_token_configured ? 'Token configured - leave blank to keep' : 'Wise API token'" /></label>
+          <label><span class="form-label">Wise business profile ID</span><input v-model="paymentSettings.wise_profile_id" class="form-input" placeholder="Optional; fetched from Wise if blank" /></label>
+          <label><span class="form-label">Wise API base URL</span><input v-model="paymentSettings.wise_api_base_url" class="form-input" placeholder="https://api.wise.com" /></label>
+          <label><span class="form-label">Wise redirect URL</span><input v-model="paymentSettings.wise_redirect_url" class="form-input" :placeholder="defaultWiseRedirectUrl" /></label>
+          <label><span class="form-label">Wise client key</span><input v-model="paymentSettings.wise_client_key" class="form-input" placeholder="Application client key from Wise" /></label>
+          <label><span class="form-label">Wise webhook URL</span><input v-model="paymentSettings.wise_webhook_url" class="form-input" :placeholder="defaultWiseWebhookUrl" /></label>
+          <label><span class="form-label">Account holder name</span><input v-model="paymentSettings.account_holder_name" class="form-input" /></label><label><span class="form-label">Business bank name</span><input v-model="paymentSettings.bank_name" class="form-input" /></label><label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input" /></label><label><span class="form-label">BIC optional</span><input v-model="paymentSettings.bic" class="form-input" /></label><label><span class="form-label">Payment description prefix</span><input v-model="paymentSettings.description_prefix" class="form-input" /></label><label><span class="form-label">Default due days</span><input v-model.number="paymentSettings.default_due_days" type="number" min="1" class="form-input" /></label></div>
+        <label class="flex gap-2"><input v-model="paymentSettings.test_mode" type="checkbox" /> Test mode</label>
+        <p class="text-sm text-slate-600">Wise incoming-transfer webhooks reconcile received transfers by matching the invoice reference.</p>
+        <p v-if="paymentSettings.wise_webhook_subscription_id" class="text-sm text-emerald-700">Webhook subscription: {{ paymentSettings.wise_webhook_subscription_id }}</p>
+        <div class="flex flex-wrap gap-2"><button class="btn-dark" :disabled="paymentSettingsSaving" @click="savePaymentSettings">{{ paymentSettingsSaving ? 'Saving...' : 'Save settings' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentWebhookSubscribing || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="createWiseWebhookSubscription">{{ paymentWebhookSubscribing ? 'Subscribing...' : 'Create Wise webhook subscription' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentTestGenerating || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="generateTestInvoice">{{ paymentTestGenerating ? 'Generating...' : 'Generate New Test Invoice' }}</button></div>
+        <p v-if="!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token" class="text-sm text-amber-700">Enter a real Wise API token before generating a test invoice with a payment link.</p>
         <div v-if="selectedPaymentInvoice?.is_test_invoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
           <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 class="font-semibold text-slate-900">Test invoice QR</h3>
+              <h3 class="font-semibold text-slate-900">Latest test invoice</h3>
               <p class="text-sm text-slate-600">{{ selectedPaymentInvoice.invoice_number }} · {{ paymentStatusLabel(selectedPaymentInvoice.payment_status) }}</p>
+              <p v-if="selectedPaymentInvoice.payment_generation_error" class="mt-1 text-sm text-amber-700">{{ selectedPaymentInvoice.payment_generation_error.error }}</p>
             </div>
-            <button class="btn-muted" @click="selectedPaymentInvoice = null">Close</button>
+            <button class="btn-muted" :disabled="paymentTestRefreshing" @click="loadLatestTestInvoice">{{ paymentTestRefreshing ? 'Refreshing...' : 'Refresh' }}</button>
           </div>
           <div class="grid gap-3 md:grid-cols-[140px_1fr]">
             <img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="w-32 rounded border bg-white p-2" />
+            <div v-else class="flex h-32 w-32 items-center justify-center rounded border border-amber-200 bg-amber-50 p-3 text-center text-xs font-semibold text-amber-700">Wise link unavailable</div>
             <div class="overflow-x-auto rounded border border-white/70 bg-white">
+              <p class="border-b border-slate-100 px-3 py-2 text-sm text-slate-600">Pay by bank transfer using the exact invoice reference, then refresh to check webhook reconciliation.</p>
               <table class="min-w-full text-sm">
                 <tbody class="divide-y divide-slate-100">
+                  <tr v-if="selectedPaymentInvoice.payment_url"><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Wise link</th><td class="px-3 py-2 text-slate-700"><a :href="selectedPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open Wise payment link</a></td></tr>
+                  <tr v-else-if="selectedPaymentInvoice.payment_generation_error"><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Wise link</th><td class="px-3 py-2 text-amber-700">{{ selectedPaymentInvoice.payment_generation_error.error }}</td></tr>
                   <tr><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Amount due</th><td class="px-3 py-2 font-semibold text-slate-900">€{{ selectedPaymentInvoice.amount_due }}</td></tr>
                   <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Due date</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.due_date }}</td></tr>
                   <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">IBAN</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.iban }}</td></tr>
                   <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Account holder</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.account_holder_name }}</td></tr>
                   <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Reference</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.payment_reference }}</td></tr>
+                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Paid amount</th><td class="px-3 py-2 text-slate-700">€{{ selectedPaymentInvoice.paid_amount || 0 }}</td></tr>
+                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Webhook events</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.webhook_events?.length || 0 }}</td></tr>
                 </tbody>
               </table>
             </div>
           </div>
         </div>
+        <div v-else class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No test invoice yet. Use Generate New Test Invoice when you want to create one.</div>
       </div>
     </section>
 
@@ -824,7 +842,7 @@
           <div v-if="selectedPaymentInvoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
             <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h4 class="font-semibold text-slate-900">QR and bank details</h4>
+                <h4 class="font-semibold text-slate-900">Wise payment details</h4>
                 <p class="text-sm text-slate-600">{{ selectedPaymentInvoice.user?.name || selectedPaymentInvoice.user?.email || 'Family invoice' }} · {{ paymentStatusLabel(selectedPaymentInvoice.payment_status) }}</p>
               </div>
               <button class="btn-muted" @click="selectedPaymentInvoice = null">Close</button>
@@ -832,8 +850,10 @@
             <div class="grid gap-3 md:grid-cols-[140px_1fr]">
               <img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="w-32 rounded border bg-white p-2" />
               <div class="overflow-x-auto rounded border border-white/70 bg-white">
+                <p class="border-b border-slate-100 px-3 py-2 text-sm text-slate-600">Scan this QR or open the Wise payment link.</p>
                 <table class="min-w-full text-sm">
                   <tbody class="divide-y divide-slate-100">
+                    <tr v-if="selectedPaymentInvoice.payment_url"><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Wise link</th><td class="px-3 py-2 text-slate-700"><a :href="selectedPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open Wise payment link</a></td></tr>
                     <tr><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Amount due</th><td class="px-3 py-2 font-semibold text-slate-900">€{{ selectedPaymentInvoice.amount_due }}</td></tr>
                     <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Due date</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.due_date }}</td></tr>
                     <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">IBAN</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.iban)">Copy</button></td></tr>
@@ -1231,6 +1251,8 @@ export default {
     const miscCosts = ref([])
     const monthlyInvoice = ref(null)
     const currentPaymentInvoice = ref(null)
+    const defaultWiseRedirectUrl = `${window.location.origin}/my-invoices`
+    const defaultWiseWebhookUrl = `${window.location.origin}/api/webhooks/wise/incoming-transfer`
     const adminMonthlyInvoices = ref(null)
     const monthlyInvoiceMonth = ref(localIsoMonth())
     const whatsappSettings = ref([])
@@ -1243,6 +1265,10 @@ export default {
     const openCompletedBookingIds = ref(new Set())
     const openMiscCostIds = ref(new Set())
     const loading = ref(false)
+    const paymentSettingsSaving = ref(false)
+    const paymentTestGenerating = ref(false)
+    const paymentTestRefreshing = ref(false)
+    const paymentWebhookSubscribing = ref(false)
     const errorMsg = ref('')
     const editingBookingId = ref(null)
     const bookingDate = ref(localIsoDate())
@@ -1819,11 +1845,44 @@ export default {
     async function loadPaymentSettings() {
       if (!isSuperAdmin.value) return
       paymentSettings.value = await fetchJson('/api/admin/payment-settings')
+      paymentSettings.value.wise_api_token = ''
+      paymentSettings.value.wise_redirect_url = paymentSettings.value.wise_redirect_url || defaultWiseRedirectUrl
+      paymentSettings.value.wise_webhook_url = paymentSettings.value.wise_webhook_url || defaultWiseWebhookUrl
+      await loadLatestTestInvoice()
     }
 
     async function savePaymentSettings() {
+      paymentSettingsSaving.value = true
+      try {
+        paymentSettings.value = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
+        paymentSettings.value.wise_api_token = ''
+        msg.value = 'Payment settings saved.'
+        errorMsg.value = ''
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        paymentSettingsSaving.value = false
+      }
+    }
+
+    async function persistPaymentSettingsForTest() {
       paymentSettings.value = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
-      msg.value = 'Payment settings saved.'
+      paymentSettings.value.wise_api_token = ''
+    }
+
+    async function createWiseWebhookSubscription() {
+      paymentWebhookSubscribing.value = true
+      try {
+        const data = await fetchJson('/api/admin/payment-settings/wise-webhook-subscription', { method: 'POST', body: JSON.stringify(paymentSettings.value) })
+        paymentSettings.value = data.settings
+        paymentSettings.value.wise_api_token = ''
+        msg.value = 'Wise webhook subscription created.'
+        errorMsg.value = ''
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        paymentWebhookSubscribing.value = false
+      }
     }
 
     async function loadPaymentInvoices() {
@@ -1834,6 +1893,19 @@ export default {
 
     async function loadPaymentInvoice(id) {
       selectedPaymentInvoice.value = await fetchJson(`/api/payment-invoices/${id}`)
+    }
+
+    async function loadLatestTestInvoice() {
+      paymentTestRefreshing.value = true
+      try {
+        const data = await fetchJson('/api/admin/payment-invoices/test/latest')
+        selectedPaymentInvoice.value = data.invoice || null
+        errorMsg.value = ''
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        paymentTestRefreshing.value = false
+      }
     }
 
     async function setPaymentStatus(invoice, status) {
@@ -1850,9 +1922,20 @@ export default {
     }
 
     async function generateTestInvoice() {
-      selectedPaymentInvoice.value = await fetchJson('/api/admin/payment-invoices/test', { method: 'POST', body: JSON.stringify({}) })
-      msg.value = 'Test invoice generated.'
-      if (isAdmin.value) await loadPaymentInvoices()
+      paymentTestGenerating.value = true
+      try {
+        msg.value = 'Preparing Wise test invoice...'
+        await persistPaymentSettingsForTest()
+        selectedPaymentInvoice.value = await fetchJson('/api/admin/payment-invoices/test', { method: 'POST', body: JSON.stringify({}) })
+        msg.value = 'Test invoice generated.'
+        errorMsg.value = ''
+        if (isAdmin.value) await loadPaymentInvoices()
+      } catch (err) {
+        errorMsg.value = err.message
+        msg.value = ''
+      } finally {
+        paymentTestGenerating.value = false
+      }
     }
 
     async function notifyMonthlyInvoicesReady() {
@@ -2706,7 +2789,13 @@ export default {
       isLoggedIn,
       isAdmin,
       isSuperAdmin,
+      paymentSettingsSaving,
+      paymentTestGenerating,
+      paymentTestRefreshing,
+      paymentWebhookSubscribing,
       paymentSettings,
+      defaultWiseRedirectUrl,
+      defaultWiseWebhookUrl,
       paymentInvoices,
       selectedPaymentInvoice,
       paymentFilter,
@@ -2791,8 +2880,10 @@ export default {
       loadWhatsAppNotifications,
       loadPaymentSettings,
       savePaymentSettings,
+      createWiseWebhookSubscription,
       loadPaymentInvoices,
       loadPaymentInvoice,
+      loadLatestTestInvoice,
       setPaymentStatus,
       setMonthlyInvoiceStatus,
       generateTestInvoice,

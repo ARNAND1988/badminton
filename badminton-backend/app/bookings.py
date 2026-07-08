@@ -229,17 +229,38 @@ def _calculated_booking_cost(court, start_time, end_time):
     return round((hours * hourly_rate) + (half_hours * half_hour_rate), 2)
 
 
+def _family_group_users(user):
+    if not user or not user.id:
+        return [user] if user else []
+    group_ids = {user.id}
+    changed = True
+    family_links = FamilyMember.query.filter(FamilyMember.linked_user_id.isnot(None)).all()
+    while changed:
+        changed = False
+        for link in family_links:
+            if not link.user_id or not link.linked_user_id:
+                continue
+            if link.user_id in group_ids or link.linked_user_id in group_ids:
+                before = len(group_ids)
+                group_ids.update([link.user_id, link.linked_user_id])
+                changed = changed or len(group_ids) != before
+    return User.query.filter(User.id.in_(group_ids)).order_by(User.id.asc()).all()
+
+
 def _family_owner_for_user(user):
-    link = FamilyMember.query.filter_by(linked_user_id=user.id).order_by(FamilyMember.created_at.asc()).first()
-    return link.user if link and link.user else user
+    group = _family_group_users(user)
+    return group[0] if group else user
 
 
 def _participant_keys_for_user(user):
-    keys = {user.phone}
-    for member in user.family_members:
-        keys.add(f'family:{member.id}')
-        if member.linked_user and member.linked_user.phone:
-            keys.add(member.linked_user.phone)
+    keys = set()
+    for group_user in _family_group_users(user):
+        if group_user.phone:
+            keys.add(group_user.phone)
+        for member in group_user.family_members:
+            keys.add(f'family:{member.id}')
+            if member.linked_user and member.linked_user.phone:
+                keys.add(member.linked_user.phone)
     return keys
 
 
@@ -281,11 +302,13 @@ def _monthly_invoice_summary(user, month_value):
     user = _family_owner_for_user(user)
     participant_keys = _participant_keys_for_user(user)
     family_title = _family_display_name(user)
-    participant_labels = {user.phone: user.name or user.email or user.phone}
-    for member in user.family_members:
-        participant_labels[f'family:{member.id}'] = member.name
-        if member.linked_user and member.linked_user.phone:
-            participant_labels[member.linked_user.phone] = member.name or member.linked_user.name or member.linked_user.email or member.linked_user.phone
+    participant_labels = {}
+    for group_user in _family_group_users(user):
+        participant_labels[group_user.phone] = group_user.name or group_user.email or group_user.phone
+        for member in group_user.family_members:
+            participant_labels[f'family:{member.id}'] = member.name
+            if member.linked_user and member.linked_user.phone:
+                participant_labels[member.linked_user.phone] = member.name or member.linked_user.name or member.linked_user.email or member.linked_user.phone
     booking_items = []
     booking_total = 0.0
     bookings = (
@@ -1664,6 +1687,13 @@ def admin_monthly_invoices():
         subject['booking_total'] = round(subject['booking_total'], 2)
         subject['paid_count'] = len([item for item in subject['booking_items'] if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'])
         subject['paid_amount'] = round(sum(float(item.get('amount') or 0.0) for item in subject['booking_items'] if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'), 2)
+        if subject['payment_invoice']:
+            invoice_status = subject['payment_invoice'].get('payment_status')
+            invoice_paid_amount = float(subject['payment_invoice'].get('paid_amount') or 0.0)
+            if invoice_status == 'PAID':
+                subject['paid_amount'] = subject['total']
+            elif invoice_paid_amount > 0:
+                subject['paid_amount'] = min(subject['total'], round(invoice_paid_amount, 2))
         subject['balance_amount'] = round(subject['total'] - subject['paid_amount'], 2)
 
     visible = [
@@ -2478,12 +2508,14 @@ def test_whatsapp_notification(setting_id):
 import base64
 from io import BytesIO
 import re as _payment_re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+import requests
 try:
     import qrcode
 except Exception:  # pragma: no cover - dependency is declared, fallback keeps app importable
     qrcode = None
 
-from .models import PaymentAuditLog, PaymentInvoice, PaymentSettings
+from .models import PaymentAuditLog, PaymentInvoice, PaymentSettings, WiseWebhookEvent
 
 PAYMENT_STATUSES = {'UNPAID', 'PAID', 'PARTIALLY_PAID', 'CANCELLED', 'EXPIRED'}
 
@@ -2533,8 +2565,11 @@ def _valid_iban(iban):
 def _payment_settings():
     settings = PaymentSettings.query.order_by(PaymentSettings.id.asc()).first()
     if not settings:
-        settings = PaymentSettings(test_mode=True, qr_enabled=True, default_due_days=14)
+        settings = PaymentSettings(payment_provider='WISE_API', test_mode=True, qr_enabled=True, default_due_days=14)
         db.session.add(settings)
+        db.session.flush()
+    elif settings.payment_provider != 'WISE_API':
+        settings.payment_provider = 'WISE_API'
         db.session.flush()
     return settings
 
@@ -2556,9 +2591,303 @@ def _next_payment_reference():
 def _epc_payload(settings, amount, reference):
     name = settings.effective_account_holder_name()
     iban = settings.effective_iban().replace(' ', '')
-    bic = settings.effective_bic() or ''
     description = f'{settings.description_prefix or "Invoice"} {reference}'[:140]
-    return '\n'.join(['BCD', '002', '1', 'SCT', bic, name[:70], iban, f'EUR{float(amount or 0):.2f}', '', '', description])
+    # Dutch banking apps are stricter with EPC QR parsing: for EEA IBANs use
+    # version 002, Latin-1 character set marker, and omit the optional BIC.
+    return '\n'.join(['BCD', '002', '2', 'SCT', '', name[:70], iban, f'EUR{float(amount or 0):.2f}', '', '', description])
+
+
+def _wise_payment_url(settings, amount, reference):
+    base_url = (settings.wise_payment_url or '').strip()
+    if not base_url:
+        return None
+    description = f'{settings.description_prefix or "Invoice"} {reference}'[:140]
+    values = {
+        'amount': f'{float(amount or 0):.2f}',
+        'currency': 'EUR',
+        'reference': reference,
+        'description': description,
+        'iban': settings.effective_iban().replace(' ', ''),
+        'account_holder_name': settings.effective_account_holder_name(),
+        'account_holder': settings.effective_account_holder_name(),
+    }
+    if any(f'{{{key}}}' in base_url for key in values):
+        payment_url = base_url
+        for key, value in values.items():
+            payment_url = payment_url.replace(f'{{{key}}}', str(value))
+        return payment_url
+    split = urlsplit(base_url)
+    query = dict(parse_qsl(split.query, keep_blank_values=True))
+    query.setdefault('amount', values['amount'])
+    query.setdefault('currency', values['currency'])
+    query.setdefault('reference', values['reference'])
+    query.setdefault('description', values['description'])
+    query.setdefault('iban', values['iban'])
+    query.setdefault('accountHolder', values['account_holder_name'])
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
+
+
+def _wise_api_base_url(settings):
+    return (settings.wise_api_base_url or 'https://api.wise.com').rstrip('/')
+
+
+def _wise_api_headers(settings):
+    token = (settings.wise_api_token or '').strip()
+    if not token:
+        raise ValueError('wise_api_token_required')
+    return {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
+
+def _wise_business_profile_id(settings):
+    if settings.wise_profile_id:
+        return settings.wise_profile_id
+    response = requests.get(f'{_wise_api_base_url(settings)}/v1/profiles', headers=_wise_api_headers(settings), timeout=10)
+    response.raise_for_status()
+    profiles = response.json() or []
+    business = next((profile for profile in profiles if (profile.get('type') or '').upper() == 'BUSINESS'), None)
+    if not business or not business.get('id'):
+        raise ValueError('wise_business_profile_not_found')
+    settings.wise_profile_id = str(business['id'])
+    return settings.wise_profile_id
+
+
+def _wise_create_payment_request(settings, invoice):
+    profile_id = _wise_business_profile_id(settings)
+    payload = {
+        'amount': round(float(invoice.amount_due or 0.0), 2),
+        'currency': 'EUR',
+        'payInMethods': ['BANK_TRANSFER'],
+        'reference': invoice.payment_reference or invoice.invoice_number,
+    }
+    if settings.wise_redirect_url:
+        payload['redirectUrl'] = settings.wise_redirect_url
+    base_url = _wise_api_base_url(settings)
+    endpoints = [
+        f'{base_url}/v3/profiles/{profile_id}/payment-requests',
+        f'{base_url}/v1/profiles/{profile_id}/payment-requests',
+        f'{base_url}/v1/payment-requests',
+    ]
+    response = None
+    for endpoint in endpoints:
+        response = requests.post(endpoint, headers=_wise_api_headers(settings), json=payload, timeout=15)
+        if response.status_code != 404:
+            break
+    if response is None:
+        raise ValueError('wise_payment_url_missing')
+    response.raise_for_status()
+    data = response.json() or {}
+    payment_url = data.get('url') or data.get('checkoutUrl') or data.get('paymentUrl')
+    if not payment_url:
+        raise ValueError('wise_payment_url_missing')
+    invoice.wise_payment_request_id = str(data.get('id') or '')
+    return payment_url
+
+
+def _wise_create_webhook_subscription(settings):
+    client_key = (settings.wise_client_key or '').strip()
+    webhook_url = (settings.wise_webhook_url or '').strip()
+    if not client_key:
+        raise ValueError('wise_client_key_required')
+    if not webhook_url:
+        raise ValueError('wise_webhook_url_required')
+    payload = {
+        'name': 'Badminton incoming transfer subscription',
+        'trigger_on': 'incoming-transfer#credited',
+        'delivery': {
+            'version': '4.0.0',
+            'url': webhook_url,
+        },
+    }
+    response = requests.post(
+        f'{_wise_api_base_url(settings)}/v3/applications/{client_key}/subscriptions',
+        headers=_wise_api_headers(settings),
+        json=payload,
+        timeout=15,
+    )
+    response.raise_for_status()
+    data = response.json() or {}
+    subscription_id = data.get('id') or data.get('subscription_id')
+    if not subscription_id:
+        raise ValueError('wise_subscription_id_missing')
+    settings.wise_webhook_subscription_id = str(subscription_id)
+    return data
+
+
+def _wise_fetch_incoming_transfer(settings, incoming_transfer_id):
+    base_url = _wise_api_base_url(settings)
+    endpoints = [
+        f'{base_url}/v1/incoming-transfers/{incoming_transfer_id}',
+        f'{base_url}/v3/incoming-transfers/{incoming_transfer_id}',
+    ]
+    response = None
+    for endpoint in endpoints:
+        response = requests.get(endpoint, headers=_wise_api_headers(settings), timeout=15)
+        if response.status_code != 404:
+            break
+    if response is None:
+        raise ValueError('wise_incoming_transfer_missing')
+    response.raise_for_status()
+    return response.json() or {}
+
+
+def _flatten_text_values(value):
+    values = []
+    if isinstance(value, dict):
+        for child in value.values():
+            values.extend(_flatten_text_values(child))
+    elif isinstance(value, list):
+        for child in value:
+            values.extend(_flatten_text_values(child))
+    elif value is not None:
+        values.append(str(value))
+    return values
+
+
+def _deep_value(data, keys):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key in keys and value not in (None, ''):
+                return value
+            found = _deep_value(value, keys)
+            if found not in (None, ''):
+                return found
+    elif isinstance(data, list):
+        for item in data:
+            found = _deep_value(item, keys)
+            if found not in (None, ''):
+                return found
+    return None
+
+
+def _incoming_transfer_id_from_payload(payload):
+    data = payload.get('data') or {}
+    candidates = [
+        data.get('incoming_transfer_id') if isinstance(data, dict) else None,
+        data.get('incomingTransferId') if isinstance(data, dict) else None,
+        payload.get('incoming_transfer_id'),
+        payload.get('incomingTransferId'),
+        _deep_value(payload, {'incoming_transfer_id', 'incomingTransferId'}),
+    ]
+    resource = data.get('resource') if isinstance(data, dict) else None
+    if isinstance(resource, dict):
+        candidates.extend([resource.get('id'), resource.get('resourceId')])
+    for candidate in candidates:
+        if candidate not in (None, ''):
+            return str(candidate)
+    return None
+
+
+def _incoming_transfer_amount(data):
+    amount_value = _deep_value(data, {'amount', 'value'})
+    try:
+        if isinstance(amount_value, dict):
+            amount_value = amount_value.get('value') or amount_value.get('amount')
+        return round(float(amount_value or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _incoming_transfer_currency(data):
+    return _deep_value(data, {'currency', 'sourceCurrency', 'targetCurrency'})
+
+
+def _incoming_transfer_reference(data):
+    reference = _deep_value(data, {'reference', 'paymentReference', 'remittanceInformation', 'description', 'message'})
+    return str(reference) if reference not in (None, '') else ''
+
+
+def _incoming_transfer_sender(data):
+    sender = _deep_value(data, {'senderName', 'debtorName', 'name'})
+    return str(sender) if sender not in (None, '') else ''
+
+
+def _find_invoice_for_incoming_transfer(data):
+    text = ' '.join(_flatten_text_values(data)).lower()
+    invoices = PaymentInvoice.query.filter(PaymentInvoice.payment_status != 'PAID').order_by(PaymentInvoice.created_at.desc()).all()
+    for invoice in invoices:
+        candidates = [invoice.payment_reference, invoice.invoice_number]
+        if any(candidate and candidate.lower() in text for candidate in candidates):
+            return invoice
+    return None
+
+
+def _apply_incoming_transfer_to_invoice(invoice, amount, note):
+    old_status = invoice.payment_status
+    invoice.paid_amount = round(float(invoice.paid_amount or 0.0) + float(amount or 0.0), 2)
+    if invoice.paid_amount + 0.001 >= float(invoice.amount_due or 0.0):
+        invoice.payment_status = 'PAID'
+        if not invoice.paid_at:
+            invoice.paid_at = datetime.utcnow()
+    elif invoice.paid_amount > 0:
+        invoice.payment_status = 'PARTIALLY_PAID'
+    invoice.payment_note = note
+    db.session.add(PaymentAuditLog(invoice_id=invoice.id, old_status=old_status, new_status=invoice.payment_status, amount=invoice.paid_amount, note=note))
+    return invoice
+
+
+def _wise_payment_error_response(exc):
+    db.session.rollback()
+    payload, status_code = _wise_payment_error_payload(exc)
+    return jsonify(payload), status_code
+
+
+def _wise_payment_error_payload(exc):
+    if isinstance(exc, ValueError) and str(exc) == 'wise_api_token_required':
+        return {
+            'error': 'Wise API token is required before generating payment invoices.',
+            'code': 'wise_api_token_required',
+        }, 400
+    if isinstance(exc, ValueError) and str(exc) == 'wise_business_profile_not_found':
+        return {
+            'error': 'No Wise business profile was found for this API token.',
+            'code': 'wise_business_profile_not_found',
+        }, 400
+    if isinstance(exc, ValueError) and str(exc) == 'wise_payment_url_missing':
+        return {
+            'error': 'Wise did not return a payment link for this invoice.',
+            'code': 'wise_payment_url_missing',
+        }, 502
+    if isinstance(exc, ValueError) and str(exc) == 'wise_client_key_required':
+        return {
+            'error': 'Wise client key is required before creating the webhook subscription.',
+            'code': 'wise_client_key_required',
+        }, 400
+    if isinstance(exc, ValueError) and str(exc) == 'wise_webhook_url_required':
+        return {
+            'error': 'Wise webhook URL is required before creating the webhook subscription.',
+            'code': 'wise_webhook_url_required',
+        }, 400
+    if isinstance(exc, ValueError) and str(exc) == 'wise_subscription_id_missing':
+        return {
+            'error': 'Wise created the webhook subscription but did not return a subscription ID.',
+            'code': 'wise_subscription_id_missing',
+        }, 502
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status_code = exc.response.status_code if exc.response is not None else 502
+        response_text = ''
+        if exc.response is not None:
+            response_text = (exc.response.text or '').strip()
+            if len(response_text) > 240:
+                response_text = response_text[:240] + '...'
+        if status_code in {401, 403}:
+            return {
+                'error': 'Wise rejected the API token or profile ID. Check the token, business profile ID, and environment.',
+                'code': 'wise_unauthorized',
+            }, 400
+        return {
+            'error': f'Wise payment request failed ({status_code}). {response_text}'.strip(),
+            'code': 'wise_api_error',
+        }, 502
+    if isinstance(exc, requests.exceptions.RequestException):
+        return {
+            'error': 'Wise payment request service is unreachable. Try again shortly.',
+            'code': 'wise_unreachable',
+        }, 502
+    raise exc
 
 
 def _qr_data_url(payload):
@@ -2578,9 +2907,19 @@ def _attach_payment_details(invoice, settings):
     invoice.bank_name = settings.effective_bank_name()
     invoice.iban = settings.effective_iban()
     invoice.bic = settings.effective_bic()
-    if settings.qr_enabled:
-        invoice.qr_payload = _epc_payload(settings, invoice.amount_due, reference)
-        invoice.qr_code_data_url = _qr_data_url(invoice.qr_payload)
+    invoice.payment_url = _wise_create_payment_request(settings, invoice)
+    invoice.qr_payload = invoice.payment_url
+    invoice.qr_code_data_url = _qr_data_url(invoice.qr_payload)
+    return invoice
+
+
+def _attach_payment_error(invoice, exc):
+    payload, _ = _wise_payment_error_payload(exc)
+    invoice.payment_url = None
+    invoice.qr_payload = None
+    invoice.qr_code_data_url = None
+    invoice.wise_payment_request_id = None
+    invoice._payment_generation_error = payload
     return invoice
 
 
@@ -2589,10 +2928,13 @@ def _user_can_view_payment_invoice(user, invoice):
         return True
     if invoice.user_id == user.id:
         return True
+    owner = _family_owner_for_user(user)
+    if invoice.user_id == owner.id:
+        return True
     return False
 
 
-def _create_payment_invoice_for_summary(user, month_value, summary, settings, is_test=False):
+def _create_payment_invoice_for_summary(user, month_value, summary, settings, is_test=False, allow_payment_failure=False):
     existing = None if is_test else PaymentInvoice.query.filter_by(user_id=user.id, month=month_value, is_test_invoice=False).first()
     invoice = existing or PaymentInvoice(user_id=user.id, month=month_value)
     if not existing:
@@ -2607,7 +2949,12 @@ def _create_payment_invoice_for_summary(user, month_value, summary, settings, is
     invoice.misc_items_json = json.dumps(summary.get('misc_items') or [])
     invoice.is_test_invoice = bool(is_test)
     invoice.payment_status = invoice.payment_status or 'UNPAID'
-    _attach_payment_details(invoice, settings)
+    try:
+        _attach_payment_details(invoice, settings)
+    except (ValueError, requests.exceptions.RequestException) as exc:
+        if not allow_payment_failure:
+            raise
+        _attach_payment_error(invoice, exc)
     return invoice
 
 
@@ -2642,10 +2989,27 @@ def admin_payment_settings():
     iban = (data.get('iban') or '').replace(' ', '').upper() or None
     if iban and not _valid_iban(iban):
         return jsonify({'error': 'invalid_iban'}), 400
+    payment_provider = 'WISE_API'
+    wise_api_token = (data.get('wise_api_token') or '').strip()
+    if not (wise_api_token or settings.wise_api_token):
+        return jsonify({'error': 'wise_api_token_required'}), 400
     for field in ['account_holder_name', 'bank_name', 'bic', 'description_prefix']:
         if field in data:
             setattr(settings, field, (data.get(field) or '').strip() or None)
     settings.iban = iban
+    settings.payment_provider = payment_provider
+    if wise_api_token:
+        settings.wise_api_token = wise_api_token
+    if 'wise_profile_id' in data:
+        settings.wise_profile_id = (data.get('wise_profile_id') or '').strip() or None
+    if 'wise_api_base_url' in data:
+        settings.wise_api_base_url = (data.get('wise_api_base_url') or '').strip() or None
+    if 'wise_redirect_url' in data:
+        settings.wise_redirect_url = (data.get('wise_redirect_url') or '').strip() or None
+    if 'wise_client_key' in data:
+        settings.wise_client_key = (data.get('wise_client_key') or '').strip() or None
+    if 'wise_webhook_url' in data:
+        settings.wise_webhook_url = (data.get('wise_webhook_url') or '').strip() or None
     if 'default_due_days' in data:
         settings.default_due_days = max(1, min(60, int(data.get('default_due_days') or 14)))
     if 'qr_enabled' in data:
@@ -2656,6 +3020,32 @@ def admin_payment_settings():
     _record_admin_audit(user, 'update', 'payment_settings', settings.id, 'Updated payment account settings', {'settings': settings.to_dict()})
     db.session.commit()
     return jsonify(settings.to_dict(include_effective=True))
+
+
+@bookings_bp.route('/admin/payment-settings/wise-webhook-subscription', methods=['POST'])
+def create_wise_webhook_subscription():
+    user, error = _require_super_admin()
+    if error:
+        return error
+    settings = _payment_settings()
+    data = request.get_json() or {}
+    wise_api_token = (data.get('wise_api_token') or '').strip()
+    if wise_api_token:
+        settings.wise_api_token = wise_api_token
+    if 'wise_api_base_url' in data:
+        settings.wise_api_base_url = (data.get('wise_api_base_url') or '').strip() or None
+    if 'wise_client_key' in data:
+        settings.wise_client_key = (data.get('wise_client_key') or '').strip() or None
+    if 'wise_webhook_url' in data:
+        settings.wise_webhook_url = (data.get('wise_webhook_url') or '').strip() or None
+    try:
+        subscription = _wise_create_webhook_subscription(settings)
+    except (ValueError, requests.exceptions.RequestException) as exc:
+        return _wise_payment_error_response(exc)
+    settings.updated_by = user.id
+    _record_admin_audit(user, 'create', 'wise_webhook_subscription', settings.wise_webhook_subscription_id, 'Created Wise incoming transfer webhook subscription', {'subscription': subscription})
+    db.session.commit()
+    return jsonify({'subscription': subscription, 'settings': settings.to_dict(include_effective=True)}), 201
 
 
 @bookings_bp.route('/payment-invoices/current', methods=['GET'])
@@ -2681,6 +3071,63 @@ def current_payment_invoice():
     return jsonify(invoice.to_dict())
 
 
+@bookings_bp.route('/webhooks/wise/incoming-transfer', methods=['GET', 'HEAD', 'POST'])
+def wise_incoming_transfer_webhook():
+    if request.method in {'GET', 'HEAD'}:
+        return jsonify({'status': 'ok', 'webhook': 'wise-incoming-transfer'})
+    payload = request.get_json(silent=True) or {}
+    settings = _payment_settings()
+    subscription_id = payload.get('subscription_id')
+    if settings.wise_webhook_subscription_id and subscription_id and subscription_id != settings.wise_webhook_subscription_id:
+        return jsonify({'error': 'unknown_subscription'}), 403
+    incoming_transfer_id = _incoming_transfer_id_from_payload(payload)
+    if not incoming_transfer_id:
+        event = WiseWebhookEvent(
+            event_type=payload.get('event_type') or payload.get('eventType'),
+            subscription_id=subscription_id,
+            payload_json=json.dumps(payload),
+            status='IGNORED',
+            error_message='No incoming transfer id in webhook payload.',
+        )
+        db.session.add(event)
+        db.session.commit()
+        return jsonify({'status': 'ignored', 'message': 'No incoming transfer id in webhook validation payload.'})
+    existing = WiseWebhookEvent.query.filter_by(incoming_transfer_id=str(incoming_transfer_id)).first()
+    if existing:
+        return jsonify({'status': 'duplicate', 'event': existing.to_dict()})
+
+    event = WiseWebhookEvent(
+        event_type=payload.get('event_type'),
+        subscription_id=subscription_id,
+        incoming_transfer_id=str(incoming_transfer_id),
+        payload_json=json.dumps(payload),
+        status='RECEIVED',
+    )
+    db.session.add(event)
+    try:
+        transfer = _wise_fetch_incoming_transfer(settings, incoming_transfer_id)
+        event.fetched_json = json.dumps(transfer)
+        event.amount = _incoming_transfer_amount(transfer)
+        event.currency = _incoming_transfer_currency(transfer)
+        event.reference = _incoming_transfer_reference(transfer)
+        event.sender_name = _incoming_transfer_sender(transfer)
+        invoice = _find_invoice_for_incoming_transfer(transfer)
+        if invoice:
+            event.invoice_id = invoice.id
+            _apply_incoming_transfer_to_invoice(invoice, event.amount, f'Wise incoming transfer {incoming_transfer_id}')
+            event.status = 'MATCHED'
+        else:
+            event.status = 'UNMATCHED'
+            event.error_message = 'No invoice reference matched this incoming transfer.'
+        db.session.commit()
+    except Exception as exc:
+        event.status = 'ERROR'
+        event.error_message = str(exc)
+        db.session.commit()
+        return jsonify({'status': 'error', 'event': event.to_dict()}), 202
+    return jsonify({'status': event.status.lower(), 'event': event.to_dict()})
+
+
 @bookings_bp.route('/admin/invoices/monthly/status', methods=['POST'])
 def update_monthly_invoice_status():
     user, error = _require_any_admin()
@@ -2703,7 +3150,10 @@ def update_monthly_invoice_status():
     if new_status == 'READY_FOR_PAYMENT':
         if not month_status.ready_at:
             month_status.ready_at = datetime.utcnow()
-        generated = _create_payment_invoices_for_month(month_value, user)
+        try:
+            generated = _create_payment_invoices_for_month(month_value, user)
+        except (ValueError, requests.exceptions.RequestException) as exc:
+            return _wise_payment_error_response(exc)
     if new_status == 'SETTLED':
         if not month_status.settled_at:
             month_status.settled_at = datetime.utcnow()
@@ -2780,6 +3230,14 @@ def update_payment_invoice_status(invoice_id):
     invoice.payment_note = data.get('payment_note') or data.get('note') or invoice.payment_note
     invoice.updated_by = user.id
     db.session.add(PaymentAuditLog(invoice_id=invoice.id, old_status=old_status, new_status=new_status, amount=invoice.paid_amount, note=invoice.payment_note, updated_by=user.id))
+    if invoice.month and not invoice.is_test_invoice:
+        month_invoices = PaymentInvoice.query.filter_by(month=invoice.month, is_test_invoice=False).all()
+        if month_invoices and all(item.payment_status == 'PAID' or item.id == invoice.id and new_status == 'PAID' for item in month_invoices):
+            month_status = _monthly_invoice_status(invoice.month, create=True)
+            month_status.status = 'SETTLED'
+            if not month_status.settled_at:
+                month_status.settled_at = datetime.utcnow()
+            month_status.updated_by = user.id
     _record_admin_audit(user, 'update', 'payment_invoice', invoice.id, f'Changed payment status for {invoice.invoice_number} to {new_status}', {'old_status': old_status, 'new_status': new_status})
     db.session.commit()
     return jsonify(invoice.to_dict())
@@ -2793,18 +3251,37 @@ def generate_test_payment_invoice():
     data = request.get_json() or {}
     target = User.query.get(data.get('user_id')) if data.get('user_id') else user
     settings = _payment_settings()
+    total_amount = round(max(0.01, float(data.get('amount') or 17.50)), 2)
     summary = {
-        'total': 17.50,
-        'booking_items': [{'title': 'Dummy booking cost', 'amount': 12.50, 'date': datetime.utcnow().strftime('%Y-%m-%d')}],
-        'misc_items': [{'title': 'Dummy miscellaneous cost', 'amount': 5.00, 'purchase_date': datetime.utcnow().strftime('%Y-%m-%d')}],
+        'total': total_amount,
+        'booking_items': [{'title': 'Wise webhook test payment', 'amount': total_amount, 'date': datetime.utcnow().strftime('%Y-%m-%d')}],
+        'misc_items': [],
     }
-    invoice = _create_payment_invoice_for_summary(target, datetime.utcnow().strftime('%Y-%m'), summary, settings, True)
+    invoice = _create_payment_invoice_for_summary(target, datetime.utcnow().strftime('%Y-%m'), summary, settings, True, allow_payment_failure=True)
     invoice.payment_status = 'UNPAID'
-    _attach_payment_details(invoice, settings)
     db.session.add(PaymentAuditLog(invoice_id=invoice.id, old_status=None, new_status='UNPAID', amount=invoice.amount_due, note='Generated test invoice', updated_by=user.id))
     _record_admin_audit(user, 'create', 'payment_invoice', invoice.id, f'Generated test payment invoice {invoice.invoice_number}', {'invoice': invoice.to_dict(include_qr=False)})
     db.session.commit()
-    return jsonify(invoice.to_dict()), 201
+    response = invoice.to_dict()
+    if getattr(invoice, '_payment_generation_error', None):
+        response['payment_generation_error'] = invoice._payment_generation_error
+    return jsonify(response), 201
+
+
+@bookings_bp.route('/admin/payment-invoices/test/latest', methods=['GET'])
+def latest_test_payment_invoice():
+    user, error = _require_super_admin()
+    if error:
+        return error
+    invoice = PaymentInvoice.query.filter_by(is_test_invoice=True).order_by(PaymentInvoice.created_at.desc()).first()
+    if not invoice:
+        return jsonify({'invoice': None})
+    payload = invoice.to_dict()
+    payload['webhook_events'] = [
+        event.to_dict()
+        for event in WiseWebhookEvent.query.filter_by(invoice_id=invoice.id).order_by(WiseWebhookEvent.created_at.desc()).limit(10).all()
+    ]
+    return jsonify({'invoice': payload})
 
 
 @bookings_bp.route('/admin/payment-invoices/monthly/notify', methods=['POST'])

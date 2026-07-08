@@ -154,6 +154,24 @@ def create_app():
         play_vote_user_id = next((col for col in inspector.get_columns('play_availability_votes') if col['name'] == 'user_id'), None)
         if play_vote_user_id and not play_vote_user_id.get('nullable') and db.engine.dialect.name != 'sqlite':
             db.session.execute(db.text('ALTER TABLE play_availability_votes ALTER COLUMN user_id DROP NOT NULL'))
+
+        payment_invoice_columns = {col['name'] for col in inspector.get_columns('payment_invoices')} if inspector.has_table('payment_invoices') else set()
+        invoice_payment_columns = {
+            "payment_status": "VARCHAR(32) DEFAULT 'UNPAID'",
+            'payment_reference': 'VARCHAR(64)',
+            'amount_due': 'FLOAT DEFAULT 0',
+            'due_date': 'VARCHAR(10)',
+            'paid_at': 'DATETIME',
+            'paid_amount': 'FLOAT DEFAULT 0',
+            'payment_note': 'TEXT',
+            'qr_payload': 'TEXT',
+            'qr_code_data_url': 'TEXT',
+            'is_test_invoice': 'BOOLEAN DEFAULT FALSE',
+        }
+        existing_invoice_columns = {col['name'] for col in inspector.get_columns('invoices')} if inspector.has_table('invoices') else set()
+        for column_name, column_spec in invoice_payment_columns.items():
+            if column_name not in existing_invoice_columns:
+                db.session.execute(db.text(f'ALTER TABLE invoices ADD COLUMN {column_name} {column_spec}'))
         db.session.commit()
         should_seed_default_admin = (
             app.config.get('TESTING')

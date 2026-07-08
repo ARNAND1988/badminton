@@ -39,7 +39,7 @@ def _require_admin():
     user, error = _require_login()
     if error:
         return None, error
-    if user.role != 'admin':
+    if (user.role or '').lower() not in {'admin', 'super_admin'}:
         return None, (jsonify({'error': 'admin_required'}), 403)
     return user, None
 
@@ -1559,8 +1559,10 @@ def create_admin_user():
     user = User.query.filter_by(phone=phone).first()
     if not user:
         role = data.get('role', 'member')
-        if role not in {'member', 'admin'}:
+        if role not in {'member', 'admin', 'super_admin'}:
             return jsonify({'error': 'invalid_role'}), 400
+        if role == 'super_admin' and (admin.role or '').lower() != 'super_admin':
+            return jsonify({'error': 'super_admin_required_for_role_changes'}), 403
         user = User(
             phone=phone,
             email=data.get('email'),
@@ -1611,8 +1613,12 @@ def update_admin_user(user_id):
         target_user.is_club_member = bool(data.get('is_club_member'))
     if 'role' in data:
         role = data.get('role')
-        if role not in {'member', 'admin'}:
+        if role not in {'member', 'admin', 'super_admin'}:
             return jsonify({'error': 'invalid_role'}), 400
+        if role == 'super_admin' and (admin.role or '').lower() != 'super_admin':
+            return jsonify({'error': 'super_admin_required_for_role_changes'}), 403
+        if target_user.role == 'super_admin' and role != 'super_admin' and (admin.role or '').lower() != 'super_admin':
+            return jsonify({'error': 'super_admin_required_for_role_changes'}), 403
         target_user.role = role
 
     after = _snapshot_fields(target_user, ['email', 'phone', 'name', 'whatsapp_number', 'role', 'is_club_member'])
@@ -1918,6 +1924,12 @@ WHATSAPP_NOTIFICATION_DEFAULTS = [
         'description': 'Share a holistic availability overview for the next few playable days.',
         'template': '{{overview}}',
         'is_enabled': True,
+    },
+    {
+        'event_key': 'monthly_invoice_ready',
+        'title': 'Monthly invoices ready',
+        'description': 'Notify the WhatsApp group once the monthly invoice run is ready for payment.',
+        'template': '💶 Monthly badminton invoices for {{month}} are ready. {{note}} Open: {{app_url}}',
     },
     {
         'event_key': 'cost_settled',
@@ -2296,3 +2308,275 @@ def test_whatsapp_notification(setting_id):
     db.session.add(log)
     db.session.commit()
     return jsonify({'message': message, 'log': log.to_dict()})
+
+# --- Payment and bank-transfer invoice administration ---
+import base64
+from io import BytesIO
+import re as _payment_re
+try:
+    import qrcode
+except Exception:  # pragma: no cover - dependency is declared, fallback keeps app importable
+    qrcode = None
+
+from .models import PaymentAuditLog, PaymentInvoice, PaymentSettings
+
+PAYMENT_STATUSES = {'UNPAID', 'PAID', 'PARTIALLY_PAID', 'CANCELLED', 'EXPIRED'}
+
+
+def _is_admin_user(user):
+    return (user.role or '').lower() in {'admin', 'super_admin'}
+
+
+def _is_super_admin_user(user):
+    return (user.role or '').lower() == 'super_admin'
+
+
+def _require_any_admin():
+    user, error = _require_login()
+    if error:
+        return None, error
+    if not _is_admin_user(user):
+        return None, (jsonify({'error': 'admin_required'}), 403)
+    return user, None
+
+
+def _require_super_admin():
+    user, error = _require_login()
+    if error:
+        return None, error
+    if not _is_super_admin_user(user):
+        return None, (jsonify({'error': 'super_admin_required'}), 403)
+    return user, None
+
+
+def _normalized_role(role):
+    role = (role or 'member').strip().lower()
+    return 'super_admin' if role == 'super_admin' else role
+
+
+def _valid_iban(iban):
+    iban = ''.join(ch for ch in (iban or '').upper() if ch.isalnum())
+    if not iban:
+        return False
+    if not _payment_re.match(r'^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$', iban):
+        return False
+    rearranged = iban[4:] + iban[:4]
+    digits = ''.join(str(ord(ch) - 55) if ch.isalpha() else ch for ch in rearranged)
+    return int(digits) % 97 == 1
+
+
+def _payment_settings():
+    settings = PaymentSettings.query.order_by(PaymentSettings.id.asc()).first()
+    if not settings:
+        settings = PaymentSettings(test_mode=True, qr_enabled=True, default_due_days=14)
+        db.session.add(settings)
+        db.session.flush()
+    return settings
+
+
+def _next_payment_reference():
+    year = datetime.utcnow().year
+    prefix = f'INV-{year}-'
+    latest = PaymentInvoice.query.filter(PaymentInvoice.invoice_number.like(f'{prefix}%')).order_by(PaymentInvoice.id.desc()).first()
+    next_id = (latest.id + 1) if latest else 1
+    return f'{prefix}{next_id:05d}'
+
+
+def _epc_payload(settings, amount, reference):
+    name = settings.effective_account_holder_name()
+    iban = settings.effective_iban().replace(' ', '')
+    bic = settings.effective_bic() or ''
+    description = f'{settings.description_prefix or "Invoice"} {reference}'[:140]
+    return '\n'.join(['BCD', '002', '1', 'SCT', bic, name[:70], iban, f'EUR{float(amount or 0):.2f}', '', '', description])
+
+
+def _qr_data_url(payload):
+    if not qrcode:
+        return None
+    img = qrcode.make(payload)
+    buf = BytesIO()
+    img.save(buf, format='PNG')
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('ascii')
+
+
+def _attach_payment_details(invoice, settings):
+    reference = invoice.payment_reference or invoice.invoice_number or _next_payment_reference()
+    invoice.payment_reference = reference
+    invoice.invoice_number = invoice.invoice_number or reference
+    invoice.bank_account_holder = settings.effective_account_holder_name()
+    invoice.bank_name = settings.effective_bank_name()
+    invoice.iban = settings.effective_iban()
+    invoice.bic = settings.effective_bic()
+    if settings.qr_enabled:
+        invoice.qr_payload = _epc_payload(settings, invoice.amount_due, reference)
+        invoice.qr_code_data_url = _qr_data_url(invoice.qr_payload)
+    return invoice
+
+
+def _user_can_view_payment_invoice(user, invoice):
+    if _is_admin_user(user):
+        return True
+    if invoice.user_id == user.id:
+        return True
+    return False
+
+
+def _create_payment_invoice_for_summary(user, month_value, summary, settings, is_test=False):
+    existing = None if is_test else PaymentInvoice.query.filter_by(user_id=user.id, month=month_value, is_test_invoice=False).first()
+    invoice = existing or PaymentInvoice(user_id=user.id, month=month_value)
+    if not existing:
+        invoice.invoice_number = _next_payment_reference()
+        invoice.payment_reference = invoice.invoice_number
+        invoice.due_date = (datetime.utcnow().date() + timedelta(days=int(settings.default_due_days or 14))).strftime('%Y-%m-%d')
+        db.session.add(invoice)
+        db.session.flush()
+    invoice.amount_due = round(float(summary.get('total') or 0.0), 2)
+    invoice.booking_items_json = json.dumps(summary.get('booking_items') or [])
+    invoice.misc_items_json = json.dumps(summary.get('misc_items') or [])
+    invoice.is_test_invoice = bool(is_test)
+    invoice.payment_status = invoice.payment_status or 'UNPAID'
+    _attach_payment_details(invoice, settings)
+    return invoice
+
+
+@bookings_bp.route('/admin/payment-settings', methods=['GET', 'PUT'])
+def admin_payment_settings():
+    user, error = _require_super_admin()
+    if error:
+        return error
+    settings = _payment_settings()
+    if request.method == 'GET':
+        return jsonify(settings.to_dict(include_effective=True))
+    data = request.get_json() or {}
+    iban = (data.get('iban') or '').replace(' ', '').upper() or None
+    if iban and not _valid_iban(iban):
+        return jsonify({'error': 'invalid_iban'}), 400
+    for field in ['account_holder_name', 'bank_name', 'bic', 'description_prefix']:
+        if field in data:
+            setattr(settings, field, (data.get(field) or '').strip() or None)
+    settings.iban = iban
+    if 'default_due_days' in data:
+        settings.default_due_days = max(1, min(60, int(data.get('default_due_days') or 14)))
+    if 'qr_enabled' in data:
+        settings.qr_enabled = bool(data.get('qr_enabled'))
+    if 'test_mode' in data:
+        settings.test_mode = bool(data.get('test_mode'))
+    settings.updated_by = user.id
+    _record_admin_audit(user, 'update', 'payment_settings', settings.id, 'Updated payment account settings', {'settings': settings.to_dict()})
+    db.session.commit()
+    return jsonify(settings.to_dict(include_effective=True))
+
+
+@bookings_bp.route('/payment-invoices/current', methods=['GET'])
+def current_payment_invoice():
+    user, error = _require_login()
+    if error:
+        return error
+    month_value = request.args.get('month') or datetime.utcnow().strftime('%Y-%m')
+    summary = _monthly_invoice_summary(user, month_value)
+    if not summary:
+        return jsonify({'error': 'month must use YYYY-MM'}), 400
+    settings = _payment_settings()
+    invoice = _create_payment_invoice_for_summary(user, month_value, summary, settings, False)
+    db.session.commit()
+    return jsonify(invoice.to_dict())
+
+
+@bookings_bp.route('/payment-invoices/<int:invoice_id>', methods=['GET'])
+def get_payment_invoice(invoice_id):
+    user, error = _require_login()
+    if error:
+        return error
+    invoice = PaymentInvoice.query.get_or_404(invoice_id)
+    if not _user_can_view_payment_invoice(user, invoice):
+        return jsonify({'error': 'forbidden'}), 403
+    payload = invoice.to_dict()
+    payload['audit_logs'] = [log.to_dict() for log in sorted(invoice.audit_logs, key=lambda x: x.created_at or datetime.min)]
+    return jsonify(payload)
+
+
+@bookings_bp.route('/admin/payment-invoices', methods=['GET'])
+def admin_payment_invoices():
+    user, error = _require_any_admin()
+    if error:
+        return error
+    status_filter = (request.args.get('status') or 'all').lower()
+    query = PaymentInvoice.query.order_by(PaymentInvoice.created_at.desc())
+    if status_filter == 'unpaid':
+        query = query.filter(PaymentInvoice.payment_status == 'UNPAID')
+    elif status_filter == 'paid':
+        query = query.filter(PaymentInvoice.payment_status == 'PAID')
+    elif status_filter == 'test':
+        query = query.filter(PaymentInvoice.is_test_invoice.is_(True))
+    invoices = query.all()
+    if status_filter == 'overdue':
+        today = datetime.utcnow().date().strftime('%Y-%m-%d')
+        invoices = [item for item in invoices if item.due_date and item.due_date < today and item.payment_status in {'UNPAID', 'PARTIALLY_PAID'}]
+    return jsonify({'invoices': [item.to_dict(include_qr=False) for item in invoices]})
+
+
+@bookings_bp.route('/admin/payment-invoices/<int:invoice_id>/status', methods=['POST'])
+def update_payment_invoice_status(invoice_id):
+    user, error = _require_any_admin()
+    if error:
+        return error
+    invoice = PaymentInvoice.query.get_or_404(invoice_id)
+    data = request.get_json() or {}
+    new_status = (data.get('payment_status') or data.get('status') or '').upper()
+    if new_status not in PAYMENT_STATUSES:
+        return jsonify({'error': 'invalid_payment_status'}), 400
+    old_status = invoice.payment_status
+    amount = data.get('paid_amount')
+    invoice.payment_status = new_status
+    if amount is not None:
+        invoice.paid_amount = round(float(amount or 0), 2)
+    elif new_status == 'PAID':
+        invoice.paid_amount = invoice.amount_due
+    if new_status == 'PAID' and not invoice.paid_at:
+        invoice.paid_at = datetime.utcnow()
+    if data.get('paid_date'):
+        invoice.paid_at = datetime.strptime(data.get('paid_date'), '%Y-%m-%d')
+    invoice.payment_note = data.get('payment_note') or data.get('note') or invoice.payment_note
+    invoice.updated_by = user.id
+    db.session.add(PaymentAuditLog(invoice_id=invoice.id, old_status=old_status, new_status=new_status, amount=invoice.paid_amount, note=invoice.payment_note, updated_by=user.id))
+    _record_admin_audit(user, 'update', 'payment_invoice', invoice.id, f'Changed payment status for {invoice.invoice_number} to {new_status}', {'old_status': old_status, 'new_status': new_status})
+    db.session.commit()
+    return jsonify(invoice.to_dict())
+
+
+@bookings_bp.route('/admin/payment-invoices/test', methods=['POST'])
+def generate_test_payment_invoice():
+    user, error = _require_super_admin()
+    if error:
+        return error
+    data = request.get_json() or {}
+    target = User.query.get(data.get('user_id')) if data.get('user_id') else user
+    settings = _payment_settings()
+    summary = {
+        'total': 17.50,
+        'booking_items': [{'title': 'Dummy booking cost', 'amount': 12.50, 'date': datetime.utcnow().strftime('%Y-%m-%d')}],
+        'misc_items': [{'title': 'Dummy miscellaneous cost', 'amount': 5.00, 'purchase_date': datetime.utcnow().strftime('%Y-%m-%d')}],
+    }
+    invoice = _create_payment_invoice_for_summary(target, datetime.utcnow().strftime('%Y-%m'), summary, settings, True)
+    invoice.invoice_number = _next_payment_reference()
+    invoice.payment_reference = invoice.invoice_number
+    invoice.payment_status = 'UNPAID'
+    _attach_payment_details(invoice, settings)
+    db.session.add(PaymentAuditLog(invoice_id=invoice.id, old_status=None, new_status='UNPAID', amount=invoice.amount_due, note='Generated test invoice', updated_by=user.id))
+    _record_admin_audit(user, 'create', 'payment_invoice', invoice.id, f'Generated test payment invoice {invoice.invoice_number}', {'invoice': invoice.to_dict(include_qr=False)})
+    db.session.commit()
+    return jsonify(invoice.to_dict()), 201
+
+
+@bookings_bp.route('/admin/payment-invoices/monthly/notify', methods=['POST'])
+def notify_monthly_invoice_ready():
+    user, error = _require_any_admin()
+    if error:
+        return error
+    month_value = (request.get_json() or {}).get('month') or datetime.utcnow().strftime('%Y-%m')
+    start_date, _ = _month_bounds(month_value)
+    if not start_date:
+        return jsonify({'error': 'month must use YYYY-MM'}), 400
+    context = {'month': month_value, 'app_url': request.host_url.rstrip('/'), 'note': 'Monthly invoices are ready. Please open the app, review your family total, and pay by bank transfer using the displayed reference.'}
+    log = _send_whatsapp_event('monthly_invoice_ready', context, dedupe_key=f'monthly_invoice_ready:{month_value}')
+    return jsonify({'status': 'sent' if log else 'skipped', 'log': log.to_dict() if log else None})

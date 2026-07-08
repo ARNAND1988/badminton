@@ -61,6 +61,21 @@ const routes = [
     props: { initialView: 'admin-costs' },
     meta: { navLabel: 'Split Costs', requiresAuth: true }
   },
+
+  {
+    path: '/admin/payments',
+    name: 'admin-payments',
+    component: Dashboard,
+    props: { initialView: 'admin-payments' },
+    meta: { navLabel: 'Payments', requiresAuth: true }
+  },
+  {
+    path: '/admin/payment-settings',
+    name: 'payment-settings',
+    component: Dashboard,
+    props: { initialView: 'payment-settings' },
+    meta: { navLabel: 'Payment Settings', requiresAuth: true }
+  },
   {
     path: '/admin/audit-logs',
     name: 'admin-audit-logs',

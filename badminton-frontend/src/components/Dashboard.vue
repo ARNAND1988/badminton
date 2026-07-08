@@ -617,6 +617,12 @@
             <div class="mt-1 text-2xl font-bold text-slate-900">€{{ monthlyInvoice.total }}</div>
           </div>
         </div>
+
+        <div v-if="currentPaymentInvoice" class="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
+          <div class="mb-3 flex items-center justify-between gap-3"><div><h4 class="font-semibold text-slate-900">Pay by bank transfer</h4><p class="text-sm text-slate-600">Scan with your banking app or use this reference when paying.</p></div><span class="rounded-full bg-white px-3 py-1 text-sm font-bold text-indigo-800">{{ paymentStatusLabel(currentPaymentInvoice.payment_status) }}</span></div>
+          <div v-if="currentPaymentInvoice.is_test_invoice" class="alert-warning">TEST MODE - This invoice is for testing only</div>
+          <div class="grid gap-4 md:grid-cols-[180px_1fr]"><img v-if="currentPaymentInvoice.qr_code_data_url" :src="currentPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p><strong>Total amount due:</strong> €{{ currentPaymentInvoice.amount_due }}</p><p><strong>Due date:</strong> {{ currentPaymentInvoice.due_date }}</p><p><strong>IBAN:</strong> {{ currentPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ currentPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ currentPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.payment_reference)">Copy payment reference</button></p></div></div>
+        </div>
         <div v-if="monthlyInvoice" class="grid gap-3 lg:grid-cols-2">
           <article v-for="section in personalInvoiceSections" :key="section.key" class="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div class="flex items-start justify-between gap-3">
@@ -699,6 +705,50 @@
             </p>
           </article>
         </div>
+      </div>
+    </section>
+
+
+    <section v-if="activeView === 'admin-payments'" class="space-y-6">
+      <div>
+        <h2 class="section-title">Payment overview</h2>
+        <p class="section-copy mt-1">Track invoice bank-transfer status and manually reconcile payments.</p>
+      </div>
+      <div v-if="!isAdmin" class="alert-warning">Admins only.</div>
+      <div v-else class="panel-card space-y-4">
+        <div class="flex flex-wrap items-end gap-3">
+          <label class="block w-48"><span class="form-label">Filter</span><select v-model="paymentFilter" class="form-input" @change="loadPaymentInvoices"><option value="all">All</option><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="overdue">Overdue</option><option value="test">Test invoices</option></select></label>
+          <button class="btn-secondary" @click="loadPaymentInvoices">Refresh</button>
+          <button class="btn-dark" @click="notifyMonthlyInvoicesReady">Send monthly group notification</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-left text-sm">
+            <thead><tr class="border-b text-xs uppercase text-slate-500"><th class="py-2">Member/family</th><th>Invoice</th><th>Amount</th><th>Due</th><th>Status</th><th>Paid</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr v-for="invoice in paymentInvoices" :key="invoice.id" class="border-b">
+                <td class="py-2 font-medium">{{ invoice.user?.name || invoice.user?.email || invoice.user?.phone || 'Test member' }}</td>
+                <td>{{ invoice.invoice_number }} <span v-if="invoice.is_test_invoice" class="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">TEST</span></td>
+                <td>€{{ invoice.amount_due }}</td><td>{{ invoice.due_date }}</td><td>{{ paymentStatusLabel(invoice.payment_status) }}</td><td>{{ invoice.paid_at || '—' }}</td>
+                <td class="flex flex-wrap gap-2 py-2"><button class="btn-secondary" @click="loadPaymentInvoice(invoice.id)">View</button><button class="btn-secondary" @click="setPaymentStatus(invoice, 'PAID')">Mark paid</button><button class="btn-muted" @click="setPaymentStatus(invoice, 'UNPAID')">Unpaid</button><button class="btn-muted" @click="setPaymentStatus(invoice, 'CANCELLED')">Cancel</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div v-if="selectedPaymentInvoice" class="panel-card space-y-4">
+        <h3 class="text-lg font-semibold">Invoice {{ selectedPaymentInvoice.invoice_number }}</h3>
+        <div v-if="selectedPaymentInvoice.is_test_invoice" class="alert-warning">TEST MODE - This invoice is for testing only</div>
+        <div class="grid gap-4 lg:grid-cols-[220px_1fr]"><img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p><strong>Total amount due:</strong> €{{ selectedPaymentInvoice.amount_due }}</p><p><strong>IBAN:</strong> {{ selectedPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ selectedPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ selectedPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.payment_reference)">Copy reference</button></p><p><strong>Instructions:</strong> Scan with your banking app or use this reference when paying.</p></div></div>
+      </div>
+    </section>
+
+    <section v-if="activeView === 'payment-settings'" class="space-y-6">
+      <div><h2 class="section-title">Payment settings</h2><p class="section-copy mt-1">Configure bank-transfer account details and QR code test mode.</p></div>
+      <div v-if="!isSuperAdmin" class="alert-warning">Only Super Admin can manage payment settings.</div>
+      <div v-else class="panel-card space-y-4">
+        <div class="grid gap-3 sm:grid-cols-2"><label><span class="form-label">Account holder name</span><input v-model="paymentSettings.account_holder_name" class="form-input" /></label><label><span class="form-label">Business bank name</span><input v-model="paymentSettings.bank_name" class="form-input" /></label><label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input" /></label><label><span class="form-label">BIC optional</span><input v-model="paymentSettings.bic" class="form-input" /></label><label><span class="form-label">Payment description prefix</span><input v-model="paymentSettings.description_prefix" class="form-input" /></label><label><span class="form-label">Default due days</span><input v-model.number="paymentSettings.default_due_days" type="number" min="1" class="form-input" /></label></div>
+        <label class="flex gap-2"><input v-model="paymentSettings.qr_enabled" type="checkbox" /> Enable QR payment feature</label><label class="flex gap-2"><input v-model="paymentSettings.test_mode" type="checkbox" /> Test mode</label>
+        <div class="flex flex-wrap gap-2"><button class="btn-dark" @click="savePaymentSettings">Save settings</button><button class="btn-secondary" @click="generateTestInvoice">Generate Test Invoice</button></div>
       </div>
     </section>
 
@@ -1169,6 +1219,7 @@ export default {
     const playDays = ref([])
     const miscCosts = ref([])
     const monthlyInvoice = ref(null)
+    const currentPaymentInvoice = ref(null)
     const adminMonthlyInvoices = ref(null)
     const monthlyInvoiceMonth = ref(localIsoMonth())
     const whatsappSettings = ref([])
@@ -1226,6 +1277,11 @@ export default {
     const msg = ref('')
     const verificationDetails = ref(null)
     const isAdmin = ref(false)
+    const isSuperAdmin = ref(false)
+    const paymentSettings = ref({ qr_enabled: true, test_mode: true, default_due_days: 14 })
+    const paymentInvoices = ref([])
+    const selectedPaymentInvoice = ref(null)
+    const paymentFilter = ref('all')
     const apiBase = import.meta.env.VITE_API_BASE || ''
 
     function localIsoDate(date = new Date()) {
@@ -1701,6 +1757,7 @@ export default {
     async function loadMonthlyInvoice() {
       const data = await fetchJson(`/api/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
       monthlyInvoice.value = data
+      currentPaymentInvoice.value = await fetchJson(`/api/payment-invoices/current?month=${monthlyInvoiceMonth.value}`)
       completedBookingPagination.value = { ...completedBookingPagination.value, page: 1 }
       await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
     }
@@ -1748,6 +1805,53 @@ export default {
       if (page < 1 || (adminAuditPagination.value.pages && page > adminAuditPagination.value.pages)) return
       adminAuditPagination.value = { ...adminAuditPagination.value, page }
       await loadDashboard()
+    }
+
+
+    async function loadPaymentSettings() {
+      if (!isSuperAdmin.value) return
+      paymentSettings.value = await fetchJson('/api/admin/payment-settings')
+    }
+
+    async function savePaymentSettings() {
+      paymentSettings.value = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
+      msg.value = 'Payment settings saved.'
+    }
+
+    async function loadPaymentInvoices() {
+      if (!isAdmin.value) return
+      const data = await fetchJson(`/api/admin/payment-invoices?status=${paymentFilter.value}`)
+      paymentInvoices.value = data.invoices || []
+    }
+
+    async function loadPaymentInvoice(id) {
+      selectedPaymentInvoice.value = await fetchJson(`/api/payment-invoices/${id}`)
+    }
+
+    async function setPaymentStatus(invoice, status) {
+      const updated = await fetchJson(`/api/admin/payment-invoices/${invoice.id}/status`, { method: 'POST', body: JSON.stringify({ payment_status: status }) })
+      selectedPaymentInvoice.value = updated
+      await loadPaymentInvoices()
+    }
+
+    async function generateTestInvoice() {
+      selectedPaymentInvoice.value = await fetchJson('/api/admin/payment-invoices/test', { method: 'POST', body: JSON.stringify({}) })
+      msg.value = 'Test invoice generated.'
+      if (isAdmin.value) await loadPaymentInvoices()
+    }
+
+    async function notifyMonthlyInvoicesReady() {
+      const data = await fetchJson('/api/admin/payment-invoices/monthly/notify', { method: 'POST', body: JSON.stringify({ month: monthlyInvoiceMonth.value }) })
+      msg.value = `Monthly payment notification ${data.status}.`
+    }
+
+    async function copyText(value) {
+      if (navigator?.clipboard) await navigator.clipboard.writeText(value || '')
+      msg.value = 'Copied.'
+    }
+
+    function paymentStatusLabel(status) {
+      return ({ UNPAID: 'Payment pending', PAID: 'Paid', PARTIALLY_PAID: 'Partially paid', CANCELLED: 'Cancelled', EXPIRED: 'Expired' })[status] || status
     }
 
     async function loadWhatsAppNotifications() {
@@ -1872,6 +1976,12 @@ export default {
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page }),
             loadAdminUsers()
           ])
+        } else if (activeView.value === 'admin-payments') {
+          if (!isAdmin.value) { errorMsg.value = 'Admins only.'; return }
+          await loadPaymentInvoices()
+        } else if (activeView.value === 'payment-settings') {
+          if (!isSuperAdmin.value) { errorMsg.value = 'Only Super Admin can manage payment settings.'; return }
+          await loadPaymentSettings()
         } else if (activeView.value === 'admin-audit-logs') {
           if (!loggedIn) {
             router.push('/login')
@@ -2485,10 +2595,12 @@ export default {
         setSessionValue('member_email', meRes.user?.email || '')
         setSessionValue('member_phone', meRes.user?.phone || '')
         setSessionValue('member_role', meRes.user?.role || 'member')
-        isAdmin.value = meRes.user?.role === 'admin'
+        isAdmin.value = ['admin', 'super_admin'].includes(meRes.user?.role)
+        isSuperAdmin.value = meRes.user?.role === 'super_admin'
       } catch (err) {
         const savedRole = getSessionValue('member_role')
-        isAdmin.value = savedRole === 'admin'
+        isAdmin.value = ['admin', 'super_admin'].includes(savedRole)
+        isSuperAdmin.value = savedRole === 'super_admin'
       }
     }
 
@@ -2547,6 +2659,7 @@ export default {
       availabilityPeople,
       miscCosts,
       monthlyInvoice,
+      currentPaymentInvoice,
       personalInvoiceSections,
       memberOptions,
       adminMonthlyInvoices,
@@ -2555,6 +2668,11 @@ export default {
       whatsappLogs,
       isLoggedIn,
       isAdmin,
+      isSuperAdmin,
+      paymentSettings,
+      paymentInvoices,
+      selectedPaymentInvoice,
+      paymentFilter,
       isBookingOpen,
       toggleBooking,
       isCompletedBookingOpen,
@@ -2633,6 +2751,15 @@ export default {
       loadPlayAvailability,
       loadFreezePeriods,
       loadWhatsAppNotifications,
+      loadPaymentSettings,
+      savePaymentSettings,
+      loadPaymentInvoices,
+      loadPaymentInvoice,
+      setPaymentStatus,
+      generateTestInvoice,
+      notifyMonthlyInvoicesReady,
+      copyText,
+      paymentStatusLabel,
       familyPersonBookingStatus,
       availabilityPersonStatus,
       normalizeVote,

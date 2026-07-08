@@ -13,3 +13,5 @@ PyJWT
 pytest
 pytest-cov
 requests==2.32.3
+
+qrcode[pil]==7.4.2

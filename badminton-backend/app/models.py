@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_CEILING
 import json
 from . import db
@@ -270,6 +270,152 @@ class Invoice(db.Model):
             'total_amount': self.total_amount,
             'split_count': self.split_count,
             'status': self.status,
+        }
+
+
+
+class PaymentSettings(db.Model):
+    __tablename__ = 'payment_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    account_holder_name = db.Column(db.String(128), nullable=True)
+    bank_name = db.Column(db.String(128), nullable=True)
+    iban = db.Column(db.String(64), nullable=True)
+    bic = db.Column(db.String(32), nullable=True)
+    description_prefix = db.Column(db.String(255), default='Nieuwegein Badminton Invoice')
+    default_due_days = db.Column(db.Integer, default=14)
+    qr_enabled = db.Column(db.Boolean, default=True)
+    test_mode = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    updater = db.relationship('User', lazy=True)
+
+    def effective_account_holder_name(self):
+        return self.account_holder_name or ('Nieuwegein Badminton Test' if self.test_mode else '')
+
+    def effective_bank_name(self):
+        return self.bank_name or ('Test Bank' if self.test_mode else '')
+
+    def effective_iban(self):
+        return self.iban or ('NL02ABNA0123456789' if self.test_mode else '')
+
+    def effective_bic(self):
+        return self.bic or ('ABNANL2A' if self.test_mode else '')
+
+    def to_dict(self, include_effective=False):
+        payload = {
+            'id': self.id,
+            'account_holder_name': self.account_holder_name,
+            'bank_name': self.bank_name,
+            'iban': self.iban,
+            'bic': self.bic,
+            'description_prefix': self.description_prefix,
+            'default_due_days': self.default_due_days,
+            'qr_enabled': self.qr_enabled,
+            'test_mode': self.test_mode,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'updated_by': self.updated_by,
+        }
+        if include_effective:
+            payload.update({
+                'effective_account_holder_name': self.effective_account_holder_name(),
+                'effective_bank_name': self.effective_bank_name(),
+                'effective_iban': self.effective_iban(),
+                'effective_bic': self.effective_bic(),
+            })
+        return payload
+
+
+class PaymentInvoice(db.Model):
+    __tablename__ = 'payment_invoices'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    month = db.Column(db.String(7), nullable=True)
+    invoice_number = db.Column(db.String(32), unique=True, nullable=False)
+    payment_status = db.Column(db.String(32), default='UNPAID')
+    payment_reference = db.Column(db.String(64), unique=True, nullable=False)
+    amount_due = db.Column(db.Float, default=0.0)
+    due_date = db.Column(db.String(10), nullable=True)
+    paid_at = db.Column(db.DateTime, nullable=True)
+    paid_amount = db.Column(db.Float, default=0.0)
+    payment_note = db.Column(db.Text, nullable=True)
+    qr_payload = db.Column(db.Text, nullable=True)
+    qr_code_data_url = db.Column(db.Text, nullable=True)
+    is_test_invoice = db.Column(db.Boolean, default=False)
+    bank_account_holder = db.Column(db.String(128), nullable=True)
+    bank_name = db.Column(db.String(128), nullable=True)
+    iban = db.Column(db.String(64), nullable=True)
+    bic = db.Column(db.String(32), nullable=True)
+    booking_items_json = db.Column(db.Text, nullable=True)
+    misc_items_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    user = db.relationship('User', foreign_keys=[user_id], lazy=True)
+    updater = db.relationship('User', foreign_keys=[updated_by], lazy=True)
+
+    def to_dict(self, include_qr=True):
+        def loads(value):
+            try:
+                return json.loads(value or '[]')
+            except Exception:
+                return []
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'user': self.user.to_dict() if self.user else None,
+            'month': self.month,
+            'invoice_number': self.invoice_number,
+            'payment_status': self.payment_status,
+            'payment_reference': self.payment_reference,
+            'amount_due': round(float(self.amount_due or 0.0), 2),
+            'due_date': self.due_date,
+            'paid_at': self.paid_at.isoformat() if self.paid_at else None,
+            'paid_amount': round(float(self.paid_amount or 0.0), 2),
+            'payment_note': self.payment_note,
+            'qr_payload': self.qr_payload,
+            'qr_code_data_url': self.qr_code_data_url if include_qr else None,
+            'is_test_invoice': self.is_test_invoice,
+            'account_holder_name': self.bank_account_holder,
+            'bank_name': self.bank_name,
+            'iban': self.iban,
+            'bic': self.bic,
+            'booking_items': loads(self.booking_items_json),
+            'misc_items': loads(self.misc_items_json),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'updated_by': self.updated_by,
+        }
+
+
+class PaymentAuditLog(db.Model):
+    __tablename__ = 'payment_audit_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey('payment_invoices.id'), nullable=False)
+    old_status = db.Column(db.String(32), nullable=True)
+    new_status = db.Column(db.String(32), nullable=False)
+    amount = db.Column(db.Float, nullable=True)
+    note = db.Column(db.Text, nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    invoice = db.relationship('PaymentInvoice', backref='audit_logs', lazy=True)
+    updater = db.relationship('User', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'invoice_id': self.invoice_id,
+            'old_status': self.old_status,
+            'new_status': self.new_status,
+            'amount': self.amount,
+            'note': self.note,
+            'updated_by': self.updated_by,
+            'updated_by_name': self.updater.name if self.updater else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
 

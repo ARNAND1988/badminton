@@ -258,12 +258,14 @@ export default {
 
     const adminLinks = computed(() => {
       getAuthSessionVersion()
-      if (!isLoggedIn.value || sessionSnapshot.value.role !== 'admin') return []
+      if (!isLoggedIn.value || !['admin', 'super_admin'].includes(sessionSnapshot.value.role)) return []
       return [
         { label: 'Manage Bookings', mobileLabel: 'Bookings+', to: '/admin/bookings', icon: CalendarIcon },
         { label: 'Courts', mobileLabel: 'Courts', to: '/admin/courts', icon: ShuttleIcon },
         { label: 'Members', mobileLabel: 'Members', to: '/admin/members', icon: AdminIcon },
         { label: 'Split Costs', mobileLabel: 'Split', to: '/admin/costs', icon: CostIcon },
+        { label: 'Payments', mobileLabel: 'Pay', to: '/admin/payments', icon: CostIcon },
+        ...(sessionSnapshot.value.role === 'super_admin' ? [{ label: 'Payment Settings', mobileLabel: 'Pay cfg', to: '/admin/payment-settings', icon: AdminIcon }] : []),
         { label: 'Audit Logs', mobileLabel: 'Logs', to: '/admin/audit-logs', icon: AdminIcon },
         { label: 'WhatsApp', mobileLabel: 'WhatsApp', to: '/admin/notifications', icon: AdminIcon }
       ]

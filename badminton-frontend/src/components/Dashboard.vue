@@ -1777,8 +1777,14 @@ export default {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ days: 7 })
       })
-      msg.value = data.log ? `Availability overview sent: ${data.log.status}` : 'Availability overview was not sent. Check the WhatsApp availability setting is enabled.'
+      if (data.log) {
+        const statusLabel = data.log.status === 'sent' ? 'sent' : `prepared but ${data.log.status}`
+        msg.value = `Availability overview ${statusLabel}.`
+      } else {
+        msg.value = 'Availability overview was not sent. Check that the WhatsApp availability setting is enabled and set to send to group.'
+      }
       await loadPlayAvailability()
+      if (isAdmin.value) await loadWhatsAppNotifications()
     }
 
     async function loadDashboard() {

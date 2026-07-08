@@ -184,12 +184,13 @@ def create_app():
             db.session.execute(db.text('ALTER TABLE play_availability_votes ALTER COLUMN user_id DROP NOT NULL'))
 
         payment_invoice_columns = {col['name'] for col in inspector.get_columns('payment_invoices')} if inspector.has_table('payment_invoices') else set()
+        datetime_column_type = 'DATETIME' if db.engine.dialect.name == 'sqlite' else 'TIMESTAMP'
         invoice_payment_columns = {
             "payment_status": "VARCHAR(32) DEFAULT 'UNPAID'",
             'payment_reference': 'VARCHAR(64)',
             'amount_due': 'FLOAT DEFAULT 0',
             'due_date': 'VARCHAR(10)',
-            'paid_at': 'DATETIME',
+            'paid_at': datetime_column_type,
             'paid_amount': 'FLOAT DEFAULT 0',
             'payment_note': 'TEXT',
             'qr_payload': 'TEXT',

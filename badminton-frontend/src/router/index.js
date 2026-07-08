@@ -59,14 +59,13 @@ const routes = [
     name: 'admin-costs',
     component: Dashboard,
     props: { initialView: 'admin-costs' },
-    meta: { navLabel: 'Split Costs', requiresAuth: true }
+    meta: { navLabel: 'Invoices & Payments', requiresAuth: true }
   },
 
   {
     path: '/admin/payments',
     name: 'admin-payments',
-    component: Dashboard,
-    props: { initialView: 'admin-payments' },
+    redirect: '/admin/costs',
     meta: { navLabel: 'Payments', requiresAuth: true }
   },
   {

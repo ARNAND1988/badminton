@@ -7,7 +7,7 @@ import jwt
 from passlib.hash import pbkdf2_sha256
 
 from . import db
-from .models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, rounded_up_cost_split
+from .models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, MonthlyInvoiceStatus, PlayAvailabilityVote, User, rounded_up_cost_split
 
 bookings_bp = Blueprint('bookings', __name__)
 
@@ -243,6 +243,33 @@ def _participant_keys_for_user(user):
     return keys
 
 
+MONTHLY_INVOICE_STATUSES = {'OPEN', 'READY_FOR_PAYMENT', 'SETTLED'}
+
+
+def _family_display_name(user):
+    names = []
+    for value in [user.name or user.email or user.phone, *[member.name for member in sorted(user.family_members, key=lambda item: item.created_at or datetime.min)]]:
+        value = (value or '').strip()
+        if value and not any(_names_match(value, existing) for existing in names):
+            names.append(value)
+    return ' & '.join(names) if names else user.email or user.phone or 'Family'
+
+
+def _append_unique_family_name(names, value):
+    value = (value or '').strip()
+    if value and not any(_names_match(value, existing) for existing in names):
+        names.append(value)
+
+
+def _monthly_invoice_status(month_value, create=False):
+    status = MonthlyInvoiceStatus.query.filter_by(month=month_value).first()
+    if not status and create:
+        status = MonthlyInvoiceStatus(month=month_value, status='OPEN')
+        db.session.add(status)
+        db.session.flush()
+    return status
+
+
 def _monthly_invoice_summary(user, month_value):
     start_date, end_date = _month_bounds(month_value)
     if not start_date:
@@ -253,6 +280,7 @@ def _monthly_invoice_summary(user, month_value):
     requested_user = user
     user = _family_owner_for_user(user)
     participant_keys = _participant_keys_for_user(user)
+    family_title = _family_display_name(user)
     participant_labels = {user.phone: user.name or user.email or user.phone}
     for member in user.family_members:
         participant_labels[f'family:{member.id}'] = member.name
@@ -308,6 +336,7 @@ def _monthly_invoice_summary(user, month_value):
         booking_total += amount
         booking_items.append({
             'booking_id': booking.id,
+            'title': family_title,
             'date': booking.booking_date,
             'court': booking.court.name if booking.court else None,
             'start_time': booking.start_time,
@@ -317,6 +346,7 @@ def _monthly_invoice_summary(user, month_value):
             'total_cost': round(float(booking.cost or 0.0), 2),
             'cost_per_person': per_person,
             'participants': [participant_labels.get(participant.phone, participant.name or participant.phone or 'Player') for participant in matching_participants],
+            'family_members': [participant_labels.get(participant.phone, participant.name or participant.phone or 'Player') for participant in matching_participants],
             'amount': amount,
             'booking_status': booking.status,
             'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
@@ -350,7 +380,9 @@ def _monthly_invoice_summary(user, month_value):
     return {
         'user': requested_user.to_dict(),
         'family_owner': user.to_dict(),
+        'family_title': family_title,
         'month': month_value,
+        'month_status': (_monthly_invoice_status(month_value) or MonthlyInvoiceStatus(month=month_value, status='OPEN')).to_dict(),
         'booking_items': booking_items,
         'misc_items': misc_items,
         'booking_total': round(booking_total, 2),
@@ -1402,10 +1434,63 @@ def admin_monthly_invoices():
     start_date, end_date = _month_bounds(month_value)
     if not start_date:
         return jsonify({'error': 'month must use YYYY-MM'}), 400
+    month_status = _monthly_invoice_status(month_value)
+    expose_payment_details = bool(month_status and month_status.status in {'READY_FOR_PAYMENT', 'SETTLED'})
 
     users = User.query.order_by(User.name.asc(), User.email.asc(), User.phone.asc()).all()
     subjects = []
     by_key = {}
+    user_by_id = {item.id: item for item in users}
+    parent = {item.id: item.id for item in users}
+
+    def find(user_id):
+        while parent[user_id] != user_id:
+            parent[user_id] = parent[parent[user_id]]
+            user_id = parent[user_id]
+        return user_id
+
+    def union(left_id, right_id):
+        left_root = find(left_id)
+        right_root = find(right_id)
+        if left_root == right_root:
+            return
+        winner = min(left_root, right_root)
+        loser = max(left_root, right_root)
+        parent[loser] = winner
+
+    all_family_members = FamilyMember.query.all()
+    for family_member in all_family_members:
+        if family_member.user_id in parent and family_member.linked_user_id in parent:
+            union(family_member.user_id, family_member.linked_user_id)
+
+    owner_by_user_id = {}
+    owner_aliases = {}
+    for item in users:
+        owner = user_by_id.get(find(item.id), item)
+        owner_by_user_id[item.id] = owner
+        owner_aliases.setdefault(owner.id, set()).update(filter(None, [owner.name, owner.email, owner.phone]))
+        for member in item.family_members:
+            owner_aliases[owner.id].update(
+                alias
+                for alias in [member.name, member.linked_user.name if member.linked_user else None, member.linked_user.email if member.linked_user else None, member.linked_user.phone if member.linked_user else None]
+                if alias
+            )
+    for item in users:
+        if owner_by_user_id[item.id].id != item.id:
+            continue
+        for candidate in users:
+            if candidate.id == item.id or owner_by_user_id[candidate.id].id != candidate.id:
+                continue
+            candidate_aliases = [candidate.name, candidate.email, candidate.phone]
+            matching_alias = any(
+                _names_match(candidate_alias, owner_alias)
+                for candidate_alias in candidate_aliases
+                if candidate_alias
+                for owner_alias in owner_aliases.get(item.id, set())
+            )
+            if matching_alias:
+                owner_by_user_id[candidate.id] = item
+                owner_aliases[item.id].update(filter(None, candidate_aliases))
 
     def add_subject(subject_id, display_name, user_obj=None, participant_keys=None, aliases=None):
         subject = {
@@ -1431,6 +1516,8 @@ def admin_monthly_invoices():
             'paid_amount': 0.0,
             'balance_amount': 0.0,
             'paid_count': 0,
+            'family_title': display_name,
+            'payment_invoice': None,
         }
         subjects.append(subject)
         for key in subject['participant_keys']:
@@ -1438,9 +1525,41 @@ def admin_monthly_invoices():
         return subject
 
     for item in users:
-        display_name = item.name or item.email or item.phone
-        if FamilyMember.query.filter_by(linked_user_id=item.id).first():
+        owner = owner_by_user_id.get(item.id, item)
+        if owner.id != item.id:
             continue
+        family_names = []
+        group_user_ids = {group_user.id for group_user in users if owner_by_user_id.get(group_user.id, group_user).id == item.id}
+        incoming_names_by_user_id = {}
+        for family_member in all_family_members:
+            if family_member.user_id in group_user_ids and family_member.linked_user_id in group_user_ids and family_member.name:
+                incoming_names_by_user_id.setdefault(family_member.linked_user_id, []).append(family_member.name)
+
+        def preferred_account_name(account):
+            account_name = account.name or account.email or account.phone
+            for alias in incoming_names_by_user_id.get(account.id, []):
+                normalized_account = _normalize_person_name(account_name)
+                normalized_alias = _normalize_person_name(alias)
+                if _names_match(alias, account_name):
+                    return account_name if len(normalized_account) <= len(normalized_alias) else alias
+                if len(normalized_account) <= 3:
+                    return alias
+            return account_name
+
+        for group_user in users:
+            if group_user.id not in group_user_ids:
+                continue
+            _append_unique_family_name(family_names, preferred_account_name(group_user))
+        for group_user in users:
+            if group_user.id not in group_user_ids:
+                continue
+            for family_member in sorted(group_user.family_members, key=lambda fm: fm.created_at or datetime.min):
+                if family_member.linked_user_id:
+                    continue
+                if any(_names_match(family_member.name, preferred_account_name(account)) for account in users if account.id in group_user_ids):
+                    continue
+                _append_unique_family_name(family_names, family_member.name)
+        display_name = ' & '.join(family_names) if family_names else _family_display_name(item)
         keys = [item.phone]
         aliases = [item.name, item.email, item.phone]
         add_subject(f'user:{item.id}', display_name, item, keys, aliases)
@@ -1453,6 +1572,11 @@ def admin_monthly_invoices():
                 subject['participant_keys'].add(family_member.linked_user.phone)
                 subject['aliases'].extend([family_member.linked_user.name, family_member.linked_user.email, family_member.linked_user.phone])
                 by_key[family_member.linked_user.phone] = subject
+        for candidate in users:
+            if candidate.id != item.id and owner_by_user_id.get(candidate.id, candidate).id == item.id:
+                subject['participant_keys'].add(candidate.phone)
+                subject['aliases'].extend([candidate.name, candidate.email, candidate.phone])
+                by_key[candidate.phone] = subject
 
     def subject_for_participant(participant):
         if participant.phone in by_key:
@@ -1496,11 +1620,14 @@ def admin_monthly_invoices():
                 participant_label = participant.name or participant.phone or subject['display_name']
                 if participant_label not in existing_item['participants']:
                     existing_item['participants'].append(participant_label)
+                if participant_label not in existing_item['family_members']:
+                    existing_item['family_members'].append(participant_label)
                 continue
             seen_booking_subjects.add(item_key)
             subject['booking_total'] = round(subject['booking_total'] + participant_amount, 2)
             subject['booking_items'].append({
                 'booking_id': booking.id,
+                'title': subject['family_title'],
                 'date': booking.booking_date,
                 'court': booking.court.name if booking.court else None,
                 'start_time': booking.start_time,
@@ -1510,32 +1637,47 @@ def admin_monthly_invoices():
                 'total_cost': round(float(booking.cost or 0.0), 2),
                 'cost_per_person': per_person,
                 'participants': [participant.name or participant.phone or subject['display_name']],
+                'family_members': [participant.name or participant.phone or subject['display_name']],
                 'amount': participant_amount,
                 'booking_status': booking.status,
                 'invoice_status': booking.invoice[0].status if booking.invoice else 'not_generated',
             })
 
     # Shared misc costs remain split across registered users only.
-    user_summaries = {summary['user']['id']: summary for summary in [_monthly_invoice_summary(item, month_value) for item in users]}
+    user_summaries = {}
+    for item in users:
+        owner = owner_by_user_id.get(item.id, item)
+        if owner.id in user_summaries:
+            continue
+        user_summaries[owner.id] = _monthly_invoice_summary(owner, month_value)
     for subject in subjects:
         user_id = subject['user'].get('id') if isinstance(subject['user'].get('id'), int) else None
         if user_id in user_summaries:
             summary = user_summaries[user_id]
             subject['misc_items'] = summary['misc_items']
             subject['misc_total'] = summary['misc_total']
+        if user_id and expose_payment_details:
+            payment_invoice = PaymentInvoice.query.filter_by(user_id=user_id, month=month_value, is_test_invoice=False).first()
+            if payment_invoice:
+                subject['payment_invoice'] = payment_invoice.to_dict(include_qr=False)
         subject['total'] = round(subject['booking_total'] + subject['misc_total'], 2)
         subject['booking_total'] = round(subject['booking_total'], 2)
         subject['paid_count'] = len([item for item in subject['booking_items'] if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'])
         subject['paid_amount'] = round(sum(float(item.get('amount') or 0.0) for item in subject['booking_items'] if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'), 2)
         subject['balance_amount'] = round(subject['total'] - subject['paid_amount'], 2)
 
-    visible = [subject for subject in subjects if subject['booking_items'] or subject['misc_items'] or subject['user'].get('id')]
+    visible = [
+        subject
+        for subject in subjects
+        if subject['booking_items'] or subject['misc_items'] or subject['payment_invoice'] or float(subject['total'] or 0.0) > 0
+    ]
     for subject in visible:
         subject.pop('participant_keys', None)
         subject.pop('aliases', None)
         subject.pop('display_name', None)
     return jsonify({
         'month': month_value,
+        'month_status': (month_status or MonthlyInvoiceStatus(month=month_value, status='OPEN')).to_dict(),
         'invoices': visible,
         'totals': {
             'booking_total': round(sum(item['booking_total'] for item in visible), 2),
@@ -2462,6 +2604,25 @@ def _create_payment_invoice_for_summary(user, month_value, summary, settings, is
     return invoice
 
 
+def _create_payment_invoices_for_month(month_value, admin_user):
+    settings = _payment_settings()
+    users = User.query.order_by(User.name.asc(), User.email.asc(), User.phone.asc()).all()
+    created = []
+    seen_owner_ids = set()
+    for item in users:
+        owner = _family_owner_for_user(item)
+        if owner.id in seen_owner_ids:
+            continue
+        seen_owner_ids.add(owner.id)
+        summary = _monthly_invoice_summary(owner, month_value)
+        if not summary or float(summary.get('total') or 0.0) <= 0:
+            continue
+        invoice = _create_payment_invoice_for_summary(owner, month_value, summary, settings, False)
+        invoice.updated_by = admin_user.id
+        created.append(invoice)
+    return created
+
+
 @bookings_bp.route('/admin/payment-settings', methods=['GET', 'PUT'])
 def admin_payment_settings():
     user, error = _require_super_admin()
@@ -2499,10 +2660,60 @@ def current_payment_invoice():
     summary = _monthly_invoice_summary(user, month_value)
     if not summary:
         return jsonify({'error': 'month must use YYYY-MM'}), 400
-    settings = _payment_settings()
-    invoice = _create_payment_invoice_for_summary(user, month_value, summary, settings, False)
-    db.session.commit()
+    owner = _family_owner_for_user(user)
+    month_status = _monthly_invoice_status(month_value)
+    invoice = None
+    if month_status and month_status.status in {'READY_FOR_PAYMENT', 'SETTLED'}:
+        invoice = PaymentInvoice.query.filter_by(user_id=owner.id, month=month_value, is_test_invoice=False).first()
+    if not invoice:
+        return jsonify({
+            'month': month_value,
+            'month_status': (month_status or MonthlyInvoiceStatus(month=month_value, status='OPEN')).to_dict(),
+            'invoice': None,
+        })
     return jsonify(invoice.to_dict())
+
+
+@bookings_bp.route('/admin/invoices/monthly/status', methods=['POST'])
+def update_monthly_invoice_status():
+    user, error = _require_any_admin()
+    if error:
+        return error
+    data = request.get_json() or {}
+    month_value = data.get('month') or datetime.utcnow().strftime('%Y-%m')
+    start_date, _ = _month_bounds(month_value)
+    if not start_date:
+        return jsonify({'error': 'month must use YYYY-MM'}), 400
+    new_status = (data.get('status') or '').upper()
+    if new_status not in MONTHLY_INVOICE_STATUSES:
+        return jsonify({'error': 'invalid_month_status'}), 400
+    month_status = _monthly_invoice_status(month_value, create=True)
+    old_status = month_status.status
+    month_status.status = new_status
+    month_status.note = data.get('note') or month_status.note
+    month_status.updated_by = user.id
+    generated = []
+    if new_status == 'READY_FOR_PAYMENT':
+        if not month_status.ready_at:
+            month_status.ready_at = datetime.utcnow()
+        generated = _create_payment_invoices_for_month(month_value, user)
+    if new_status == 'SETTLED':
+        if not month_status.settled_at:
+            month_status.settled_at = datetime.utcnow()
+    _record_admin_audit(
+        user,
+        'update',
+        'monthly_invoice_status',
+        month_value,
+        f'Changed monthly invoice status for {month_value} to {new_status}',
+        {'old_status': old_status, 'new_status': new_status, 'generated_invoice_count': len(generated)},
+    )
+    db.session.commit()
+    return jsonify({
+        'month_status': month_status.to_dict(),
+        'generated_invoice_count': len(generated),
+        'payment_invoices': [invoice.to_dict(include_qr=False) for invoice in generated],
+    })
 
 
 @bookings_bp.route('/payment-invoices/<int:invoice_id>', methods=['GET'])

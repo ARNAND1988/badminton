@@ -391,6 +391,32 @@ class PaymentInvoice(db.Model):
         }
 
 
+class MonthlyInvoiceStatus(db.Model):
+    __tablename__ = 'monthly_invoice_statuses'
+    id = db.Column(db.Integer, primary_key=True)
+    month = db.Column(db.String(7), unique=True, nullable=False)
+    status = db.Column(db.String(32), default='OPEN', nullable=False)
+    ready_at = db.Column(db.DateTime, nullable=True)
+    settled_at = db.Column(db.DateTime, nullable=True)
+    note = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    updater = db.relationship('User', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'month': self.month,
+            'status': self.status,
+            'ready_at': self.ready_at.isoformat() if self.ready_at else None,
+            'settled_at': self.settled_at.isoformat() if self.settled_at else None,
+            'note': self.note,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'updated_by': self.updated_by,
+        }
+
+
 class PaymentAuditLog(db.Model):
     __tablename__ = 'payment_audit_logs'
     id = db.Column(db.Integer, primary_key=True)

@@ -577,12 +577,7 @@
     <section v-if="activeView === 'costs'" class="space-y-6">
       <div>
         <h2 class="section-title">My Costs</h2>
-        <p class="section-copy mt-1">Review your monthly invoice with booking and miscellaneous splits in one simple view.</p>
-        <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
-          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'summary' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="costViewTab = 'summary'">Summary / Total</button>
-          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'booking' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="costViewTab = 'booking'">Bookings</button>
-          <button class="btn-secondary w-full justify-center" :class="costViewTab === 'misc' ? 'bg-white text-emerald-800 shadow-sm' : ''" @click="costViewTab = 'misc'">Miscellaneous</button>
-        </div>
+        <p class="section-copy mt-1">Review your family total, payment status, and every booking or shared cost included in the selected month.</p>
       </div>
 
       <div class="panel-card">
@@ -598,10 +593,15 @@
         </div>
       </div>
 
-      <div v-if="costViewTab === 'summary'" class="panel-card space-y-4">
+      <div class="panel-card space-y-5">
         <div class="flex flex-col gap-1">
-          <h3 class="text-lg font-semibold text-slate-900">Invoice summary</h3>
-          <p class="section-copy">Your booking total, misc total, and grand total for the selected month.</p>
+          <h3 class="text-lg font-semibold text-slate-900">Summary / Total</h3>
+          <p class="section-copy">Everything for this month is shown below in one view.</p>
+        </div>
+        <div v-if="monthlyInvoice" class="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+          <span class="text-slate-600">Month status</span>
+          <span :class="monthStatusClass(monthlyInvoice.month_status?.status)" class="rounded-full px-3 py-1 text-xs font-bold">{{ monthStatusLabel(monthlyInvoice.month_status?.status) }}</span>
+          <span class="text-slate-500">{{ monthlyInvoice.family_title || monthlyInvoice.family_owner?.name || 'Family invoice' }}</span>
         </div>
         <div v-if="monthlyInvoice" class="mt-4 grid gap-3 sm:grid-cols-3">
           <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
@@ -623,124 +623,60 @@
           <div v-if="currentPaymentInvoice.is_test_invoice" class="alert-warning">TEST MODE - This invoice is for testing only</div>
           <div class="grid gap-4 md:grid-cols-[180px_1fr]"><img v-if="currentPaymentInvoice.qr_code_data_url" :src="currentPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p><strong>Total amount due:</strong> €{{ currentPaymentInvoice.amount_due }}</p><p><strong>Due date:</strong> {{ currentPaymentInvoice.due_date }}</p><p><strong>IBAN:</strong> {{ currentPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ currentPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ currentPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.payment_reference)">Copy payment reference</button></p></div></div>
         </div>
-        <div v-if="monthlyInvoice" class="grid gap-3 lg:grid-cols-2">
-          <article v-for="section in personalInvoiceSections" :key="section.key" class="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h4 class="font-semibold text-slate-900">{{ section.title }}</h4>
-                <p class="text-sm text-slate-600">{{ section.count }} items</p>
-              </div>
-              <span class="rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-900">€{{ section.total }}</span>
+        <div v-else-if="monthlyInvoice" class="rounded-xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-900">
+          Payment QR and bank details will appear here when an admin marks {{ monthName(monthlyInvoice.month) }} as ready for payment.
+        </div>
+
+        <div v-if="monthlyInvoice" class="space-y-5">
+          <section class="space-y-3">
+            <div class="flex flex-col gap-1">
+              <h4 class="font-semibold text-slate-900">Bookings included</h4>
+              <p class="text-sm text-slate-600">Each booking shows the family members counted in your family share.</p>
             </div>
-            <details class="mt-3 rounded-lg bg-white p-3">
-              <summary class="cursor-pointer text-sm font-semibold text-indigo-700">Show detailed breakdown</summary>
-              <div class="mt-3 space-y-2 text-sm">
-                <div v-for="item in section.items" :key="`${section.key}-${item.booking_id || item.cost_id}`" class="rounded border border-slate-100 p-2">
-                  <div class="font-medium text-slate-900">{{ item.court || item.title || 'Cost item' }}</div>
-                  <div class="text-slate-600">{{ item.date || item.purchase_date }} <span v-if="item.start_time">· {{ item.start_time }}-{{ item.end_time }}</span></div>
-                  <div class="mt-1 text-xs text-slate-500">Split {{ item.total_people_played || item.split_count }} ways · Your share €{{ item.amount }}</div>
+            <div v-if="monthlyInvoice.booking_items?.length" class="grid gap-3 lg:grid-cols-2">
+              <article v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-sm">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h5 class="font-semibold text-slate-900">{{ item.court || 'Court booking' }}</h5>
+                    <p class="text-slate-600">{{ item.date }} · {{ item.start_time }}-{{ item.end_time }}</p>
+                  </div>
+                  <span class="rounded-full bg-indigo-100 px-2 py-1 text-xs font-semibold text-indigo-700">{{ bookingItemStatusSummary(item) }}</span>
                 </div>
-                <p v-if="!section.items.length" class="text-sm text-slate-500">No items in this section.</p>
-              </div>
-            </details>
-          </article>
-        </div>
-      </div>
-
-      <div v-if="costViewTab === 'booking'" class="panel-card space-y-3 text-sm">
-        <h3 class="text-lg font-semibold text-slate-900">Booking split details</h3>
-        <div v-if="monthlyInvoice?.booking_items?.length" class="grid gap-3 lg:grid-cols-2">
-          <article v-for="item in monthlyInvoice.booking_items" :key="item.booking_id" class="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h4 class="font-semibold text-slate-900">{{ item.court || 'Court booking' }}</h4>
-                <p class="text-slate-600">{{ item.date }} · {{ item.start_time }}-{{ item.end_time }}</p>
-              </div>
-              <span class="rounded-full bg-indigo-100 px-2 py-1 text-xs font-semibold text-indigo-700">{{ bookingItemStatusSummary(item) }}</span>
+                <div v-if="(item.family_members || item.participants)?.length" class="mt-3 rounded-lg border border-indigo-100 bg-white p-2">
+                  <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Family members in this booking</div>
+                  <div class="mt-1 font-medium text-slate-900">{{ (item.family_members || item.participants).join(' & ') }}</div>
+                </div>
+                <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Players</div><div class="font-semibold">{{ item.total_people_played }}</div></div>
+                  <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Total</div><div class="font-semibold">€{{ item.total_cost }}</div></div>
+                  <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Each</div><div class="font-semibold">€{{ item.cost_per_person }}</div></div>
+                  <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Family share</div><div class="font-semibold">€{{ item.amount }}</div></div>
+                </div>
+              </article>
             </div>
-            <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Players</div><div class="font-semibold">{{ item.total_people_played }}</div></div>
-              <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Total</div><div class="font-semibold">€{{ item.total_cost }}</div></div>
-              <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Each</div><div class="font-semibold">€{{ item.cost_per_person }}</div></div>
-              <div class="rounded bg-white p-2"><div class="text-xs text-slate-500">Your share</div><div class="font-semibold">€{{ item.amount }}</div></div>
-            </div>
-            <p v-if="item.participants?.length" class="mt-2 text-xs text-slate-500">Players: {{ item.participants.join(', ') }}</p>
-          </article>
-        </div>
-        <p v-if="!monthlyInvoice?.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
-      </div>
+            <p v-if="!monthlyInvoice.booking_items?.length" class="text-sm text-slate-600">No booking costs for this month.</p>
+          </section>
 
-      <div v-if="costViewTab === 'misc'" class="space-y-4">
-        <div class="panel-card space-y-3 text-sm">
-          <h3 class="text-lg font-semibold text-slate-900">Misc split details</h3>
-          <div v-if="monthlyInvoice?.misc_items?.length" class="grid gap-3 lg:grid-cols-2">
-            <article v-for="item in monthlyInvoice.misc_items" :key="item.cost_id" class="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+          <section class="space-y-3">
+            <h4 class="font-semibold text-slate-900">Miscellaneous costs</h4>
+            <div v-if="monthlyInvoice.misc_items?.length" class="grid gap-3 lg:grid-cols-2">
+              <article v-for="item in monthlyInvoice.misc_items" :key="item.cost_id" class="rounded-xl border border-emerald-100 bg-emerald-50/70 p-3 text-sm">
               <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <h4 class="font-semibold text-slate-900">{{ item.title }}</h4>
+                  <h5 class="font-semibold text-slate-900">{{ item.title }}</h5>
                   <p class="text-slate-600">{{ item.purchase_date || 'No purchase date' }} · {{ item.status }}</p>
                 </div>
                 <span class="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">€{{ item.amount }} each</span>
               </div>
               <p class="mt-2 text-sm text-slate-700">Split by {{ item.split_count }} members · Total €{{ item.amount_total || item.total_cost || 0 }}</p>
-            </article>
-          </div>
-          <p v-if="!monthlyInvoice?.misc_items?.length" class="text-sm text-slate-600">No misc costs for this month.</p>
-        </div>
-
-        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <article v-for="cost in miscCosts" :key="cost.id" class="sub-card space-y-3 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
-                <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
-              </div>
-              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
+              </article>
             </div>
-            <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">
-              Split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each
-            </div>
-            <p class="text-sm text-slate-600">
-              Paid by {{ cost.paid_by || 'Not set' }} · {{ cost.purchase_date || 'No purchase date' }} · {{ cost.status }}
-            </p>
-          </article>
+            <p v-if="!monthlyInvoice.misc_items?.length" class="text-sm text-slate-600">No misc costs for this month.</p>
+          </section>
         </div>
       </div>
     </section>
 
-
-    <section v-if="activeView === 'admin-payments'" class="space-y-6">
-      <div>
-        <h2 class="section-title">Payment overview</h2>
-        <p class="section-copy mt-1">Track invoice bank-transfer status and manually reconcile payments.</p>
-      </div>
-      <div v-if="!isAdmin" class="alert-warning">Admins only.</div>
-      <div v-else class="panel-card space-y-4">
-        <div class="flex flex-wrap items-end gap-3">
-          <label class="block w-48"><span class="form-label">Filter</span><select v-model="paymentFilter" class="form-input" @change="loadPaymentInvoices"><option value="all">All</option><option value="unpaid">Unpaid</option><option value="paid">Paid</option><option value="overdue">Overdue</option><option value="test">Test invoices</option></select></label>
-          <button class="btn-secondary" @click="loadPaymentInvoices">Refresh</button>
-          <button class="btn-dark" @click="notifyMonthlyInvoicesReady">Send monthly group notification</button>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="min-w-full text-left text-sm">
-            <thead><tr class="border-b text-xs uppercase text-slate-500"><th class="py-2">Member/family</th><th>Invoice</th><th>Amount</th><th>Due</th><th>Status</th><th>Paid</th><th>Actions</th></tr></thead>
-            <tbody>
-              <tr v-for="invoice in paymentInvoices" :key="invoice.id" class="border-b">
-                <td class="py-2 font-medium">{{ invoice.user?.name || invoice.user?.email || invoice.user?.phone || 'Test member' }}</td>
-                <td>{{ invoice.invoice_number }} <span v-if="invoice.is_test_invoice" class="rounded bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-800">TEST</span></td>
-                <td>€{{ invoice.amount_due }}</td><td>{{ invoice.due_date }}</td><td>{{ paymentStatusLabel(invoice.payment_status) }}</td><td>{{ invoice.paid_at || '—' }}</td>
-                <td class="flex flex-wrap gap-2 py-2"><button class="btn-secondary" @click="loadPaymentInvoice(invoice.id)">View</button><button class="btn-secondary" @click="setPaymentStatus(invoice, 'PAID')">Mark paid</button><button class="btn-muted" @click="setPaymentStatus(invoice, 'UNPAID')">Unpaid</button><button class="btn-muted" @click="setPaymentStatus(invoice, 'CANCELLED')">Cancel</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div v-if="selectedPaymentInvoice" class="panel-card space-y-4">
-        <h3 class="text-lg font-semibold">Invoice {{ selectedPaymentInvoice.invoice_number }}</h3>
-        <div v-if="selectedPaymentInvoice.is_test_invoice" class="alert-warning">TEST MODE - This invoice is for testing only</div>
-        <div class="grid gap-4 lg:grid-cols-[220px_1fr]"><img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p><strong>Total amount due:</strong> €{{ selectedPaymentInvoice.amount_due }}</p><p><strong>IBAN:</strong> {{ selectedPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ selectedPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ selectedPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.payment_reference)">Copy reference</button></p><p><strong>Instructions:</strong> Scan with your banking app or use this reference when paying.</p></div></div>
-      </div>
-    </section>
 
     <section v-if="activeView === 'payment-settings'" class="space-y-6">
       <div><h2 class="section-title">Payment settings</h2><p class="section-copy mt-1">Configure bank-transfer account details and QR code test mode.</p></div>
@@ -754,27 +690,43 @@
 
     <section v-if="activeView === 'admin-costs'" class="space-y-6">
       <div>
-        <h2 class="section-title">Split Costs</h2>
-        <p class="section-copy mt-1">Create and maintain shared expenses, then settle completed court booking invoices.</p>
+        <h2 class="section-title">Invoices & Payments</h2>
+        <p class="section-copy mt-1">Review family totals, prepare monthly invoices, and reconcile payments in one place.</p>
         <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
-          <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'invoices' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'invoices'">Invoices</button>
+          <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'invoices' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'invoices'">Monthly invoices</button>
           <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'misc' ? 'bg-white text-emerald-800 shadow-sm' : ''" @click="adminCostTab = 'misc'">Misc costs</button>
           <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'booking' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'booking'">Booking costs</button>
         </div>
       </div>
 
       <div v-if="adminCostTab === 'invoices'" class="panel-card">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div class="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h3 class="text-lg font-semibold text-slate-900">Monthly cost per person</h3>
-            <p class="section-copy">Review each member's booking, shared-cost, and total amount for the selected month.</p>
+            <h3 class="text-lg font-semibold text-slate-900">Monthly family invoices</h3>
+            <p class="section-copy">Review each family's booking, shared-cost, and total amount for the selected month.</p>
           </div>
-          <label class="block sm:w-48">
-            <span class="form-label">Month</span>
-            <input v-model="monthlyInvoiceMonth" type="month" class="form-input" @change="loadAdminMonthlyInvoices" />
-          </label>
+          <div class="grid gap-2 sm:grid-cols-[minmax(10rem,12rem)_minmax(12rem,16rem)_auto] sm:items-end">
+            <label class="block sm:w-48">
+              <span class="form-label">Month</span>
+              <input v-model="monthlyInvoiceMonth" type="month" class="form-input" @change="loadAdminMonthlyInvoices" />
+            </label>
+            <label class="block">
+              <span class="form-label">Month status</span>
+              <select :value="adminMonthlyInvoices?.month_status?.status || 'OPEN'" class="form-input" @change="setMonthlyInvoiceStatus($event.target.value)">
+                <option value="OPEN">Open</option>
+                <option value="READY_FOR_PAYMENT">Ready for payment</option>
+                <option value="SETTLED">Settled</option>
+              </select>
+            </label>
+            <button class="btn-secondary" @click="notifyMonthlyInvoicesReady">Notify group</button>
+          </div>
         </div>
         <div v-if="adminMonthlyInvoices" class="mt-4 space-y-4">
+          <div class="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <span class="text-slate-600">Month status</span>
+            <span :class="monthStatusClass(adminMonthlyInvoices.month_status?.status)" class="rounded-full px-3 py-1 text-xs font-bold">{{ monthStatusLabel(adminMonthlyInvoices.month_status?.status) }}</span>
+            <span v-if="adminMonthlyInvoices.month_status?.ready_at" class="text-slate-500">Ready {{ dateTimeLabel(adminMonthlyInvoices.month_status.ready_at) }}</span>
+          </div>
           <div class="grid gap-3 sm:grid-cols-3">
             <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
               <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Booking total</div>
@@ -794,54 +746,103 @@
               <summary class="cursor-pointer list-none">
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h4 class="font-semibold text-slate-900">{{ invoice.user.name || invoice.user.email || invoice.user.phone }}</h4>
+                    <h4 class="font-semibold text-slate-900">{{ invoice.family_title || invoice.user.name || invoice.user.email || invoice.user.phone }}</h4>
                     <p class="text-sm text-slate-600">{{ adminMonthlyInvoices.month }} · {{ (invoice.booking_items || []).length }} booking costs · {{ (invoice.misc_items || []).length }} misc costs</p>
                   </div>
-                  <div class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <div class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
                     <div class="rounded bg-slate-50 p-2"><div class="text-xs text-slate-500">Total cost</div><div class="font-bold">€{{ invoice.total }}</div></div>
                     <div class="rounded bg-emerald-50 p-2"><div class="text-xs text-slate-500">Amount paid</div><div class="font-bold text-emerald-800">€{{ invoice.paid_amount || 0 }}</div></div>
                     <div class="rounded bg-amber-50 p-2"><div class="text-xs text-slate-500">Balance</div><div class="font-bold text-amber-800">€{{ invoice.balance_amount ?? invoice.total }}</div></div>
-                    <div class="rounded bg-indigo-50 p-2"><div class="text-xs text-slate-500">Paid count</div><div class="font-bold text-indigo-800">{{ invoice.paid_count || 0 }}</div></div>
                   </div>
                 </div>
               </summary>
-              <div class="mt-4 grid gap-3 lg:grid-cols-2">
-                <div class="rounded-lg border border-indigo-100 bg-indigo-50/60 p-3">
-                  <h5 class="font-semibold text-indigo-900">Bookings</h5>
-                  <div class="mt-2 space-y-2 text-sm">
-                    <div v-for="item in invoice.booking_items" :key="item.booking_id" class="rounded bg-white p-2">
-                      <div class="font-medium text-slate-900">{{ item.date }} · {{ item.start_time }}-{{ item.end_time }}</div>
-                      <div class="text-slate-600">{{ item.court }} · {{ item.participants?.join(', ') }}</div>
-                      <div class="text-xs text-slate-500">Total €{{ item.total_cost }} · {{ item.total_people_played }} players · Share €{{ item.amount }}</div>
-                    </div>
-                    <p v-if="!invoice.booking_items?.length" class="text-sm text-slate-500">No booking costs.</p>
-                  </div>
+              <div class="mt-4 space-y-3">
+                <div class="overflow-x-auto rounded-lg border border-slate-200">
+                  <table class="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th class="px-3 py-2">Type</th>
+                        <th class="px-3 py-2">Date</th>
+                        <th class="px-3 py-2">Details</th>
+                        <th class="px-3 py-2">Members</th>
+                        <th class="px-3 py-2 text-right">Total</th>
+                        <th class="px-3 py-2 text-right">Split</th>
+                        <th class="px-3 py-2 text-right">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 bg-white">
+                      <tr v-for="item in invoice.booking_items" :key="`booking-${invoice.id}-${item.booking_id}`" class="align-top">
+                        <td class="whitespace-nowrap px-3 py-2 font-medium text-indigo-800">Booking</td>
+                        <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ item.date }}<span class="block text-xs text-slate-500">{{ item.start_time }}-{{ item.end_time }}</span></td>
+                        <td class="px-3 py-2 text-slate-700">{{ item.court }}</td>
+                        <td class="px-3 py-2 text-slate-700">{{ (item.family_members || item.participants || []).join(' & ') }}</td>
+                        <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">€{{ item.total_cost }}</td>
+                        <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">{{ item.total_people_played }} players</td>
+                        <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ item.amount }}</td>
+                      </tr>
+                      <tr v-for="item in invoice.misc_items" :key="`misc-${invoice.id}-${item.cost_id}`" class="align-top">
+                        <td class="whitespace-nowrap px-3 py-2 font-medium text-emerald-800">Misc</td>
+                        <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ item.purchase_date || 'No date' }}</td>
+                        <td class="px-3 py-2 text-slate-700">{{ item.title }}</td>
+                        <td class="px-3 py-2 text-slate-500">Family split</td>
+                        <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">€{{ item.amount_total }}</td>
+                        <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">{{ item.split_count }} ways</td>
+                        <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ item.amount }}</td>
+                      </tr>
+                      <tr v-if="!invoice.booking_items?.length && !invoice.misc_items?.length">
+                        <td colspan="7" class="px-3 py-4 text-center text-slate-500">No booking or misc costs.</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
-                <div class="rounded-lg border border-emerald-100 bg-emerald-50/60 p-3">
-                  <h5 class="font-semibold text-emerald-900">Miscellaneous</h5>
-                  <div class="mt-2 space-y-2 text-sm">
-                    <div v-for="item in invoice.misc_items" :key="item.cost_id" class="rounded bg-white p-2">
-                      <div class="font-medium text-slate-900">{{ item.purchase_date || 'No date' }} · {{ item.title }}</div>
-                      <div class="text-xs text-slate-500">Total €{{ item.amount_total }} · split {{ item.split_count }} ways · Share €{{ item.amount }}</div>
-                    </div>
-                    <p v-if="!invoice.misc_items?.length" class="text-sm text-slate-500">No misc costs.</p>
+                <div v-if="invoice.payment_invoice" class="flex flex-col gap-2 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <div class="min-w-0 text-slate-700">
+                    <span class="font-semibold text-indigo-950">Payment</span>
+                    <span class="mx-1 text-slate-400">·</span>
+                    <span>{{ invoice.payment_invoice.invoice_number }}</span>
+                    <span class="mx-1 text-slate-400">·</span>
+                    <span>Due {{ invoice.payment_invoice.due_date }}</span>
+                    <span class="mx-1 text-slate-400">·</span>
+                    <span>{{ paymentStatusLabel(invoice.payment_invoice.payment_status) }}</span>
+                    <span class="mx-1 text-slate-400">·</span>
+                    <span class="font-semibold">€{{ invoice.payment_invoice.amount_due }}</span>
                   </div>
-                </div>
-                <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 lg:col-span-2">
-                  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h5 class="font-semibold text-slate-900">Readable member cost summary</h5>
-                      <p class="text-sm text-slate-600">All verification details are shown here after opening the member row—no separate popup needed.</p>
-                    </div>
-                    <div class="grid grid-cols-3 gap-2 text-center text-sm">
-                      <div class="rounded bg-white px-3 py-2"><div class="text-xs text-slate-500">Bookings</div><div class="font-bold text-indigo-800">€{{ invoice.booking_total }}</div></div>
-                      <div class="rounded bg-white px-3 py-2"><div class="text-xs text-slate-500">Misc</div><div class="font-bold text-emerald-800">€{{ invoice.misc_total }}</div></div>
-                      <div class="rounded bg-white px-3 py-2"><div class="text-xs text-slate-500">Due</div><div class="font-bold text-slate-900">€{{ invoice.total }}</div></div>
-                    </div>
+                  <div class="flex flex-wrap gap-2">
+                    <button class="btn-secondary" @click="loadPaymentInvoice(invoice.payment_invoice.id)">QR</button>
+                    <button class="btn-secondary" @click="setPaymentStatus(invoice.payment_invoice, 'PAID')">Paid</button>
+                    <button class="btn-muted" @click="setPaymentStatus(invoice.payment_invoice, 'UNPAID')">Unpaid</button>
                   </div>
                 </div>
               </div>
             </details>
+          </div>
+
+          <div v-if="adminMonthlyInvoices.month_status?.status === 'OPEN'" class="rounded-lg border border-amber-100 bg-amber-50/70 p-3 text-sm text-amber-900">
+            Payment QR codes and bank details become available after the month status is changed to Ready for payment.
+          </div>
+
+          <div v-if="selectedPaymentInvoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
+            <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 class="font-semibold text-slate-900">QR and bank details</h4>
+                <p class="text-sm text-slate-600">{{ selectedPaymentInvoice.user?.name || selectedPaymentInvoice.user?.email || 'Family invoice' }} · {{ paymentStatusLabel(selectedPaymentInvoice.payment_status) }}</p>
+              </div>
+              <button class="btn-muted" @click="selectedPaymentInvoice = null">Close</button>
+            </div>
+            <div class="grid gap-3 md:grid-cols-[140px_1fr]">
+              <img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="w-32 rounded border bg-white p-2" />
+              <div class="overflow-x-auto rounded border border-white/70 bg-white">
+                <table class="min-w-full text-sm">
+                  <tbody class="divide-y divide-slate-100">
+                    <tr><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Amount due</th><td class="px-3 py-2 font-semibold text-slate-900">€{{ selectedPaymentInvoice.amount_due }}</td></tr>
+                    <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Due date</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.due_date }}</td></tr>
+                    <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">IBAN</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.iban)">Copy</button></td></tr>
+                    <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Account holder</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.account_holder_name }}</td></tr>
+                    <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Reference</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.payment_reference)">Copy</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
 
         </div>
@@ -1258,7 +1259,6 @@ export default {
     const adminBookingTab = ref('bookings')
     const adminCostTab = ref('invoices')
     const completedBookingTab = ref('completed')
-    const costViewTab = ref('summary')
     const invoiceDetailTab = ref('booking')
     const newCourtName = ref('')
     const newCourtLocation = ref('')
@@ -1378,13 +1378,6 @@ export default {
         totals[day.date] = day.totals || defaultPlayTotals()
         return totals
       }, {})
-    })
-    const personalInvoiceSections = computed(() => {
-      const invoice = monthlyInvoice.value || {}
-      return [
-        { key: 'booking', title: 'Bookings', count: (invoice.booking_items || []).length, total: Number(invoice.booking_total || 0).toFixed(2), items: invoice.booking_items || [] },
-        { key: 'misc', title: 'Miscellaneous', count: (invoice.misc_items || []).length, total: Number(invoice.misc_total || 0).toFixed(2), items: invoice.misc_items || [] },
-      ]
     })
     const attendanceStatuses = [
       { value: 'attending', label: 'Attending' },
@@ -1768,7 +1761,8 @@ export default {
     async function loadMonthlyInvoice() {
       const data = await fetchJson(`/api/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
       monthlyInvoice.value = data
-      currentPaymentInvoice.value = await fetchJson(`/api/payment-invoices/current?month=${monthlyInvoiceMonth.value}`)
+      const paymentData = await fetchJson(`/api/payment-invoices/current?month=${monthlyInvoiceMonth.value}`)
+      currentPaymentInvoice.value = paymentData.invoice === undefined ? paymentData : paymentData.invoice
       completedBookingPagination.value = { ...completedBookingPagination.value, page: 1 }
       await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
     }
@@ -1843,6 +1837,13 @@ export default {
       const updated = await fetchJson(`/api/admin/payment-invoices/${invoice.id}/status`, { method: 'POST', body: JSON.stringify({ payment_status: status }) })
       selectedPaymentInvoice.value = updated
       await loadPaymentInvoices()
+      if (adminMonthlyInvoices.value) await loadAdminMonthlyInvoices()
+    }
+
+    async function setMonthlyInvoiceStatus(status) {
+      const data = await fetchJson('/api/admin/invoices/monthly/status', { method: 'POST', body: JSON.stringify({ month: monthlyInvoiceMonth.value, status }) })
+      msg.value = `${monthStatusLabel(data.month_status?.status)} saved for ${monthName(monthlyInvoiceMonth.value)}.`
+      await loadAdminMonthlyInvoices()
     }
 
     async function generateTestInvoice() {
@@ -1863,6 +1864,29 @@ export default {
 
     function paymentStatusLabel(status) {
       return ({ UNPAID: 'Payment pending', PAID: 'Paid', PARTIALLY_PAID: 'Partially paid', CANCELLED: 'Cancelled', EXPIRED: 'Expired' })[status] || status
+    }
+
+    function monthStatusLabel(status) {
+      return ({ OPEN: 'Open', READY_FOR_PAYMENT: 'Ready for payment', SETTLED: 'Settled' })[status] || 'Open'
+    }
+
+    function monthStatusClass(status) {
+      return ({
+        OPEN: 'bg-slate-200 text-slate-800',
+        READY_FOR_PAYMENT: 'bg-indigo-100 text-indigo-800',
+        SETTLED: 'bg-emerald-100 text-emerald-800'
+      })[status] || 'bg-slate-200 text-slate-800'
+    }
+
+    function monthName(value) {
+      if (!value) return 'this month'
+      const [year, month] = value.split('-').map(Number)
+      return new Date(year, (month || 1) - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+    }
+
+    function dateTimeLabel(value) {
+      if (!value) return ''
+      return new Date(value).toLocaleString()
     }
 
     async function loadWhatsAppNotifications() {
@@ -1987,9 +2011,6 @@ export default {
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page }),
             loadAdminUsers()
           ])
-        } else if (activeView.value === 'admin-payments') {
-          if (!isAdmin.value) { errorMsg.value = 'Admins only.'; return }
-          await loadPaymentInvoices()
         } else if (activeView.value === 'payment-settings') {
           if (!isSuperAdmin.value) { errorMsg.value = 'Only Super Admin can manage payment settings.'; return }
           await loadPaymentSettings()
@@ -2664,7 +2685,6 @@ export default {
       completedBookingPagination,
       archivedBookingPagination,
       completedBookingTab,
-      costViewTab,
       invoiceDetailTab,
       courts,
       calculatedBookingCost,
@@ -2675,7 +2695,6 @@ export default {
       miscCosts,
       monthlyInvoice,
       currentPaymentInvoice,
-      personalInvoiceSections,
       memberOptions,
       adminMonthlyInvoices,
       monthlyInvoiceMonth,
@@ -2772,10 +2791,15 @@ export default {
       loadPaymentInvoices,
       loadPaymentInvoice,
       setPaymentStatus,
+      setMonthlyInvoiceStatus,
       generateTestInvoice,
       notifyMonthlyInvoicesReady,
       copyText,
       paymentStatusLabel,
+      monthStatusLabel,
+      monthStatusClass,
+      monthName,
+      dateTimeLabel,
       familyPersonBookingStatus,
       availabilityPersonStatus,
       normalizeVote,

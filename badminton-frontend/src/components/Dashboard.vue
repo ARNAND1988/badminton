@@ -1991,6 +1991,7 @@ export default {
       systemCheckQuery.value = ''
       systemCheckWhatsAppRecipient.value = ''
       isAdmin.value = false
+      isSuperAdmin.value = false
       newParticipantName.value = {}
       newParticipantPhone.value = {}
       newParticipantStatus.value = {}
@@ -2409,6 +2410,7 @@ export default {
         const loggedIn = hasToken()
         if (!loggedIn) {
           isAdmin.value = false
+          isSuperAdmin.value = false
         }
 
         if (activeView.value === 'bookings') {
@@ -2483,6 +2485,10 @@ export default {
             loadAdminUsers()
           ])
         } else if (activeView.value === 'payment-settings') {
+          if (!loggedIn) {
+            router.push('/login')
+            return
+          }
           if (!isSuperAdmin.value) { errorMsg.value = 'Only Super Admin can manage payment settings.'; return }
           await loadPaymentSettings()
         } else if (activeView.value === 'admin-audit-logs') {

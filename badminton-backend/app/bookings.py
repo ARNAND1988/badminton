@@ -3048,6 +3048,31 @@ def create_wise_webhook_subscription():
     return jsonify({'subscription': subscription, 'settings': settings.to_dict(include_effective=True)}), 201
 
 
+@bookings_bp.route('/admin/payment-settings/wise-webhook-status', methods=['GET'])
+def wise_webhook_status():
+    user, error = _require_super_admin()
+    if error:
+        return error
+    settings = _payment_settings()
+    latest_events = WiseWebhookEvent.query.order_by(WiseWebhookEvent.created_at.desc()).limit(10).all()
+    test_invoices = PaymentInvoice.query.filter_by(is_test_invoice=True).order_by(PaymentInvoice.created_at.desc()).limit(10).all()
+    matched_event_count = WiseWebhookEvent.query.filter(WiseWebhookEvent.invoice_id.isnot(None)).count()
+    unmatched_event_count = WiseWebhookEvent.query.filter_by(status='UNMATCHED').count()
+    error_event_count = WiseWebhookEvent.query.filter_by(status='ERROR').count()
+    return jsonify({
+        'webhook_configured': bool(settings.wise_webhook_url),
+        'subscription_configured': bool(settings.wise_webhook_subscription_id),
+        'subscription_id': settings.wise_webhook_subscription_id,
+        'webhook_url': settings.wise_webhook_url,
+        'latest_event': latest_events[0].to_dict() if latest_events else None,
+        'recent_events': [event.to_dict() for event in latest_events],
+        'recent_test_invoices': [invoice.to_dict(include_qr=False) for invoice in test_invoices],
+        'matched_event_count': matched_event_count,
+        'unmatched_event_count': unmatched_event_count,
+        'error_event_count': error_event_count,
+    })
+
+
 @bookings_bp.route('/payment-invoices/current', methods=['GET'])
 def current_payment_invoice():
     user, error = _require_login()
@@ -3077,7 +3102,7 @@ def wise_incoming_transfer_webhook():
         return jsonify({'status': 'ok', 'webhook': 'wise-incoming-transfer'})
     payload = request.get_json(silent=True) or {}
     settings = _payment_settings()
-    subscription_id = payload.get('subscription_id')
+    subscription_id = payload.get('subscription_id') or payload.get('subscriptionId')
     if settings.wise_webhook_subscription_id and subscription_id and subscription_id != settings.wise_webhook_subscription_id:
         return jsonify({'error': 'unknown_subscription'}), 403
     incoming_transfer_id = _incoming_transfer_id_from_payload(payload)
@@ -3097,7 +3122,7 @@ def wise_incoming_transfer_webhook():
         return jsonify({'status': 'duplicate', 'event': existing.to_dict()})
 
     event = WiseWebhookEvent(
-        event_type=payload.get('event_type'),
+        event_type=payload.get('event_type') or payload.get('eventType'),
         subscription_id=subscription_id,
         incoming_transfer_id=str(incoming_transfer_id),
         payload_json=json.dumps(payload),

@@ -673,7 +673,6 @@
           <label><span class="form-label">Account holder name</span><input v-model="paymentSettings.account_holder_name" class="form-input" /></label><label><span class="form-label">Business bank name</span><input v-model="paymentSettings.bank_name" class="form-input" /></label><label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input" /></label><label><span class="form-label">BIC optional</span><input v-model="paymentSettings.bic" class="form-input" /></label><label><span class="form-label">Payment description prefix</span><input v-model="paymentSettings.description_prefix" class="form-input" /></label><label><span class="form-label">Default due days</span><input v-model.number="paymentSettings.default_due_days" type="number" min="1" class="form-input" /></label></div>
         <label class="flex gap-2"><input v-model="paymentSettings.test_mode" type="checkbox" /> Test mode</label>
         <p class="text-sm text-slate-600">Wise incoming-transfer webhooks reconcile received transfers by matching the invoice reference.</p>
-<<<<<<< HEAD
         <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
           <p v-if="paymentSettings.wise_webhook_subscription_id" class="font-semibold text-emerald-700">Webhook subscription active: {{ paymentSettings.wise_webhook_subscription_id }}</p>
           <p v-else class="font-semibold text-amber-700">No Wise webhook subscription ID is saved yet.</p>
@@ -681,10 +680,6 @@
           <p v-if="paymentWebhookStatus?.latest_event" class="mt-1 text-slate-600">Latest webhook: {{ paymentWebhookStatus.latest_event.status }} · {{ paymentWebhookStatus.latest_event.reference || paymentWebhookStatus.latest_event.incoming_transfer_id || 'no reference' }} · {{ formatDateTime(paymentWebhookStatus.latest_event.created_at) }}</p>
         </div>
         <div class="flex flex-wrap gap-2"><button class="btn-dark" :disabled="paymentSettingsSaving" @click="savePaymentSettings">{{ paymentSettingsSaving ? 'Saving...' : 'Save settings' }}</button><button v-if="!paymentSettings.wise_webhook_subscription_id" class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentWebhookSubscribing || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="createWiseWebhookSubscription">{{ paymentWebhookSubscribing ? 'Subscribing...' : 'Create Wise webhook subscription' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentTestGenerating || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="generateTestInvoice">{{ paymentTestGenerating ? 'Generating...' : 'Generate New Test Invoice' }}</button><button class="btn-muted" :disabled="paymentWebhookStatusLoading" @click="loadWiseWebhookStatus">{{ paymentWebhookStatusLoading ? 'Checking...' : 'Check webhook connection' }}</button></div>
-=======
-        <p v-if="paymentSettings.wise_webhook_subscription_id" class="text-sm text-emerald-700">Webhook subscription: {{ paymentSettings.wise_webhook_subscription_id }}</p>
-        <div class="flex flex-wrap gap-2"><button class="btn-dark" :disabled="paymentSettingsSaving" @click="savePaymentSettings">{{ paymentSettingsSaving ? 'Saving...' : 'Save settings' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentWebhookSubscribing || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="createWiseWebhookSubscription">{{ paymentWebhookSubscribing ? 'Subscribing...' : 'Create Wise webhook subscription' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentTestGenerating || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="generateTestInvoice">{{ paymentTestGenerating ? 'Generating...' : 'Generate €1 Test Invoice' }}</button></div>
->>>>>>> 7aea508 (did not read the ticket description yet :-))
         <p v-if="!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token" class="text-sm text-amber-700">Enter a real Wise API token before generating a test invoice with a payment link.</p>
         <div v-if="selectedPaymentInvoice?.is_test_invoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
           <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1524,13 +1519,10 @@ export default {
     const paymentTestGenerating = ref(false)
     const paymentTestRefreshing = ref(false)
     const paymentWebhookSubscribing = ref(false)
-<<<<<<< HEAD
     const paymentWebhookStatusLoading = ref(false)
-=======
     const systemCheckRefreshing = ref(false)
     const systemCheckWhatsAppTesting = ref(false)
     const retryingWiseEventId = ref(null)
->>>>>>> 7aea508 (did not read the ticket description yet :-))
     const errorMsg = ref('')
     const editingBookingId = ref(null)
     const bookingDate = ref(localIsoDate())
@@ -3199,13 +3191,10 @@ export default {
       paymentTestGenerating,
       paymentTestRefreshing,
       paymentWebhookSubscribing,
-<<<<<<< HEAD
       paymentWebhookStatusLoading,
-=======
       systemCheckRefreshing,
       systemCheckWhatsAppTesting,
       retryingWiseEventId,
->>>>>>> 7aea508 (did not read the ticket description yet :-))
       paymentSettings,
       paymentWebhookStatus,
       wiseWebhookHealthText,

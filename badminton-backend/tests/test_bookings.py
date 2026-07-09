@@ -1768,3 +1768,38 @@ def test_admin_can_run_whatsapp_connection_test_from_system_checks(client, app, 
     checks_payload = checks_resp.get_json()
     assert checks_payload['whatsapp']['default_test_recipient'] == '+31 6 1111 2222'
     assert checks_payload['whatsapp']['last_test_log']['recipient'] == '31611112222@c.us'
+
+
+def test_wise_webhook_records_concise_error_when_wise_dns_fails(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    def fake_get(url, headers=None, timeout=None):
+        raise bookings_module.requests.exceptions.ConnectionError(
+            "HTTPSConnectionPool(host='api.wise.com', port=443): Max retries exceeded with url: /v1/transfers/2238838788 "
+            "(Caused by NameResolutionError(\"HTTPSConnection(host='api.wise.com', port=443): Failed to resolve 'api.wise.com'\"))"
+        )
+
+    monkeypatch.setattr(bookings_module.requests, 'get', fake_get)
+
+    payload = {
+        'data': {'resource': {'id': 2238838788, 'type': 'transfer'}},
+        'subscription_id': 'sub-1',
+        'event_type': 'transfers#state-change',
+    }
+
+    with app.app_context():
+        settings = PaymentSettings(wise_api_token='token', wise_profile_id='84642112', wise_webhook_subscription_id='sub-1')
+        db.session.add(settings)
+        db.session.commit()
+
+    resp = client.post('/api/webhooks/wise/incoming-transfer', json=payload)
+
+    assert resp.status_code == 202
+    data = resp.get_json()
+    assert data['status'] == 'error'
+    assert data['event']['status'] == 'ERROR'
+    assert data['event']['error_message'] == 'Wise API is unreachable due to a network or DNS connection error. Retry once DNS/network connectivity is restored.'
+
+    with app.app_context():
+        event = WiseWebhookEvent.query.filter_by(incoming_transfer_id='2238838788').one()
+        assert event.error_message == data['event']['error_message']

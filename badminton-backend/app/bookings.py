@@ -2718,6 +2718,17 @@ def _wise_create_webhook_subscription(settings):
     return data
 
 
+def _wise_request_error_message(exc):
+    message = str(exc)
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        message = 'Wise API is unreachable due to a network or DNS connection error. Retry once DNS/network connectivity is restored.'
+    elif isinstance(exc, requests.exceptions.Timeout):
+        message = 'Wise API request timed out. Retry once Wise is reachable.'
+    if len(message) > 240:
+        message = message[:240] + '...'
+    return message
+
+
 def _wise_fetch_incoming_transfer(settings, incoming_transfer_id):
     base_url = _wise_api_base_url(settings)
     profile_id = (settings.wise_profile_id or '').strip()
@@ -2733,11 +2744,18 @@ def _wise_fetch_incoming_transfer(settings, incoming_transfer_id):
             f'{base_url}/v3/profiles/{profile_id}/incoming-transfers/{incoming_transfer_id}',
         ])
     response = None
+    last_request_error = None
     for endpoint in endpoints:
-        response = requests.get(endpoint, headers=_wise_api_headers(settings), timeout=15)
+        try:
+            response = requests.get(endpoint, headers=_wise_api_headers(settings), timeout=15)
+        except requests.exceptions.RequestException as exc:
+            last_request_error = exc
+            continue
         if response.status_code != 404:
             break
     if response is None:
+        if last_request_error is not None:
+            raise last_request_error
         raise ValueError('wise_incoming_transfer_missing')
     response.raise_for_status()
     return response.json() or {}
@@ -3503,7 +3521,7 @@ def retry_wise_webhook_event(event_id):
         })
     except Exception as exc:
         event.status = 'ERROR'
-        event.error_message = str(exc)
+        event.error_message = _wise_request_error_message(exc)
         db.session.commit()
         return jsonify({'status': 'error', 'event': event.to_dict()}), 202
 
@@ -3569,7 +3587,7 @@ def wise_incoming_transfer_webhook():
         db.session.commit()
     except Exception as exc:
         event.status = 'ERROR'
-        event.error_message = str(exc)
+        event.error_message = _wise_request_error_message(exc)
         db.session.commit()
         return jsonify({'status': 'error', 'event': event.to_dict()}), 202
     return jsonify({'status': event.status.lower(), 'event': event.to_dict()})

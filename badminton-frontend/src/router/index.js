@@ -90,6 +90,13 @@ const routes = [
     meta: { navLabel: 'Audit Logs', requiresAuth: true }
   },
   {
+    path: '/admin/system-checks',
+    name: 'admin-system-checks',
+    component: Dashboard,
+    props: { initialView: 'system-checks' },
+    meta: { navLabel: 'Diagnostics', requiresAuth: true }
+  },
+  {
     path: '/admin/notifications',
     name: 'notifications',
     component: Dashboard,

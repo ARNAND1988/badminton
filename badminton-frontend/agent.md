@@ -1,86 +1,102 @@
-# Frontend Agent Boot Notes
+# Frontend Agent Notes
 
 ## Stack
 
-- Vue 3 single page app
-- Vite 5 dev/build tooling
-- Vue Router 4 with history mode
-- Tailwind CSS 3 through PostCSS and Autoprefixer
-- Nginx config for serving the built app in containerized deployments
+- Vue 3
+- Vue Router
+- Vite
+- Tailwind CSS
 
-## Fast Start
+## Active Paths
+
+- `src/App.vue`: app shell and route-width layout
+- `src/router/index.js`: route map and auth guard
+- `src/components/Navbar.vue`: desktop/mobile nav, admin menu, auth-aware UI
+- `src/components/Register.vue`: login and registration screen
+- `src/components/Dashboard.vue`: main member and admin work surface
+- `src/authSession.js`: localStorage/sessionStorage auth state helpers
+
+## How The Frontend Works
+
+### Route model
+
+Routes map into either the register/login screen or a shared `Dashboard` component with different `initialView` props.
+
+Important route groups:
+
+- member views: `/availability`, `/bookings`, `/costs`
+- admin views: `/admin/bookings`, `/admin/courts`, `/admin/costs`, `/admin/payment-settings`, `/admin/audit-logs`, `/admin/notifications`, `/admin/members`
+
+Protected routes rely on `router.beforeEach()`, `hasAuthSession()`, and a live `/api/auth/me` check.
+
+### Session model
+
+`src/authSession.js` stores:
+
+- `auth_token`
+- `member_phone`
+- `member_name`
+- `member_email`
+- `member_role`
+
+The "remember me" behavior picks `localStorage` or `sessionStorage`. Session changes emit a `badminton-auth-changed` browser event so `Navbar.vue` and routed screens can refresh.
+
+### Dashboard model
+
+`src/components/Dashboard.vue` is the central UI module. It contains most fetch logic, local state, and view switching for:
+
+- bookings
+- admin bookings
+- admin courts
+- play availability
+- member costs/invoices
+- payment settings
+- admin costs and payment invoices
+- members
+- admin audit logs
+- notifications
+
+Before refactoring, search for the target `activeView` branch and for the endpoint the view calls. Most behavior lives in a small number of large methods near the bottom of the file.
+
+### API usage
+
+The frontend mostly talks to:
+
+- `/api/auth/me`
+- `/api/family-members`
+- `/api/play-availability`
+- `/api/bookings`
+- `/api/misc-costs`
+- `/api/admin/courts`
+- `/api/admin/freeze-periods`
+- `/api/admin/users`
+- `/api/admin/payment-settings`
+- `/api/admin/payment-invoices/...`
+- `/api/admin/whatsapp-notifications`
+
+If an API shape changes, update both the fetch call and the rendering logic that assumes the response shape.
+
+## Visual Structure
+
+- `App.vue` changes page width based on route type.
+- `Navbar.vue` renders separate desktop and mobile navigation patterns.
+- Admin navigation appears only when stored `member_role` indicates admin access.
+- `Register.vue` handles both login and registration modes in one component.
+
+## Build
+
+Run:
 
 ```bash
 cd badminton-frontend
-npm install
-npm run dev
-```
-
-The Vite dev server listens on `http://localhost:5173`.
-
-API calls to `/api` are proxied by `vite.config.js` to `http://127.0.0.1:8000`, so run the backend on port `8000` for local full-stack work.
-
-## Useful Commands
-
-```bash
-npm run dev
 npm run build
-npm run preview
 ```
 
-There is no frontend test script currently defined in `package.json`.
+There is no dedicated frontend test suite in this repo today, so the production build is the main safety check.
 
-## Important Files
+## Working Rules
 
-- `package.json`: scripts and npm dependencies.
-- `vite.config.js`: Vue plugin, port `5173`, and `/api` proxy.
-- `tailwind.config.cjs`: Tailwind content paths.
-- `postcss.config.cjs`: Tailwind and Autoprefixer setup.
-- `src/main.js`: Vue app bootstrap.
-- `src/App.vue`: top-level shell.
-- `src/router/index.js`: routes for login, verification, bookings, and member availability.
-- `src/components/Register.vue`: login/registration entry screen.
-- `src/components/Verify.vue`: OTP verification flow.
-- `src/components/Dashboard.vue`: bookings, courts, invoices, family members, and play availability UI.
-- `src/components/Navbar.vue`: app navigation.
-- `nginx.conf`: frontend container web server config.
-
-## Routes
-
-- `/`: login/register screen.
-- `/verify`: OTP verification.
-- `/dashboard`: redirects to `/bookings`.
-- `/bookings`: dashboard booking view.
-- `/availability`: member play attendance voting view.
-
-## Backend Contract
-
-The app expects JSON API endpoints under `/api`, including:
-
-- `POST /api/auth/login`
-- `POST /api/auth/send-otp`
-- `POST /api/auth/verify`
-- `GET /api/auth/me`
-- `GET /api/bookings`
-- `POST /api/bookings`
-- `PUT /api/bookings/:id`
-- `POST /api/bookings/:id/invoice`
-- `GET /api/family-members`
-- `POST /api/family-members`
-- `GET /api/play-availability`
-- `POST /api/play-availability`
-- `GET /api/admin/courts`
-- `POST /api/admin/courts`
-
-Authenticated calls use a bearer JWT from the backend. Demo accounts are created by the backend bootstrap:
-
-- Admin: `admin` / `admin123`
-- Member: `user` / `user123`
-
-## Working Notes
-
-- Keep API paths relative (`/api/...`) so local Vite proxy and production Nginx both work.
-- Use existing Vue Options/Composition API style in nearby components before introducing a new pattern.
-- Keep Tailwind utility classes consistent with the existing components and shared classes in `src/index.css`.
-- If editing navigation, check both `src/router/index.js` and `Navbar.vue`.
-- For production verification, run `npm run build`; Vite will catch template and bundling issues.
+- Prefer editing the existing `Dashboard.vue` branch for the affected view over introducing new parallel state flows.
+- Keep route names, nav labels, and `initialView` mappings consistent.
+- When auth behavior changes, check `Register.vue`, `authSession.js`, `Navbar.vue`, and the router guard together.
+- Prefer the top-level `badminton-frontend` directory; treat `badminton-frontend/badminton-frontend` as a legacy split-repo copy.

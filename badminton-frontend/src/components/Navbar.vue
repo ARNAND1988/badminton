@@ -265,6 +265,7 @@ export default {
         { label: 'Members', mobileLabel: 'Members', to: '/admin/members', icon: AdminIcon },
         { label: 'Invoices & Payments', mobileLabel: 'Invoices', to: '/admin/costs', icon: CostIcon },
         ...(sessionSnapshot.value.role === 'super_admin' ? [{ label: 'Payment Settings', mobileLabel: 'Pay cfg', to: '/admin/payment-settings', icon: AdminIcon }] : []),
+        { label: 'Diagnostics', mobileLabel: 'Checks', to: '/admin/system-checks', icon: AdminIcon },
         { label: 'Audit Logs', mobileLabel: 'Logs', to: '/admin/audit-logs', icon: AdminIcon },
         { label: 'WhatsApp', mobileLabel: 'WhatsApp', to: '/admin/notifications', icon: AdminIcon }
       ]

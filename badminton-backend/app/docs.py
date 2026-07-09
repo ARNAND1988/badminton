@@ -39,6 +39,9 @@ ENDPOINT_DOCS = {
     '/api/admin/whatsapp-notifications': ('WhatsApp', 'List WhatsApp notification settings and recent logs.'),
     '/api/admin/whatsapp-notifications/{setting_id}': ('WhatsApp', 'Update a WhatsApp notification setting.'),
     '/api/admin/whatsapp-notifications/{setting_id}/test': ('WhatsApp', 'Send a test WhatsApp notification.'),
+    '/api/admin/system-checks': ('Admin Diagnostics', 'Check backend, WhatsApp bot, Wise profile, and Wise webhook subscription status.'),
+    '/api/admin/system-checks/whatsapp-test': ('Admin Diagnostics', 'Send a direct WhatsApp connection test to the configured or provided recipient.'),
+    '/api/admin/wise-webhook-events/{event_id}/retry': ('Admin Diagnostics', 'Retry reconciliation for a stored Wise webhook event.'),
 }
 
 

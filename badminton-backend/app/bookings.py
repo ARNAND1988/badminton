@@ -265,6 +265,7 @@ def _participant_keys_for_user(user):
 
 
 MONTHLY_INVOICE_STATUSES = {'OPEN', 'READY_FOR_PAYMENT', 'SETTLED'}
+TEST_PAYMENT_INVOICE_AMOUNT = 1.00
 
 
 def _family_display_name(user):
@@ -2719,10 +2720,18 @@ def _wise_create_webhook_subscription(settings):
 
 def _wise_fetch_incoming_transfer(settings, incoming_transfer_id):
     base_url = _wise_api_base_url(settings)
+    profile_id = (settings.wise_profile_id or '').strip()
     endpoints = [
+        f'{base_url}/v1/transfers/{incoming_transfer_id}',
         f'{base_url}/v1/incoming-transfers/{incoming_transfer_id}',
         f'{base_url}/v3/incoming-transfers/{incoming_transfer_id}',
     ]
+    if profile_id:
+        endpoints.extend([
+            f'{base_url}/v3/profiles/{profile_id}/transfers/{incoming_transfer_id}',
+            f'{base_url}/v1/profiles/{profile_id}/incoming-transfers/{incoming_transfer_id}',
+            f'{base_url}/v3/profiles/{profile_id}/incoming-transfers/{incoming_transfer_id}',
+        ])
     response = None
     for endpoint in endpoints:
         response = requests.get(endpoint, headers=_wise_api_headers(settings), timeout=15)
@@ -2745,6 +2754,58 @@ def _flatten_text_values(value):
     elif value is not None:
         values.append(str(value))
     return values
+
+
+def _reference_parts(value):
+    parts = []
+    current = []
+    for ch in str(value or '').upper():
+        if ch.isalnum():
+            current.append(ch)
+            continue
+        if current:
+            parts.append(''.join(current))
+            current = []
+    if current:
+        parts.append(''.join(current))
+    return parts
+
+
+def _reference_aliases(value):
+    parts = _reference_parts(value)
+    aliases = []
+    if parts:
+        aliases.append(''.join(parts))
+        if len(parts[-1]) >= 4:
+            aliases.append(parts[-1])
+    deduped = []
+    seen = set()
+    for alias in aliases:
+        if alias and alias not in seen:
+            seen.add(alias)
+            deduped.append(alias)
+    return deduped
+
+
+def _invoice_reference_aliases(invoice):
+    exact = []
+    suffix = []
+    for candidate in [invoice.payment_reference, invoice.invoice_number]:
+        aliases = _reference_aliases(candidate)
+        if aliases:
+            exact.append(aliases[0])
+            if len(aliases) > 1 and len(aliases[1]) >= 5:
+                suffix.append(aliases[1])
+    return exact, suffix
+
+
+def _transfer_reference_search(data):
+    values = _flatten_text_values(data)
+    text = ''.join(_reference_parts(' '.join(values)))
+    aliases = set()
+    for value in values:
+        aliases.update(_reference_aliases(value))
+    return text, aliases
 
 
 def _deep_value(data, keys):
@@ -2782,7 +2843,7 @@ def _incoming_transfer_id_from_payload(payload):
 
 
 def _incoming_transfer_amount(data):
-    amount_value = _deep_value(data, {'amount', 'value'})
+    amount_value = _deep_value(data, {'amount', 'value', 'sourceAmount', 'sourceValue', 'targetAmount', 'targetValue'})
     try:
         if isinstance(amount_value, dict):
             amount_value = amount_value.get('value') or amount_value.get('amount')
@@ -2805,14 +2866,112 @@ def _incoming_transfer_sender(data):
     return str(sender) if sender not in (None, '') else ''
 
 
-def _find_invoice_for_incoming_transfer(data):
-    text = ' '.join(_flatten_text_values(data)).lower()
-    invoices = PaymentInvoice.query.filter(PaymentInvoice.payment_status != 'PAID').order_by(PaymentInvoice.created_at.desc()).all()
+def _match_invoice_for_reference_blob(invoices, data):
+    text, aliases = _transfer_reference_search(data)
+    exact_matches = []
+    suffix_matches = []
     for invoice in invoices:
-        candidates = [invoice.payment_reference, invoice.invoice_number]
-        if any(candidate and candidate.lower() in text for candidate in candidates):
-            return invoice
+        exact_aliases, suffix_aliases = _invoice_reference_aliases(invoice)
+        for alias in exact_aliases:
+            if alias and (alias in aliases or alias in text):
+                exact_matches.append((invoice, alias, 'full_reference'))
+                break
+        else:
+            for alias in suffix_aliases:
+                if alias and alias in aliases:
+                    suffix_matches.append((invoice, alias, 'suffix_reference'))
+                    break
+    if exact_matches:
+        invoice, alias, reason = exact_matches[0]
+        return invoice, {'match_reason': reason, 'matched_alias': alias}
+    unique_suffix_matches = {item[0].id: item for item in suffix_matches}
+    if len(unique_suffix_matches) == 1:
+        invoice, alias, reason = next(iter(unique_suffix_matches.values()))
+        return invoice, {'match_reason': reason, 'matched_alias': alias}
+    return None, {
+        'match_reason': 'unmatched',
+        'searched_aliases': sorted(aliases)[:12],
+    }
+
+
+def _find_invoice_for_incoming_transfer(data, invoices=None):
+    invoice_list = invoices
+    if invoice_list is None:
+        invoice_list = PaymentInvoice.query.filter(PaymentInvoice.payment_status != 'PAID').order_by(PaymentInvoice.created_at.desc()).all()
+    return _match_invoice_for_reference_blob(invoice_list, data)
+
+
+def _payment_invoice_lookup(query, include_paid=True):
+    query = (query or '').strip()
+    if not query:
+        return None
+    query_aliases = _reference_aliases(query)
+    if not query_aliases:
+        return None
+    invoices_query = PaymentInvoice.query.order_by(PaymentInvoice.created_at.desc())
+    if not include_paid:
+        invoices_query = invoices_query.filter(PaymentInvoice.payment_status != 'PAID')
+    invoices = invoices_query.all()
+    exact_matches = []
+    suffix_matches = []
+    for invoice in invoices:
+        exact_aliases, suffix_aliases = _invoice_reference_aliases(invoice)
+        if any(alias in exact_aliases for alias in query_aliases):
+            exact_matches.append((invoice, 'full_reference'))
+            continue
+        for alias in query_aliases[1:]:
+            if alias and alias in suffix_aliases:
+                suffix_matches.append((invoice, 'suffix_reference'))
+                break
+        else:
+            for alias in query_aliases:
+                if any(candidate and alias in candidate for candidate in exact_aliases):
+                    exact_matches.append((invoice, 'contains_reference'))
+                    break
+    if exact_matches:
+        invoice, reason = exact_matches[0]
+        return {'invoice': invoice, 'match_reason': reason}
+    unique_suffix_matches = {item[0].id: item for item in suffix_matches}
+    if len(unique_suffix_matches) == 1:
+        invoice, reason = next(iter(unique_suffix_matches.values()))
+        return {'invoice': invoice, 'match_reason': reason}
     return None
+
+
+def _related_wise_events(invoice=None, query=None, limit=10):
+    query_aliases = set(_reference_aliases(query))
+    events = WiseWebhookEvent.query.order_by(WiseWebhookEvent.created_at.desc()).limit(max(limit, 1) * 4).all()
+    related = []
+    for event in events:
+        if invoice and event.invoice_id == invoice.id:
+            related.append(event)
+            continue
+        event_aliases = set(_reference_aliases(event.reference))
+        if query_aliases and query_aliases.intersection(event_aliases):
+            related.append(event)
+    return related[:limit]
+
+
+def _process_wise_incoming_transfer_event(event, settings, incoming_transfer_id):
+    transfer = _wise_fetch_incoming_transfer(settings, incoming_transfer_id)
+    event.fetched_json = json.dumps(transfer)
+    event.amount = _incoming_transfer_amount(transfer)
+    event.currency = _incoming_transfer_currency(transfer)
+    event.reference = _incoming_transfer_reference(transfer)
+    event.sender_name = _incoming_transfer_sender(transfer)
+    invoice, match_meta = _find_invoice_for_incoming_transfer(transfer)
+    if invoice:
+        event.invoice_id = invoice.id
+        if event.status != 'MATCHED':
+            _apply_incoming_transfer_to_invoice(invoice, event.amount, f'Wise incoming transfer {incoming_transfer_id}')
+        event.status = 'MATCHED'
+        event.error_message = None
+        return invoice, match_meta
+    event.invoice_id = None
+    event.status = 'UNMATCHED'
+    transfer_reference = event.reference or 'no reference'
+    event.error_message = f"No invoice reference matched this incoming transfer ({transfer_reference})."
+    return None, match_meta
 
 
 def _apply_incoming_transfer_to_invoice(invoice, amount, note):
@@ -2921,6 +3080,146 @@ def _attach_payment_error(invoice, exc):
     invoice.wise_payment_request_id = None
     invoice._payment_generation_error = payload
     return invoice
+
+
+def _check_whatsapp_bot_status():
+    import os
+
+    bot_url = (os.environ.get('WHATSAPP_BOT_URL') or '').strip()
+    token_configured = bool(os.environ.get('WHATSAPP_BOT_TOKEN'))
+    if not bot_url:
+        return {
+            'status': 'not_configured',
+            'bot_url': None,
+            'token_configured': token_configured,
+            'ready': False,
+            'message': 'WHATSAPP_BOT_URL is not configured.',
+        }
+    try:
+        response = requests.get(f"{bot_url.rstrip('/')}/health", timeout=5)
+        response.raise_for_status()
+        payload = response.json() or {}
+        return {
+            'status': 'ok' if payload.get('ready') else 'warning',
+            'bot_url': bot_url,
+            'token_configured': token_configured,
+            'ready': bool(payload.get('ready')),
+            'message': 'WhatsApp bot is reachable.',
+        }
+    except requests.exceptions.RequestException as exc:
+        return {
+            'status': 'error',
+            'bot_url': bot_url,
+            'token_configured': token_configured,
+            'ready': False,
+            'message': str(exc),
+        }
+
+
+def _default_whatsapp_test_setting():
+    from .models import WhatsAppNotificationSetting
+
+    _ensure_whatsapp_notification_settings()
+    setting = WhatsAppNotificationSetting.query.filter(
+        WhatsAppNotificationSetting.test_recipient_number.isnot(None)
+    ).order_by(WhatsAppNotificationSetting.updated_at.desc()).first()
+    if setting:
+        return setting
+    return WhatsAppNotificationSetting.query.order_by(WhatsAppNotificationSetting.updated_at.desc()).first()
+
+
+def _check_wise_profile_status(settings):
+    if not (settings.wise_api_token or '').strip():
+        return {
+            'status': 'not_configured',
+            'message': 'Wise API token is not configured.',
+            'resolved_profile_id': settings.wise_profile_id,
+        }
+    try:
+        response = requests.get(f'{_wise_api_base_url(settings)}/v1/profiles', headers=_wise_api_headers(settings), timeout=10)
+        response.raise_for_status()
+        profiles = response.json() or []
+        business = next((profile for profile in profiles if (profile.get('type') or '').upper() == 'BUSINESS'), None)
+        resolved_profile_id = str((business or {}).get('id') or settings.wise_profile_id or '')
+        return {
+            'status': 'ok' if resolved_profile_id else 'warning',
+            'message': 'Wise profiles fetched successfully.' if resolved_profile_id else 'Wise token worked but no business profile was found.',
+            'resolved_profile_id': resolved_profile_id or None,
+            'profile_count': len(profiles),
+        }
+    except Exception as exc:
+        payload, _ = _wise_payment_error_payload(exc) if isinstance(exc, (ValueError, requests.exceptions.RequestException, requests.exceptions.HTTPError)) else ({'error': str(exc)}, 502)
+        return {
+            'status': 'error',
+            'message': payload.get('error') or str(exc),
+            'resolved_profile_id': settings.wise_profile_id,
+        }
+
+
+def _fetch_wise_webhook_subscription(settings):
+    client_key = (settings.wise_client_key or '').strip()
+    subscription_id = (settings.wise_webhook_subscription_id or '').strip()
+    if not client_key:
+        raise ValueError('wise_client_key_required')
+    if not subscription_id:
+        raise ValueError('wise_subscription_id_missing')
+    base_url = _wise_api_base_url(settings)
+    endpoints = [
+        f'{base_url}/v3/applications/{client_key}/subscriptions/{subscription_id}',
+        f'{base_url}/v3/applications/{client_key}/subscriptions',
+    ]
+    for endpoint in endpoints:
+        response = requests.get(endpoint, headers=_wise_api_headers(settings), timeout=10)
+        if response.status_code == 404:
+            continue
+        response.raise_for_status()
+        data = response.json() or {}
+        if endpoint.endswith(f'/{subscription_id}'):
+            return data
+        items = data.get('subscriptions') if isinstance(data, dict) else data
+        if isinstance(items, list):
+            match = next((item for item in items if str(item.get('id') or item.get('subscription_id') or '') == subscription_id), None)
+            if match:
+                return match
+    raise ValueError('wise_subscription_id_missing')
+
+
+def _check_wise_subscription_status(settings):
+    if not (settings.wise_api_token or '').strip():
+        return {
+            'status': 'not_configured',
+            'message': 'Wise API token is not configured.',
+        }
+    if not (settings.wise_client_key or '').strip():
+        return {
+            'status': 'not_configured',
+            'message': 'Wise client key is not configured.',
+        }
+    if not (settings.wise_webhook_subscription_id or '').strip():
+        return {
+            'status': 'not_configured',
+            'message': 'Wise webhook subscription ID is not configured.',
+        }
+    try:
+        subscription = _fetch_wise_webhook_subscription(settings)
+        delivery = subscription.get('delivery') or {}
+        return {
+            'status': 'ok',
+            'message': 'Wise webhook subscription is reachable.',
+            'subscription': {
+                'id': str(subscription.get('id') or subscription.get('subscription_id') or settings.wise_webhook_subscription_id),
+                'name': subscription.get('name'),
+                'trigger_on': subscription.get('trigger_on') or subscription.get('triggerOn'),
+                'delivery_url': delivery.get('url') or subscription.get('url'),
+                'version': delivery.get('version'),
+            },
+        }
+    except Exception as exc:
+        payload, _ = _wise_payment_error_payload(exc) if isinstance(exc, (ValueError, requests.exceptions.RequestException, requests.exceptions.HTTPError)) else ({'error': str(exc)}, 502)
+        return {
+            'status': 'error',
+            'message': payload.get('error') or str(exc),
+        }
 
 
 def _user_can_view_payment_invoice(user, invoice):
@@ -3048,6 +3347,7 @@ def create_wise_webhook_subscription():
     return jsonify({'subscription': subscription, 'settings': settings.to_dict(include_effective=True)}), 201
 
 
+<<<<<<< HEAD
 @bookings_bp.route('/admin/payment-settings/wise-webhook-status', methods=['GET'])
 def wise_webhook_status():
     user, error = _require_super_admin()
@@ -3073,6 +3373,139 @@ def wise_webhook_status():
     })
 
 
+=======
+@bookings_bp.route('/admin/system-checks', methods=['GET'])
+def admin_system_checks():
+    user, error = _require_any_admin()
+    if error:
+        return error
+    settings = _payment_settings()
+    from .models import WhatsAppNotificationLog
+    whatsapp_test_setting = _default_whatsapp_test_setting()
+    recent_whatsapp_logs = WhatsAppNotificationLog.query.order_by(WhatsAppNotificationLog.created_at.desc()).limit(5).all()
+    last_whatsapp_test_log = next((log for log in recent_whatsapp_logs if log.event_key == 'connection_test'), None)
+    query = (request.args.get('query') or '').strip()
+    lookup = _payment_invoice_lookup(query) if query else None
+    invoice = lookup['invoice'] if lookup else None
+    return jsonify({
+        'checked_at': datetime.utcnow().isoformat(),
+        'query': query or None,
+        'backend': {
+            'status': 'ok',
+            'message': 'Backend API is reachable.',
+        },
+        'whatsapp': {
+            **_check_whatsapp_bot_status(),
+            'default_test_recipient': whatsapp_test_setting.test_recipient_number if whatsapp_test_setting else None,
+            'last_test_log': last_whatsapp_test_log.to_dict() if last_whatsapp_test_log else None,
+            'recent_logs': [log.to_dict() for log in recent_whatsapp_logs],
+        },
+        'wise': {
+            'status': 'ok' if (settings.wise_api_token or '').strip() else 'not_configured',
+            'settings': {
+                'wise_api_base_url': settings.wise_api_base_url or 'https://api.wise.com',
+                'wise_profile_id': settings.wise_profile_id,
+                'wise_client_key_configured': bool((settings.wise_client_key or '').strip()),
+                'wise_webhook_url': settings.wise_webhook_url,
+                'wise_webhook_subscription_id': settings.wise_webhook_subscription_id,
+                'wise_api_token_configured': bool((settings.wise_api_token or '').strip()),
+            },
+            'profile_check': _check_wise_profile_status(settings),
+            'subscription_check': _check_wise_subscription_status(settings),
+            'recent_events': [event.to_dict() for event in WiseWebhookEvent.query.order_by(WiseWebhookEvent.created_at.desc()).limit(10).all()],
+        },
+        'payment_lookup': {
+            'match_reason': lookup['match_reason'] if lookup else None,
+            'invoice': invoice.to_dict(include_qr=False) if invoice else None,
+            'related_events': [event.to_dict() for event in _related_wise_events(invoice=invoice, query=query, limit=8)],
+        } if query else None,
+    })
+
+
+@bookings_bp.route('/admin/system-checks/whatsapp-test', methods=['POST'])
+def admin_system_checks_whatsapp_test():
+    user, error = _require_any_admin()
+    if error:
+        return error
+    from .models import WhatsAppNotificationLog
+
+    data = request.get_json() or {}
+    setting = _default_whatsapp_test_setting()
+    raw_recipient = data.get('recipient')
+    if raw_recipient in (None, '') and setting:
+        raw_recipient = setting.test_recipient_number
+    recipient = _normalize_whatsapp_test_recipient(raw_recipient)
+    if not recipient:
+        return jsonify({'error': 'Configure a WhatsApp test recipient first.'}), 400
+
+    message = '\n'.join([
+        'Badminton admin connection test',
+        f'Time: {datetime.utcnow().isoformat()}Z',
+        f'Admin: {user.name or user.email or user.phone or "Unknown admin"}',
+    ])
+    status, response_text = _send_whatsapp_bot_message(message, recipient)
+    log = WhatsAppNotificationLog(
+        setting_id=setting.id if setting else None,
+        event_key='connection_test',
+        recipient=recipient,
+        message=message,
+        status=status,
+        response=response_text,
+    )
+    db.session.add(log)
+    _record_admin_audit(
+        user,
+        'send',
+        'whatsapp_connection_test',
+        log.id,
+        f'Sent WhatsApp connection test to {recipient}',
+        {'status': status, 'recipient': recipient},
+    )
+    db.session.commit()
+    return jsonify({
+        'status': status,
+        'recipient': recipient,
+        'message': 'WhatsApp connection test sent.' if status == 'sent' else 'WhatsApp connection test completed with a non-sent status.',
+        'log': log.to_dict(),
+    })
+
+
+@bookings_bp.route('/admin/wise-webhook-events/<int:event_id>/retry', methods=['POST'])
+def retry_wise_webhook_event(event_id):
+    user, error = _require_any_admin()
+    if error:
+        return error
+    event = WiseWebhookEvent.query.get_or_404(event_id)
+    if not event.incoming_transfer_id:
+        return jsonify({'error': 'incoming_transfer_id_missing'}), 400
+    settings = _payment_settings()
+    event.status = 'RECEIVED'
+    event.error_message = None
+    try:
+        invoice, match_meta = _process_wise_incoming_transfer_event(event, settings, event.incoming_transfer_id)
+        _record_admin_audit(
+            user,
+            'retry',
+            'wise_webhook_event',
+            event.id,
+            f'Retried Wise webhook event {event.incoming_transfer_id}',
+            {'event': event.to_dict(), 'match_meta': match_meta},
+        )
+        db.session.commit()
+        return jsonify({
+            'status': event.status.lower(),
+            'event': event.to_dict(),
+            'invoice': invoice.to_dict(include_qr=False) if invoice else None,
+            'match_meta': match_meta,
+        })
+    except Exception as exc:
+        event.status = 'ERROR'
+        event.error_message = str(exc)
+        db.session.commit()
+        return jsonify({'status': 'error', 'event': event.to_dict()}), 202
+
+
+>>>>>>> 7aea508 (did not read the ticket description yet :-))
 @bookings_bp.route('/payment-invoices/current', methods=['GET'])
 def current_payment_invoice():
     user, error = _require_login()
@@ -3118,9 +3551,10 @@ def wise_incoming_transfer_webhook():
         db.session.commit()
         return jsonify({'status': 'ignored', 'message': 'No incoming transfer id in webhook validation payload.'})
     existing = WiseWebhookEvent.query.filter_by(incoming_transfer_id=str(incoming_transfer_id)).first()
-    if existing:
+    if existing and existing.status == 'MATCHED':
         return jsonify({'status': 'duplicate', 'event': existing.to_dict()})
 
+<<<<<<< HEAD
     event = WiseWebhookEvent(
         event_type=payload.get('event_type') or payload.get('eventType'),
         subscription_id=subscription_id,
@@ -3129,21 +3563,18 @@ def wise_incoming_transfer_webhook():
         status='RECEIVED',
     )
     db.session.add(event)
+=======
+    event = existing or WiseWebhookEvent(incoming_transfer_id=str(incoming_transfer_id))
+    event.event_type = payload.get('event_type')
+    event.subscription_id = subscription_id
+    event.payload_json = json.dumps(payload)
+    event.status = 'RECEIVED'
+    event.error_message = None
+    if not existing:
+        db.session.add(event)
+>>>>>>> 7aea508 (did not read the ticket description yet :-))
     try:
-        transfer = _wise_fetch_incoming_transfer(settings, incoming_transfer_id)
-        event.fetched_json = json.dumps(transfer)
-        event.amount = _incoming_transfer_amount(transfer)
-        event.currency = _incoming_transfer_currency(transfer)
-        event.reference = _incoming_transfer_reference(transfer)
-        event.sender_name = _incoming_transfer_sender(transfer)
-        invoice = _find_invoice_for_incoming_transfer(transfer)
-        if invoice:
-            event.invoice_id = invoice.id
-            _apply_incoming_transfer_to_invoice(invoice, event.amount, f'Wise incoming transfer {incoming_transfer_id}')
-            event.status = 'MATCHED'
-        else:
-            event.status = 'UNMATCHED'
-            event.error_message = 'No invoice reference matched this incoming transfer.'
+        _process_wise_incoming_transfer_event(event, settings, incoming_transfer_id)
         db.session.commit()
     except Exception as exc:
         event.status = 'ERROR'
@@ -3276,7 +3707,7 @@ def generate_test_payment_invoice():
     data = request.get_json() or {}
     target = User.query.get(data.get('user_id')) if data.get('user_id') else user
     settings = _payment_settings()
-    total_amount = round(max(0.01, float(data.get('amount') or 17.50)), 2)
+    total_amount = TEST_PAYMENT_INVOICE_AMOUNT
     summary = {
         'total': total_amount,
         'booking_items': [{'title': 'Wise webhook test payment', 'amount': total_amount, 'date': datetime.utcnow().strftime('%Y-%m-%d')}],

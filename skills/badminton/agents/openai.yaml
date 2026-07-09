@@ -1,0 +1,4 @@
+interface:
+  display_name: "Badminton Repo"
+  short_description: "Navigate the badminton monorepo safely."
+  default_prompt: "Use $badminton to inspect the badminton repo, load the right module context, and make a precise change."

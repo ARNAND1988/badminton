@@ -1,4 +1,4 @@
-# Infra Agent Boot Notes
+# Infra Agent Notes
 
 ## Stack
 
@@ -12,6 +12,18 @@
 - Traefik ingress and cert-manager annotation for `nieuwegeinbadminton.nl`
 - GitHub Container Registry images referenced by Kubernetes manifests
 
+## Active Paths
+
+- `docker-compose.app.yml`: active monorepo app stack
+- `docker-compose.cloudflare.yml`: Cloudflare Tunnel overlay
+- `docker-compose.local-db.yml`: Postgres and Redis only for source-based local development
+- `deploy-cloudflare.sh`: deploy helper that writes `.env` and starts Compose
+- `update-from-main.sh`: Raspberry Pi update and redeploy script
+- `nginx/nginx.conf`: reverse proxy for frontend, backend API, and uploads
+- `infra/k8s/`: optional Kubernetes path
+
+Prefer the top-level `badminton-infra` directory. Treat `badminton-infra/badminton-infra` as a legacy split-repo copy unless the task explicitly targets that layout.
+
 ## Important Files
 
 - `docker-compose.app.yml`: active monorepo Docker app stack for Postgres, Redis, backend, and frontend.
@@ -20,6 +32,7 @@
 - `badminton-app.service`: Pi boot service that starts the app stack plus Cloudflare tunnel.
 - `docker-compose.yml`: older split-repository layout; build contexts do not match this monorepo checkout.
 - `nginx/nginx.conf`: reverse proxy and API rate limit config.
+- `../whatsapp-bot`: Compose-managed helper service used by backend notification features.
 - `infra/k8s/namespace.yaml`: Kubernetes namespace.
 - `infra/k8s/postgres-secret.yaml`: Postgres password secret.
 - `infra/k8s/postgres-deployment.yaml`: in-cluster Postgres deployment.
@@ -55,6 +68,7 @@ Compose services:
 - `postgres`: database `badminton`, user `badminton_user`, password `strongpassword`.
 - `redis`: cache/support service.
 - `badminton-backend`: Flask API at container port `8000`, host port `8000`.
+- `whatsapp-bot`: helper service for outbound WhatsApp automation at host port `3000`.
 - `badminton-frontend`: Vue/Nginx frontend at container port `80`, host port `8080`.
 - `cloudflared`: Cloudflare Tunnel connector; token is read from local ignored `.env`.
 
@@ -159,6 +173,8 @@ Disable `AUTH_MOCK` and use strong secrets outside development.
 - `/` is proxied to `http://frontend:80`.
 - API requests are rate limited with `limit_req_zone` at `10r/s` and burst `20`.
 
+Any change to service names or ports needs a coordinated update across Compose, Nginx, and any frontend or backend assumptions about reachable hosts.
+
 ## Kubernetes Fast Start
 
 From `badminton-infra/infra`:
@@ -191,3 +207,4 @@ Ingress host:
 - The backend Kubernetes `DATABASE_URL` points to service host `postgres` in namespace `nieuwegein-badminton`.
 - The ingress routes only `/` to the frontend service. Make sure frontend production Nginx or cluster routing also sends `/api` to the backend if API calls need to work through the public host.
 - Before changing ports or service names, update Docker Compose, Nginx config, Kubernetes service names, and the frontend API proxy assumptions together.
+- Prefer `docker-compose.app.yml` for this monorepo checkout. The older `docker-compose.yml` expects different build contexts and is easy to break accidentally.

@@ -1,120 +1,135 @@
-# Backend Agent Boot Notes
+# Backend Agent Notes
 
 ## Stack
 
-- Python Flask application factory in `app/__init__.py`
-- Flask-SQLAlchemy models
-- Alembic migrations
+- Flask application factory in `app/__init__.py`
+- SQLAlchemy models in `app/models.py`
+- Main API blueprints in `app/auth.py`, `app/bookings.py`, and `app/docs.py`
 - JWT auth with `PyJWT`
-- OTP hashing with `passlib`
-- Optional Redis-backed OTP storage
-- Optional Twilio WhatsApp delivery
-- Flask-Limiter for rate limiting
-- Flask-Talisman enabled outside testing/development
-- Gunicorn production entrypoint through `wsgi.py`
-- Pytest test suite
+- Password hashing and OTP hashing with `passlib`
+- Redis-backed OTP storage when `REDIS_URL` is present, in-memory fallback otherwise
+- Twilio fallback helper in `app/utils.py`
 
-## Fast Start
+## Active Paths
+
+- `app/__init__.py`: app bootstrap, config, schema patching, seed users
+- `app/models.py`: ORM models and booking cost split helpers
+- `app/auth.py`: register, login, OTP, `/me`
+- `app/bookings.py`: most domain logic and admin APIs
+- `app/docs.py`: dynamic OpenAPI spec and Swagger UI
+- `tests/`: pytest coverage for auth, bookings, and play availability
+
+## How The Backend Works
+
+### Startup model
+
+`create_app()` configures Flask, SQLAlchemy, rate limiting, optional Talisman, Redis, and JWT settings, then registers the blueprints.
+
+On startup it also:
+
+- runs `db.create_all()`
+- inspects existing tables
+- applies many `ALTER TABLE` statements opportunistically for missing columns
+- seeds demo admin/member users in development or mock-auth mode
+- always upserts the `Anand Parasuraman` super-admin user
+
+This means schema changes are partly model-driven and partly startup-patched. If you add a column that must work against existing databases, update both the SQLAlchemy model and the startup bootstrap logic in `app/__init__.py`.
+
+### Auth flow
+
+Two auth paths exist:
+
+- OTP-based auth in `app/auth.py` via `/api/auth/send-otp` and `/api/auth/verify`
+- email/password auth via `/api/auth/register` and `/api/auth/login`
+
+`/api/auth/me` resolves the bearer token back to a `User`.
+
+Important development behavior:
+
+- `AUTH_MOCK=1` only exposes `mock_otp` when `FLASK_ENV=development`
+- seed credentials default to `admin/admin123` and `user/user123`
+
+### Domain model
+
+Core models in `app/models.py`:
+
+- `User`
+- `FamilyMember`
+- `Court`
+- `Booking`
+- `BookingParticipant`
+- `PlayAvailabilityVote`
+- `Invoice`
+- payment-related models such as `PaymentSettings` and payment invoice records
+- audit and notification models such as `AdminAuditLog`
+
+Booking cost sharing is computed from participant statuses. Only `attending` and `participated` count toward cost split.
+
+### Main API surface
+
+`app/bookings.py` is the main domain module. It owns:
+
+- play availability
+- family member CRUD
+- booking CRUD
+- participant RSVP and admin attendance management
+- court management
+- freeze periods
+- misc shared costs
+- monthly invoice summaries
+- admin users and audit logs
+- WhatsApp notification settings and test sends
+- Wise payment settings, invoice generation, and webhook handling
+
+Expect most business changes to land in `app/bookings.py` plus `app/models.py`.
+
+### API docs
+
+`app/docs.py` walks Flask `url_map` at runtime and builds the OpenAPI document dynamically. If you add or rename an endpoint, keep `ENDPOINT_DOCS` aligned so `/api/docs` remains readable.
+
+## External Integrations
+
+### WhatsApp
+
+Two patterns exist:
+
+- direct Twilio send helper in `app/utils.py`
+- bot-driven notification flow in `app/bookings.py` using `WHATSAPP_BOT_URL` and `WHATSAPP_BOT_TOKEN`
+
+Check which path the touched feature uses before changing notification behavior.
+
+### Wise payments
+
+Wise integration lives in the lower half of `app/bookings.py`. It handles:
+
+- payment settings persistence
+- payment request creation
+- webhook subscription creation
+- incoming transfer webhook processing
+- payment invoice status updates
+
+If payment behavior changes, review both the admin endpoints and the webhook handler.
+
+## Test And Run
+
+Run tests:
 
 ```bash
 cd badminton-backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export DATABASE_URL="sqlite:///db.sqlite"
-export SECRET_KEY="dev-secret"
-export JWT_SECRET="dev-jwt-secret"
-export FLASK_ENV=development
-export AUTH_MOCK=1
-flask --app app:create_app run --port=8000
+pytest
 ```
 
-The app serves API routes on `http://localhost:8000/api`.
+Test setup in `tests/conftest.py` uses:
 
-## Useful Commands
+- `AUTH_MOCK=1`
+- `FLASK_ENV=development`
+- `DATABASE_URL=sqlite:///:memory:`
 
-```bash
-pytest -q
-pytest --cov=app
-gunicorn wsgi:app -w 2 -b 0.0.0.0:8000
-alembic -c alembic.ini upgrade head
-alembic -c alembic.ini revision --autogenerate -m "describe change"
-```
+For local manual runs, use the environment block documented in the repo `README.md`.
 
-## Environment Variables
+## Working Rules
 
-- `DATABASE_URL`: SQLAlchemy database URL. Local quick start can use `sqlite:///db.sqlite`; production should use Postgres.
-- `SECRET_KEY`: Flask secret key.
-- `JWT_SECRET`: JWT signing secret. Falls back to `SECRET_KEY` when unset.
-- `JWT_EXP_SECONDS`: token lifetime in seconds, default `3600`.
-- `REDIS_URL`: optional Redis URL for OTP storage, for example `redis://localhost:6379/0`.
-- `AUTH_MOCK`: set to `1`, `true`, or `yes` only in development to return OTPs in API responses.
-- `FLASK_ENV`: set to `development` locally. Talisman is skipped in development/testing.
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `WHATSAPP_FROM`: optional production WhatsApp OTP delivery settings.
-
-## Important Files
-
-- `app/__init__.py`: app factory, extensions, blueprints, default seed data, health route.
-- `app/models.py`: `User`, `FamilyMember`, `PlayAvailabilityVote`, `Court`, `Booking`, `BookingParticipant`, `Invoice`.
-- `app/auth.py`: OTP auth, demo username/password login, JWT issuance, current-user endpoint.
-- `app/bookings.py`: booking, court admin, invoice, family member, and play availability endpoints.
-- `app/utils.py`: WhatsApp/Twilio helper.
-- `wsgi.py`: Gunicorn entrypoint.
-- `requirements.txt`: Python dependencies.
-- `alembic.ini`, `alembic/`: database migrations.
-- `tests/`: pytest coverage for auth, bookings, and play availability.
-
-## API Overview
-
-Health:
-
-- `GET /api/health`
-
-Auth:
-
-- `POST /api/auth/send-otp`
-- `POST /api/auth/verify`
-- `POST /api/auth/login`
-- `GET /api/auth/me`
-
-Bookings and courts:
-
-- `GET /api/bookings/availability?date=YYYY-MM-DD`
-- `GET /api/bookings`
-- `POST /api/bookings` admin only
-- `PUT /api/bookings/:id` admin only
-- `POST /api/bookings/:id/invoice` admin only
-- `GET /api/admin/courts` admin only
-- `POST /api/admin/courts` admin only
-
-Member availability:
-
-- `GET /api/family-members`
-- `POST /api/family-members`
-- `GET /api/play-availability`
-- `POST /api/play-availability`
-
-Admin users:
-
-- `GET /api/admin/users` admin only
-- `POST /api/admin/users` admin only
-
-## Demo Accounts
-
-The app seeds these users if missing:
-
-- Admin: `admin` / `admin123`, phone `+10000000000`
-
-## Database Notes
-
-- `create_app()` currently calls `db.create_all()` and seeds default court/user records on startup.
-- Alembic migrations exist and should be used for schema changes that need repeatable deployment.
-- Dates and times in booking models are stored as strings (`YYYY-MM-DD`, `HH:MM`), so preserve that format in API clients and tests.
-
-## Working Notes
-
-- Admin-only endpoints require a bearer JWT for a user with `role == "admin"`.
-- Development OTP mock mode only works when `AUTH_MOCK=1` and `FLASK_ENV=development`.
-- Redis is optional; without `REDIS_URL`, OTPs are kept in process memory.
-- When changing models, update `models.py`, add or adjust Alembic migrations, and run `pytest -q`.
-- Tests use SQLite-friendly setup from `tests/conftest.py`; avoid adding production-only database assumptions without test coverage.
+- Keep changes narrow in `app/bookings.py`; it is large and cross-cutting.
+- Prefer updating existing helpers over introducing parallel logic.
+- When changing a response payload, search the frontend for the same endpoint and update the consumer.
+- When changing model fields, check tests and seed/bootstrap code together.

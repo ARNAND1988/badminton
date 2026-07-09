@@ -673,6 +673,7 @@
           <label><span class="form-label">Account holder name</span><input v-model="paymentSettings.account_holder_name" class="form-input" /></label><label><span class="form-label">Business bank name</span><input v-model="paymentSettings.bank_name" class="form-input" /></label><label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input" /></label><label><span class="form-label">BIC optional</span><input v-model="paymentSettings.bic" class="form-input" /></label><label><span class="form-label">Payment description prefix</span><input v-model="paymentSettings.description_prefix" class="form-input" /></label><label><span class="form-label">Default due days</span><input v-model.number="paymentSettings.default_due_days" type="number" min="1" class="form-input" /></label></div>
         <label class="flex gap-2"><input v-model="paymentSettings.test_mode" type="checkbox" /> Test mode</label>
         <p class="text-sm text-slate-600">Wise incoming-transfer webhooks reconcile received transfers by matching the invoice reference.</p>
+<<<<<<< HEAD
         <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
           <p v-if="paymentSettings.wise_webhook_subscription_id" class="font-semibold text-emerald-700">Webhook subscription active: {{ paymentSettings.wise_webhook_subscription_id }}</p>
           <p v-else class="font-semibold text-amber-700">No Wise webhook subscription ID is saved yet.</p>
@@ -680,6 +681,10 @@
           <p v-if="paymentWebhookStatus?.latest_event" class="mt-1 text-slate-600">Latest webhook: {{ paymentWebhookStatus.latest_event.status }} · {{ paymentWebhookStatus.latest_event.reference || paymentWebhookStatus.latest_event.incoming_transfer_id || 'no reference' }} · {{ formatDateTime(paymentWebhookStatus.latest_event.created_at) }}</p>
         </div>
         <div class="flex flex-wrap gap-2"><button class="btn-dark" :disabled="paymentSettingsSaving" @click="savePaymentSettings">{{ paymentSettingsSaving ? 'Saving...' : 'Save settings' }}</button><button v-if="!paymentSettings.wise_webhook_subscription_id" class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentWebhookSubscribing || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="createWiseWebhookSubscription">{{ paymentWebhookSubscribing ? 'Subscribing...' : 'Create Wise webhook subscription' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentTestGenerating || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="generateTestInvoice">{{ paymentTestGenerating ? 'Generating...' : 'Generate New Test Invoice' }}</button><button class="btn-muted" :disabled="paymentWebhookStatusLoading" @click="loadWiseWebhookStatus">{{ paymentWebhookStatusLoading ? 'Checking...' : 'Check webhook connection' }}</button></div>
+=======
+        <p v-if="paymentSettings.wise_webhook_subscription_id" class="text-sm text-emerald-700">Webhook subscription: {{ paymentSettings.wise_webhook_subscription_id }}</p>
+        <div class="flex flex-wrap gap-2"><button class="btn-dark" :disabled="paymentSettingsSaving" @click="savePaymentSettings">{{ paymentSettingsSaving ? 'Saving...' : 'Save settings' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentWebhookSubscribing || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="createWiseWebhookSubscription">{{ paymentWebhookSubscribing ? 'Subscribing...' : 'Create Wise webhook subscription' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentTestGenerating || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="generateTestInvoice">{{ paymentTestGenerating ? 'Generating...' : 'Generate €1 Test Invoice' }}</button></div>
+>>>>>>> 7aea508 (did not read the ticket description yet :-))
         <p v-if="!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token" class="text-sm text-amber-700">Enter a real Wise API token before generating a test invoice with a payment link.</p>
         <div v-if="selectedPaymentInvoice?.is_test_invoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
           <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1121,6 +1126,229 @@
       </div>
     </section>
 
+    <section v-if="activeView === 'system-checks'" class="space-y-6">
+      <div class="rounded-3xl border border-sky-100 bg-gradient-to-br from-sky-50 via-white to-emerald-50 p-4 shadow-sm sm:p-6">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p class="text-xs font-bold uppercase tracking-[0.24em] text-sky-700">Admin diagnostics</p>
+            <h2 class="mt-1 text-2xl font-black text-slate-950">Third-party connection checks</h2>
+            <p class="mt-2 max-w-3xl text-sm text-slate-600">Check backend reachability, WhatsApp bot health, Wise profile access, and Wise webhook subscription status. You can also send a direct WhatsApp test and inspect recent Wise webhook events here.</p>
+          </div>
+          <button class="btn-dark w-full sm:w-auto" :disabled="systemCheckRefreshing" @click="loadSystemChecks()">
+            {{ systemCheckRefreshing ? 'Refreshing...' : 'Refresh checks' }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="!isAdmin" class="alert-warning">
+        Admin access is required to use diagnostics.
+      </div>
+
+      <div v-else class="space-y-6">
+        <div class="grid gap-4 xl:grid-cols-4">
+          <article class="panel-card space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="font-semibold text-slate-900">Backend API</h3>
+              <span class="rounded-full px-3 py-1 text-xs font-bold" :class="connectionStatusClass(systemChecks?.backend?.status)">
+                {{ connectionStatusLabel(systemChecks?.backend?.status) }}
+              </span>
+            </div>
+            <p class="text-sm text-slate-600">{{ systemChecks?.backend?.message || 'Waiting for diagnostics data.' }}</p>
+          </article>
+
+          <article class="panel-card space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="font-semibold text-slate-900">WhatsApp bot</h3>
+              <span class="rounded-full px-3 py-1 text-xs font-bold" :class="connectionStatusClass(systemChecks?.whatsapp?.status)">
+                {{ connectionStatusLabel(systemChecks?.whatsapp?.status) }}
+              </span>
+            </div>
+            <p class="text-sm text-slate-600">{{ systemChecks?.whatsapp?.message || 'Waiting for diagnostics data.' }}</p>
+            <div class="grid gap-2 text-xs text-slate-500">
+              <div><strong class="text-slate-700">Bot URL:</strong> {{ systemChecks?.whatsapp?.bot_url || 'Not configured' }}</div>
+              <div><strong class="text-slate-700">Token:</strong> {{ systemChecks?.whatsapp?.token_configured ? 'Configured' : 'Missing' }}</div>
+              <div><strong class="text-slate-700">Ready:</strong> {{ systemChecks?.whatsapp?.ready ? 'Yes' : 'No' }}</div>
+            </div>
+          </article>
+
+          <article class="panel-card space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="font-semibold text-slate-900">Wise profile</h3>
+              <span class="rounded-full px-3 py-1 text-xs font-bold" :class="connectionStatusClass(systemChecks?.wise?.profile_check?.status)">
+                {{ connectionStatusLabel(systemChecks?.wise?.profile_check?.status) }}
+              </span>
+            </div>
+            <p class="text-sm text-slate-600">{{ systemChecks?.wise?.profile_check?.message || 'Waiting for diagnostics data.' }}</p>
+            <div class="grid gap-2 text-xs text-slate-500">
+              <div><strong class="text-slate-700">Profile ID:</strong> {{ systemChecks?.wise?.profile_check?.resolved_profile_id || systemChecks?.wise?.settings?.wise_profile_id || 'Not resolved' }}</div>
+              <div><strong class="text-slate-700">API token:</strong> {{ systemChecks?.wise?.settings?.wise_api_token_configured ? 'Configured' : 'Missing' }}</div>
+              <div><strong class="text-slate-700">API base URL:</strong> {{ systemChecks?.wise?.settings?.wise_api_base_url || 'https://api.wise.com' }}</div>
+            </div>
+          </article>
+
+          <article class="panel-card space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="font-semibold text-slate-900">Wise webhook</h3>
+              <span class="rounded-full px-3 py-1 text-xs font-bold" :class="connectionStatusClass(systemChecks?.wise?.subscription_check?.status)">
+                {{ connectionStatusLabel(systemChecks?.wise?.subscription_check?.status) }}
+              </span>
+            </div>
+            <p class="text-sm text-slate-600">{{ systemChecks?.wise?.subscription_check?.message || 'Waiting for diagnostics data.' }}</p>
+            <div class="grid gap-2 text-xs text-slate-500">
+              <div><strong class="text-slate-700">Subscription ID:</strong> {{ systemChecks?.wise?.settings?.wise_webhook_subscription_id || 'Not configured' }}</div>
+              <div><strong class="text-slate-700">Webhook URL:</strong> {{ systemChecks?.wise?.settings?.wise_webhook_url || 'Not configured' }}</div>
+              <div><strong class="text-slate-700">Client key:</strong> {{ systemChecks?.wise?.settings?.wise_client_key_configured ? 'Configured' : 'Missing' }}</div>
+            </div>
+          </article>
+        </div>
+
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+          <section class="panel-card space-y-4">
+            <div>
+              <h3 class="font-semibold text-slate-900">WhatsApp connection test</h3>
+              <p class="mt-1 text-sm text-slate-600">Send a direct test message through the bot and confirm the current delivery status without changing notification templates.</p>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <label class="block">
+                <span class="form-label">Test recipient</span>
+                <input v-model="systemCheckWhatsAppRecipient" class="form-input" placeholder="+31612345678 or 31612345678@c.us" />
+              </label>
+              <button class="btn-dark" :disabled="systemCheckWhatsAppTesting" @click="runWhatsAppConnectionTest">
+                {{ systemCheckWhatsAppTesting ? 'Sending...' : 'Send connection test' }}
+              </button>
+            </div>
+            <div class="grid gap-3 md:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                <div class="font-semibold text-slate-900">Saved default recipient</div>
+                <div class="mt-1">{{ systemChecks?.whatsapp?.default_test_recipient || 'No saved WhatsApp test number yet.' }}</div>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                <div class="font-semibold text-slate-900">Last direct test</div>
+                <div class="mt-1" v-if="systemChecks?.whatsapp?.last_test_log">
+                  {{ systemChecks.whatsapp.last_test_log.recipient || 'No recipient' }} ·
+                  <span class="font-semibold" :class="connectionStatusTextClass(systemChecks.whatsapp.last_test_log.status)">
+                    {{ connectionStatusLabel(systemChecks.whatsapp.last_test_log.status) }}
+                  </span>
+                </div>
+                <div class="mt-1" v-else>No direct connection test sent yet.</div>
+              </div>
+            </div>
+          </section>
+
+          <aside class="panel-card space-y-4">
+            <div>
+              <h3 class="font-semibold text-slate-900">Recent WhatsApp logs</h3>
+              <p class="mt-1 text-sm text-slate-600">Latest sends, including direct connection tests.</p>
+            </div>
+            <div class="space-y-3">
+              <div v-for="log in systemChecks?.whatsapp?.recent_logs || []" :key="log.id" class="rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-semibold text-slate-800">{{ log.event_key }}</span>
+                  <span class="rounded-full px-2 py-0.5 text-xs font-bold" :class="connectionStatusClass(log.status)">{{ connectionStatusLabel(log.status) }}</span>
+                </div>
+                <p class="mt-1 text-xs text-slate-500">{{ log.recipient || 'No recipient' }} · {{ dateTimeLabel(log.created_at) }}</p>
+                <p class="mt-2 line-clamp-3 whitespace-pre-line text-xs text-slate-600">{{ log.message }}</p>
+              </div>
+              <p v-if="!(systemChecks?.whatsapp?.recent_logs || []).length" class="text-sm text-slate-500">No WhatsApp logs yet.</p>
+            </div>
+          </aside>
+        </div>
+
+        <section class="panel-card space-y-4">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h3 class="font-semibold text-slate-900">Wise payment lookup</h3>
+              <p class="mt-1 text-sm text-slate-600">Search by invoice number or payment reference to find the invoice and the most relevant webhook events.</p>
+            </div>
+            <div class="grid gap-2 sm:grid-cols-[minmax(14rem,20rem)_auto_auto] sm:items-end">
+              <label class="block">
+                <span class="form-label">Invoice or reference</span>
+                <input v-model="systemCheckQuery" class="form-input" placeholder="INV-2026-00039" @keyup.enter="loadSystemChecks()" />
+              </label>
+              <button class="btn-secondary" :disabled="systemCheckRefreshing" @click="loadSystemChecks()">Check reference</button>
+              <button class="btn-muted" :disabled="systemCheckRefreshing" @click="clearSystemCheckLookup">Clear</button>
+            </div>
+          </div>
+
+          <div v-if="systemCheckQuery && systemChecks?.payment_lookup" class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <h4 class="font-semibold text-slate-900">Matched invoice</h4>
+                <span class="rounded-full px-3 py-1 text-xs font-bold" :class="systemChecks.payment_lookup.invoice ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">
+                  {{ systemChecks.payment_lookup.invoice ? 'Found' : 'No match' }}
+                </span>
+              </div>
+              <div v-if="systemChecks.payment_lookup.invoice" class="mt-3 space-y-2 text-sm text-slate-700">
+                <div><strong>Invoice:</strong> {{ systemChecks.payment_lookup.invoice.invoice_number }}</div>
+                <div><strong>Reference:</strong> {{ systemChecks.payment_lookup.invoice.payment_reference }}</div>
+                <div><strong>Status:</strong> {{ paymentStatusLabel(systemChecks.payment_lookup.invoice.payment_status) }}</div>
+                <div><strong>Amount due:</strong> €{{ systemChecks.payment_lookup.invoice.amount_due }}</div>
+                <div><strong>Paid amount:</strong> €{{ systemChecks.payment_lookup.invoice.paid_amount || 0 }}</div>
+                <div><strong>Match reason:</strong> {{ connectionStatusLabel(systemChecks.payment_lookup.match_reason) }}</div>
+              </div>
+              <p v-else class="mt-3 text-sm text-slate-600">No invoice matched this query.</p>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white p-4">
+              <h4 class="font-semibold text-slate-900">Related Wise events</h4>
+              <div class="mt-3 space-y-3">
+                <div v-for="event in systemChecks.payment_lookup.related_events || []" :key="event.id" class="rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">
+                  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div class="font-semibold text-slate-900">{{ event.incoming_transfer_id || `Event #${event.id}` }}</div>
+                      <div class="text-xs text-slate-500">{{ event.reference || 'No reference' }} · {{ dateTimeLabel(event.created_at) }}</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span class="rounded-full px-2 py-0.5 text-xs font-bold" :class="connectionStatusClass((event.status || '').toLowerCase())">{{ connectionStatusLabel((event.status || '').toLowerCase()) }}</span>
+                      <button class="btn-secondary" :disabled="retryingWiseEventId === event.id || !event.incoming_transfer_id" @click="retryWiseWebhookEvent(event)">
+                        {{ retryingWiseEventId === event.id ? 'Retrying...' : 'Retry' }}
+                      </button>
+                    </div>
+                  </div>
+                  <p v-if="event.error_message" class="mt-2 text-xs text-rose-700">{{ event.error_message }}</p>
+                </div>
+                <p v-if="!(systemChecks.payment_lookup.related_events || []).length" class="text-sm text-slate-500">No related Wise events found for this query.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-card space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="font-semibold text-slate-900">Recent Wise webhook events</h3>
+              <p class="mt-1 text-sm text-slate-600">Inspect recent incoming-transfer events and retry reconciliation if the reference match failed.</p>
+            </div>
+            <p class="text-xs text-slate-500">Checked {{ dateTimeLabel(systemChecks?.checked_at) }}</p>
+          </div>
+          <div class="space-y-3">
+            <div v-for="event in systemChecks?.wise?.recent_events || []" :key="event.id" class="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm">
+              <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-semibold text-slate-900">{{ event.incoming_transfer_id || `Event #${event.id}` }}</span>
+                    <span class="rounded-full px-2 py-0.5 text-xs font-bold" :class="connectionStatusClass((event.status || '').toLowerCase())">{{ connectionStatusLabel((event.status || '').toLowerCase()) }}</span>
+                  </div>
+                  <p class="mt-1 text-xs text-slate-500">{{ event.event_type || 'Unknown type' }} · {{ dateTimeLabel(event.created_at) }}</p>
+                  <div class="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
+                    <div><strong>Reference:</strong> {{ event.reference || 'No reference' }}</div>
+                    <div><strong>Amount:</strong> {{ event.currency || 'EUR' }} {{ event.amount || 0 }}</div>
+                    <div><strong>Sender:</strong> {{ event.sender_name || 'Unknown sender' }}</div>
+                    <div><strong>Invoice ID:</strong> {{ event.invoice_id || 'Not matched' }}</div>
+                  </div>
+                  <p v-if="event.error_message" class="mt-2 text-xs text-rose-700">{{ event.error_message }}</p>
+                </div>
+                <button class="btn-secondary self-start" :disabled="retryingWiseEventId === event.id || !event.incoming_transfer_id" @click="retryWiseWebhookEvent(event)">
+                  {{ retryingWiseEventId === event.id ? 'Retrying...' : 'Retry match' }}
+                </button>
+              </div>
+            </div>
+            <p v-if="!(systemChecks?.wise?.recent_events || []).length" class="text-sm text-slate-500">No Wise webhook events recorded yet.</p>
+          </div>
+        </section>
+      </div>
+    </section>
+
     <section v-if="activeView === 'notifications'" class="space-y-6">
       <div class="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-sky-50 p-4 shadow-sm sm:p-6">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1281,6 +1509,9 @@ export default {
     const monthlyInvoiceMonth = ref(localIsoMonth())
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
+    const systemChecks = ref(null)
+    const systemCheckQuery = ref('')
+    const systemCheckWhatsAppRecipient = ref('')
     const adminAuditLogs = ref([])
     const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
     const archivedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
@@ -1293,7 +1524,13 @@ export default {
     const paymentTestGenerating = ref(false)
     const paymentTestRefreshing = ref(false)
     const paymentWebhookSubscribing = ref(false)
+<<<<<<< HEAD
     const paymentWebhookStatusLoading = ref(false)
+=======
+    const systemCheckRefreshing = ref(false)
+    const systemCheckWhatsAppTesting = ref(false)
+    const retryingWiseEventId = ref(null)
+>>>>>>> 7aea508 (did not read the ticket description yet :-))
     const errorMsg = ref('')
     const editingBookingId = ref(null)
     const bookingDate = ref(localIsoDate())
@@ -1758,6 +1995,9 @@ export default {
       adminUsers.value = []
       courts.value = []
       freezePeriods.value = []
+      systemChecks.value = null
+      systemCheckQuery.value = ''
+      systemCheckWhatsAppRecipient.value = ''
       isAdmin.value = false
       newParticipantName.value = {}
       newParticipantPhone.value = {}
@@ -1978,7 +2218,7 @@ export default {
         msg.value = 'Preparing Wise test invoice...'
         await persistPaymentSettingsForTest()
         selectedPaymentInvoice.value = await fetchJson('/api/admin/payment-invoices/test', { method: 'POST', body: JSON.stringify({}) })
-        msg.value = 'Test invoice generated.'
+        msg.value = '€1 test invoice generated.'
         errorMsg.value = ''
         if (isAdmin.value) await loadPaymentInvoices()
         await loadWiseWebhookStatus()
@@ -2025,6 +2265,107 @@ export default {
     function dateTimeLabel(value) {
       if (!value) return ''
       return new Date(value).toLocaleString()
+    }
+
+    function connectionStatusLabel(status) {
+      return ({
+        ok: 'OK',
+        warning: 'Warning',
+        error: 'Error',
+        not_configured: 'Not configured',
+        matched: 'Matched',
+        unmatched: 'Unmatched',
+        received: 'Received',
+        sent: 'Sent',
+        failed: 'Failed',
+        skipped: 'Skipped',
+        full_reference: 'Full reference',
+        suffix_reference: 'Suffix reference',
+        contains_reference: 'Contains reference',
+      })[status] || statusLabel(status, 'Unknown')
+    }
+
+    function connectionStatusClass(status) {
+      return ({
+        ok: 'bg-emerald-100 text-emerald-700',
+        matched: 'bg-emerald-100 text-emerald-700',
+        sent: 'bg-emerald-100 text-emerald-700',
+        warning: 'bg-amber-100 text-amber-700',
+        unmatched: 'bg-amber-100 text-amber-700',
+        not_configured: 'bg-slate-200 text-slate-700',
+        received: 'bg-sky-100 text-sky-700',
+        error: 'bg-rose-100 text-rose-700',
+        failed: 'bg-rose-100 text-rose-700',
+        skipped: 'bg-slate-200 text-slate-700',
+      })[status] || 'bg-slate-200 text-slate-700'
+    }
+
+    function connectionStatusTextClass(status) {
+      return ({
+        ok: 'text-emerald-700',
+        matched: 'text-emerald-700',
+        sent: 'text-emerald-700',
+        warning: 'text-amber-700',
+        unmatched: 'text-amber-700',
+        not_configured: 'text-slate-700',
+        received: 'text-sky-700',
+        error: 'text-rose-700',
+        failed: 'text-rose-700',
+        skipped: 'text-slate-700',
+      })[status] || 'text-slate-700'
+    }
+
+    async function loadSystemChecks(query = systemCheckQuery.value.trim()) {
+      systemCheckRefreshing.value = true
+      try {
+        const params = new URLSearchParams()
+        const trimmedQuery = (query || '').trim()
+        if (trimmedQuery) params.set('query', trimmedQuery)
+        const suffix = params.toString() ? `?${params.toString()}` : ''
+        systemChecks.value = await fetchJson(`/api/admin/system-checks${suffix}`)
+        systemCheckQuery.value = trimmedQuery
+        if (!systemCheckWhatsAppRecipient.value && systemChecks.value?.whatsapp?.default_test_recipient) {
+          systemCheckWhatsAppRecipient.value = systemChecks.value.whatsapp.default_test_recipient
+        }
+      } finally {
+        systemCheckRefreshing.value = false
+      }
+    }
+
+    async function runWhatsAppConnectionTest() {
+      systemCheckWhatsAppTesting.value = true
+      try {
+        const payload = await fetchJson('/api/admin/system-checks/whatsapp-test', {
+          method: 'POST',
+          body: JSON.stringify({ recipient: (systemCheckWhatsAppRecipient.value || '').trim() })
+        })
+        msg.value = `${payload.message} (${payload.recipient})`
+        errorMsg.value = ''
+        await loadSystemChecks(systemCheckQuery.value)
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        systemCheckWhatsAppTesting.value = false
+      }
+    }
+
+    async function retryWiseWebhookEvent(event) {
+      retryingWiseEventId.value = event.id
+      try {
+        const payload = await fetchJson(`/api/admin/wise-webhook-events/${event.id}/retry`, { method: 'POST' })
+        msg.value = `Wise webhook retry result: ${connectionStatusLabel(payload.status)}.`
+        errorMsg.value = ''
+        await loadSystemChecks(systemCheckQuery.value)
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        retryingWiseEventId.value = null
+      }
+    }
+
+    async function clearSystemCheckLookup() {
+      systemCheckQuery.value = ''
+      await loadSystemChecks('')
     }
 
     async function loadWhatsAppNotifications() {
@@ -2162,6 +2503,16 @@ export default {
             return
           }
           await loadAdminAuditLogs()
+        } else if (activeView.value === 'system-checks') {
+          if (!loggedIn) {
+            router.push('/login')
+            return
+          }
+          if (!isAdmin.value) {
+            errorMsg.value = 'Admin access is required.'
+            return
+          }
+          await loadSystemChecks()
         } else if (activeView.value === 'notifications') {
           if (!loggedIn) {
             router.push('/login')
@@ -2838,6 +3189,9 @@ export default {
       monthlyInvoiceMonth,
       whatsappSettings,
       whatsappLogs,
+      systemChecks,
+      systemCheckQuery,
+      systemCheckWhatsAppRecipient,
       isLoggedIn,
       isAdmin,
       isSuperAdmin,
@@ -2845,7 +3199,13 @@ export default {
       paymentTestGenerating,
       paymentTestRefreshing,
       paymentWebhookSubscribing,
+<<<<<<< HEAD
       paymentWebhookStatusLoading,
+=======
+      systemCheckRefreshing,
+      systemCheckWhatsAppTesting,
+      retryingWiseEventId,
+>>>>>>> 7aea508 (did not read the ticket description yet :-))
       paymentSettings,
       paymentWebhookStatus,
       wiseWebhookHealthText,
@@ -2932,6 +3292,7 @@ export default {
       loadAdminMonthlyInvoices,
       loadPlayAvailability,
       loadFreezePeriods,
+      loadSystemChecks,
       loadWhatsAppNotifications,
       loadPaymentSettings,
       savePaymentSettings,
@@ -2944,12 +3305,16 @@ export default {
       setMonthlyInvoiceStatus,
       generateTestInvoice,
       notifyMonthlyInvoicesReady,
+      clearSystemCheckLookup,
       copyText,
       paymentStatusLabel,
       monthStatusLabel,
       monthStatusClass,
       monthName,
       dateTimeLabel,
+      connectionStatusLabel,
+      connectionStatusClass,
+      connectionStatusTextClass,
       familyPersonBookingStatus,
       availabilityPersonStatus,
       normalizeVote,
@@ -2963,8 +3328,10 @@ export default {
       saveBookingRsvp,
       saveFamilyPersonAttendance,
       saveWhatsAppNotification,
+      runWhatsAppConnectionTest,
       sendAvailabilitySummary,
       testWhatsAppNotification,
+      retryWiseWebhookEvent,
       setAvailabilityPersonStatus,
       startEditBooking,
       showVerificationDetails,

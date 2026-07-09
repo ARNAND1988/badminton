@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta, timezone
 
 from app import db
-from app.models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting
+from app.models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PaymentInvoice, PaymentSettings, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting, WiseWebhookEvent
 
 
 def test_booking_availability_and_invoice(client, app):
@@ -1156,6 +1156,8 @@ def test_openapi_and_swagger_docs_are_available(client):
     assert spec['openapi'] == '3.0.3'
     assert '/api/bookings' in spec['paths']
     assert '/api/admin/whatsapp-notifications' in spec['paths']
+    assert '/api/admin/system-checks' in spec['paths']
+    assert '/api/admin/system-checks/whatsapp-test' in spec['paths']
 
     swagger_resp = client.get('/api/swagger.json')
     assert swagger_resp.status_code == 200
@@ -1478,6 +1480,135 @@ def test_api_responses_disable_cache_for_session_safety(client):
     assert resp.headers['Pragma'] == 'no-cache'
 
 
+def test_super_admin_generates_one_euro_test_payment_invoice_by_default(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    payment_requests = []
+
+    def fake_create_payment_request(settings, invoice):
+        payment_requests.append({'amount': invoice.amount_due, 'reference': invoice.payment_reference})
+        invoice.wise_payment_request_id = 'test-payment-request'
+        return 'https://wise.example/pay/test'
+
+    monkeypatch.setattr(bookings_module, '_wise_create_payment_request', fake_create_payment_request)
+
+    with app.app_context():
+        admin = User(phone='+31100009992', email='payment-admin@example.com', name='Payment Admin', role='super_admin')
+        settings = PaymentSettings(wise_api_token='token', wise_profile_id='profile-1', test_mode=True)
+        db.session.add_all([admin, settings])
+        db.session.commit()
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    resp = client.post('/api/admin/payment-invoices/test', json={'amount': 17.50}, headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 201
+    payload = resp.get_json()
+    assert payload['is_test_invoice'] is True
+    assert payload['amount_due'] == 1.0
+    assert payment_requests == [{'amount': 1.0, 'reference': payload['payment_reference']}]
+
+    with app.app_context():
+        invoice = PaymentInvoice.query.filter_by(is_test_invoice=True).one()
+        assert invoice.amount_due == 1.0
+
+
+def test_wise_transfer_state_webhook_matches_invoice_reference_after_error_retry(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    class FakeResponse:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.text = ''
+            self.content = b'{}'
+
+        def json(self):
+            return self._payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise AssertionError(f'unexpected status {self.status_code}')
+
+    calls = []
+
+    def fake_get(url, headers=None, timeout=None):
+        calls.append(url)
+        if url.endswith('/v1/transfers/2238838788'):
+            return FakeResponse(200, {
+                'id': 2238838788,
+                'business': 84642112,
+                'targetAccount': 1358290420,
+                'status': 'outgoing_payment_sent',
+                'reference': 'INV-2026-00039',
+                'details': {'reference': 'INV-2026-00039'},
+                'sourceCurrency': 'EUR',
+                'sourceValue': 1.0,
+                'targetCurrency': 'EUR',
+                'targetValue': 1.0,
+            })
+        return FakeResponse(404)
+
+    monkeypatch.setattr(bookings_module.requests, 'get', fake_get)
+
+    payload = {
+        'data': {
+            'resource': {
+                'id': 2238838788,
+                'profile_id': 84642112,
+                'account_id': 1358290420,
+                'type': 'transfer',
+            },
+            'current_state': 'incoming_payment_waiting',
+            'previous_state': None,
+            'occurred_at': '2026-07-08T21:59:49Z',
+        },
+        'subscription_id': 'sub-1',
+        'event_type': 'transfers#state-change',
+        'schema_version': '2.0.0',
+        'sent_at': '2026-07-08T21:59:49Z',
+    }
+
+    with app.app_context():
+        admin = User(phone='+31100009993', email='wise-webhook@example.com', name='Wise Webhook', role='super_admin')
+        settings = PaymentSettings(wise_api_token='token', wise_profile_id='84642112', wise_webhook_subscription_id='sub-1')
+        invoice = PaymentInvoice(
+            user=admin,
+            invoice_number='INV-2026-00039',
+            payment_reference='INV-2026-00039',
+            amount_due=1.0,
+            payment_status='UNPAID',
+            is_test_invoice=True,
+        )
+        errored_event = WiseWebhookEvent(
+            event_type='transfers#state-change',
+            subscription_id='sub-1',
+            incoming_transfer_id='2238838788',
+            payload_json='{}',
+            status='ERROR',
+            error_message='404 Client Error',
+        )
+        db.session.add_all([admin, settings, invoice, errored_event])
+        db.session.commit()
+
+    resp = client.post('/api/webhooks/wise/incoming-transfer', json=payload)
+    assert resp.status_code == 200
+    assert resp.get_json()['status'] == 'matched'
+    assert any(url.endswith('/v1/transfers/2238838788') for url in calls)
+
+    with app.app_context():
+        invoice = PaymentInvoice.query.filter_by(invoice_number='INV-2026-00039').one()
+        event = WiseWebhookEvent.query.filter_by(incoming_transfer_id='2238838788').one()
+        assert invoice.payment_status == 'PAID'
+        assert invoice.paid_amount == 1.0
+        assert event.status == 'MATCHED'
+        assert event.invoice_id == invoice.id
+        assert event.amount == 1.0
+        assert event.reference == 'INV-2026-00039'
+
+
 def test_admin_can_save_test_whatsapp_number_and_send_direct_test(client, app, monkeypatch):
     from app import bookings as bookings_module
 
@@ -1522,3 +1653,49 @@ def test_admin_can_save_test_whatsapp_number_and_send_direct_test(client, app, m
     assert payload['log']['recipient'] == '31612345678@c.us'
     assert sent[-1]['recipient'] == '31612345678@c.us'
     assert 'Sample court' in sent[-1]['message']
+
+
+def test_admin_can_run_whatsapp_connection_test_from_system_checks(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent = []
+
+    def fake_send(message, recipient=None):
+        sent.append({'message': message, 'recipient': recipient})
+        return 'sent', 'ok'
+
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', fake_send)
+
+    with app.app_context():
+        admin = User(phone='+31100009994', email='system-check-admin@example.com', name='System Check Admin', role='admin')
+        db.session.add(admin)
+        db.session.commit()
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    headers = {'Authorization': f'Bearer {token}'}
+    list_resp = client.get('/api/admin/whatsapp-notifications', headers=headers)
+    setting_id = next(item['id'] for item in list_resp.get_json()['settings'] if item['event_key'] == 'booking_created')
+    update_resp = client.put(
+        f'/api/admin/whatsapp-notifications/{setting_id}',
+        json={'test_recipient_number': '+31 6 1111 2222'},
+        headers=headers,
+    )
+    assert update_resp.status_code == 200
+
+    test_resp = client.post('/api/admin/system-checks/whatsapp-test', json={}, headers=headers)
+    assert test_resp.status_code == 200
+    payload = test_resp.get_json()
+    assert payload['status'] == 'sent'
+    assert payload['recipient'] == '31611112222@c.us'
+    assert payload['log']['event_key'] == 'connection_test'
+    assert sent[-1]['recipient'] == '31611112222@c.us'
+
+    checks_resp = client.get('/api/admin/system-checks', headers=headers)
+    assert checks_resp.status_code == 200
+    checks_payload = checks_resp.get_json()
+    assert checks_payload['whatsapp']['default_test_recipient'] == '+31 6 1111 2222'
+    assert checks_payload['whatsapp']['last_test_log']['recipient'] == '31611112222@c.us'

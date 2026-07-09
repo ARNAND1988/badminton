@@ -1609,6 +1609,75 @@ def test_wise_transfer_state_webhook_matches_invoice_reference_after_error_retry
         assert event.reference == 'INV-2026-00039'
 
 
+def test_wise_webhook_retry_links_already_paid_invoice_without_double_counting(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    class FakeResponse:
+        status_code = 200
+        text = ''
+        content = b'{}'
+
+        def json(self):
+            return {
+                'id': 2238838788,
+                'reference': 'INV-2026-00039',
+                'sourceCurrency': 'EUR',
+                'sourceValue': 1.0,
+            }
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(bookings_module.requests, 'get', lambda *args, **kwargs: FakeResponse())
+
+    with app.app_context():
+        admin = User(phone='+31100009994', email='wise-paid@example.com', name='Wise Paid', role='super_admin')
+        settings = PaymentSettings(wise_api_token='token', wise_profile_id='84642112', wise_webhook_subscription_id='sub-1')
+        invoice = PaymentInvoice(
+            user=admin,
+            invoice_number='INV-2026-00039',
+            payment_reference='INV-2026-00039',
+            amount_due=1.0,
+            paid_amount=1.0,
+            payment_status='PAID',
+            is_test_invoice=True,
+        )
+        event = WiseWebhookEvent(
+            event_type='transfers#state-change',
+            subscription_id='sub-1',
+            incoming_transfer_id='2238838788',
+            payload_json='{}',
+            status='UNMATCHED',
+            reference='INV-2026-00039',
+            error_message='No invoice reference matched this incoming transfer (INV-2026-00039).',
+        )
+        db.session.add_all([admin, settings, invoice, event])
+        db.session.commit()
+        event_id = event.id
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'],
+            algorithm='HS256',
+        )
+
+    headers = {'Authorization': f'Bearer {token}'}
+    resp = client.post(f'/api/admin/wise-webhook-events/{event_id}/retry', headers=headers)
+
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload['status'] == 'matched'
+    assert payload['invoice']['invoice_number'] == 'INV-2026-00039'
+
+    with app.app_context():
+        invoice = PaymentInvoice.query.filter_by(invoice_number='INV-2026-00039').one()
+        event = WiseWebhookEvent.query.filter_by(incoming_transfer_id='2238838788').one()
+        assert invoice.payment_status == 'PAID'
+        assert invoice.paid_amount == 1.0
+        assert event.status == 'MATCHED'
+        assert event.invoice_id == invoice.id
+        assert event.error_message is None
+
+
 def test_admin_can_save_test_whatsapp_number_and_send_direct_test(client, app, monkeypatch):
     from app import bookings as bookings_module
 

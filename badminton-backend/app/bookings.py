@@ -2897,7 +2897,11 @@ def _match_invoice_for_reference_blob(invoices, data):
 def _find_invoice_for_incoming_transfer(data, invoices=None):
     invoice_list = invoices
     if invoice_list is None:
-        invoice_list = PaymentInvoice.query.filter(PaymentInvoice.payment_status != 'PAID').order_by(PaymentInvoice.created_at.desc()).all()
+        # Wise webhooks can arrive after an invoice was manually marked paid, or
+        # after a previous retry applied the payment but failed to attach the
+        # event. Match across all invoices so diagnostics/retry can still link
+        # the webhook event to the invoice reference.
+        invoice_list = PaymentInvoice.query.order_by(PaymentInvoice.created_at.desc()).all()
     return _match_invoice_for_reference_blob(invoice_list, data)
 
 
@@ -2962,7 +2966,8 @@ def _process_wise_incoming_transfer_event(event, settings, incoming_transfer_id)
     invoice, match_meta = _find_invoice_for_incoming_transfer(transfer)
     if invoice:
         event.invoice_id = invoice.id
-        if event.status != 'MATCHED':
+        invoice_fully_paid = float(invoice.paid_amount or 0.0) + 0.001 >= float(invoice.amount_due or 0.0)
+        if event.status != 'MATCHED' and invoice.payment_status != 'PAID' and not invoice_fully_paid:
             _apply_incoming_transfer_to_invoice(invoice, event.amount, f'Wise incoming transfer {incoming_transfer_id}')
         event.status = 'MATCHED'
         event.error_message = None
@@ -3347,7 +3352,6 @@ def create_wise_webhook_subscription():
     return jsonify({'subscription': subscription, 'settings': settings.to_dict(include_effective=True)}), 201
 
 
-<<<<<<< HEAD
 @bookings_bp.route('/admin/payment-settings/wise-webhook-status', methods=['GET'])
 def wise_webhook_status():
     user, error = _require_super_admin()
@@ -3373,7 +3377,6 @@ def wise_webhook_status():
     })
 
 
-=======
 @bookings_bp.route('/admin/system-checks', methods=['GET'])
 def admin_system_checks():
     user, error = _require_any_admin()
@@ -3505,7 +3508,6 @@ def retry_wise_webhook_event(event_id):
         return jsonify({'status': 'error', 'event': event.to_dict()}), 202
 
 
->>>>>>> 7aea508 (did not read the ticket description yet :-))
 @bookings_bp.route('/payment-invoices/current', methods=['GET'])
 def current_payment_invoice():
     user, error = _require_login()
@@ -3554,25 +3556,14 @@ def wise_incoming_transfer_webhook():
     if existing and existing.status == 'MATCHED':
         return jsonify({'status': 'duplicate', 'event': existing.to_dict()})
 
-<<<<<<< HEAD
-    event = WiseWebhookEvent(
-        event_type=payload.get('event_type') or payload.get('eventType'),
-        subscription_id=subscription_id,
-        incoming_transfer_id=str(incoming_transfer_id),
-        payload_json=json.dumps(payload),
-        status='RECEIVED',
-    )
-    db.session.add(event)
-=======
     event = existing or WiseWebhookEvent(incoming_transfer_id=str(incoming_transfer_id))
-    event.event_type = payload.get('event_type')
+    event.event_type = payload.get('event_type') or payload.get('eventType')
     event.subscription_id = subscription_id
     event.payload_json = json.dumps(payload)
     event.status = 'RECEIVED'
     event.error_message = None
     if not existing:
         db.session.add(event)
->>>>>>> 7aea508 (did not read the ticket description yet :-))
     try:
         _process_wise_incoming_transfer_event(event, settings, incoming_transfer_id)
         db.session.commit()

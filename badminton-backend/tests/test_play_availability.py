@@ -197,3 +197,55 @@ def test_startup_backfills_family_member_link_column(client, app):
     with app.app_context():
         columns = {column['name'] for column in db.inspect(db.engine).get_columns('family_members')}
     assert 'linked_user_id' in columns
+
+
+def test_linked_family_member_availability_stays_in_sync_without_duplicate_totals(client, app):
+    with app.app_context():
+        owner = User(phone='+31100002000', email='owner-sync@example.com', name='Owner User', role='member')
+        child = User(phone='+31100002001', email='child-sync@example.com', name='Child User', role='member')
+        db.session.add_all([owner, child])
+        db.session.commit()
+        family = FamilyMember(user_id=owner.id, name='Child Family Name', linked_user_id=child.id)
+        db.session.add(family)
+        db.session.commit()
+        owner_headers = _auth_headers(app, owner)
+        child_headers = _auth_headers(app, child)
+        family_id = family.id
+        owner_id = owner.id
+
+    owner_resp = client.post('/api/play-availability', json={
+        'play_date': '2030-03-01',
+        'status': 'available',
+        'attendees': [
+            {'type': 'self'},
+            {'type': 'family', 'family_member_id': family_id},
+        ],
+    }, headers=owner_headers)
+    assert owner_resp.status_code == 200
+
+    child_view = client.get('/api/play-availability?start_date=2030-03-01&days=1', headers=child_headers)
+    assert child_view.status_code == 200
+    child_day = child_view.get_json()['days'][0]
+    assert child_day['totals']['available_count'] == 2
+    assert [item['name'] for item in child_day['totals']['available_attendees']] == ['Owner User', 'Child Family Name']
+
+    child_resp = client.post('/api/play-availability', json={
+        'play_date': '2030-03-01',
+        'attendees': [
+            {'type': 'self', 'status': 'tentative'},
+        ],
+    }, headers=child_headers)
+    assert child_resp.status_code == 200
+
+    owner_view = client.get('/api/play-availability?start_date=2030-03-01&days=1', headers=owner_headers)
+    assert owner_view.status_code == 200
+    owner_day = owner_view.get_json()['days'][0]
+    assert owner_day['vote']['user_id'] == owner_id
+    assert owner_day['totals']['available_count'] == 1
+    assert owner_day['totals']['tentative_count'] == 1
+    assert [item['name'] for item in owner_day['totals']['available_attendees']] == ['Owner User']
+    assert [item['name'] for item in owner_day['totals']['tentative_attendees']] == ['Child Family Name']
+
+    with app.app_context():
+        votes = PlayAvailabilityVote.query.filter_by(play_date='2030-03-01').all()
+        assert len(votes) == 2

@@ -183,29 +183,40 @@ def create_app():
         if play_vote_user_id and not play_vote_user_id.get('nullable') and db.engine.dialect.name != 'sqlite':
             db.session.execute(db.text('ALTER TABLE play_availability_votes ALTER COLUMN user_id DROP NOT NULL'))
 
+        datetime_column_type = 'DATETIME' if db.engine.dialect.name == 'sqlite' else 'TIMESTAMP'
         payment_invoice_columns = {col['name'] for col in inspector.get_columns('payment_invoices')} if inspector.has_table('payment_invoices') else set()
         payment_setting_columns = {col['name'] for col in inspector.get_columns('payment_settings')} if inspector.has_table('payment_settings') else set()
         if payment_setting_columns:
-            if 'payment_provider' not in payment_setting_columns:
-                db.session.execute(db.text("ALTER TABLE payment_settings ADD COLUMN payment_provider VARCHAR(32) DEFAULT 'WISE_API'"))
-            if 'wise_payment_url' not in payment_setting_columns:
-                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_payment_url VARCHAR(1024)'))
-            if 'wise_api_token' not in payment_setting_columns:
-                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_api_token TEXT'))
-            if 'wise_profile_id' not in payment_setting_columns:
-                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_profile_id VARCHAR(64)'))
-            if 'wise_api_base_url' not in payment_setting_columns:
-                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_api_base_url VARCHAR(255)'))
-            if 'wise_redirect_url' not in payment_setting_columns:
-                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_redirect_url VARCHAR(1024)'))
-            if 'wise_client_key' not in payment_setting_columns:
-                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_client_key VARCHAR(128)'))
-            if 'wise_webhook_url' not in payment_setting_columns:
-                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_webhook_url VARCHAR(1024)'))
-            if 'wise_webhook_subscription_id' not in payment_setting_columns:
-                db.session.execute(db.text('ALTER TABLE payment_settings ADD COLUMN wise_webhook_subscription_id VARCHAR(128)'))
+            payment_setting_specs = {
+                'account_holder_name': 'VARCHAR(128)',
+                'bank_name': 'VARCHAR(128)',
+                'iban': 'VARCHAR(64)',
+                'bic': 'VARCHAR(32)',
+                'payment_provider': "VARCHAR(32) DEFAULT 'WISE_API'",
+                'wise_payment_url': 'VARCHAR(1024)',
+                'wise_api_token': 'TEXT',
+                'wise_profile_id': 'VARCHAR(64)',
+                'wise_api_base_url': 'VARCHAR(255)',
+                'wise_redirect_url': 'VARCHAR(1024)',
+                'wise_client_key': 'VARCHAR(128)',
+                'wise_webhook_url': 'VARCHAR(1024)',
+                'wise_webhook_subscription_id': 'VARCHAR(128)',
+                'description_prefix': 'VARCHAR(255)',
+                'default_due_days': 'INTEGER DEFAULT 14',
+                'qr_enabled': 'BOOLEAN DEFAULT TRUE',
+                'test_mode': 'BOOLEAN DEFAULT TRUE',
+                'created_at': datetime_column_type,
+                'updated_at': datetime_column_type,
+                'updated_by': 'INTEGER',
+            }
+            for column_name, column_spec in payment_setting_specs.items():
+                if column_name not in payment_setting_columns:
+                    db.session.execute(db.text(f'ALTER TABLE payment_settings ADD COLUMN {column_name} {column_spec}'))
             db.session.execute(db.text("UPDATE payment_settings SET payment_provider = 'WISE_API' WHERE payment_provider IS NULL OR payment_provider != 'WISE_API'"))
             db.session.execute(db.text("UPDATE payment_settings SET wise_api_base_url = 'https://api.wise.com' WHERE wise_api_base_url IS NULL OR wise_api_base_url = 'https://api.transferwise.com'"))
+            db.session.execute(db.text("UPDATE payment_settings SET default_due_days = 14 WHERE default_due_days IS NULL"))
+            db.session.execute(db.text("UPDATE payment_settings SET qr_enabled = TRUE WHERE qr_enabled IS NULL"))
+            db.session.execute(db.text("UPDATE payment_settings SET test_mode = TRUE WHERE test_mode IS NULL"))
         if not inspector.has_table('wise_webhook_events'):
             webhook_id_type = 'INTEGER' if db.engine.dialect.name == 'sqlite' else 'SERIAL'
             db.session.execute(db.text("""
@@ -226,11 +237,37 @@ def create_app():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
-        if payment_invoice_columns and 'payment_url' not in payment_invoice_columns:
-            db.session.execute(db.text('ALTER TABLE payment_invoices ADD COLUMN payment_url VARCHAR(2048)'))
-        if payment_invoice_columns and 'wise_payment_request_id' not in payment_invoice_columns:
-            db.session.execute(db.text('ALTER TABLE payment_invoices ADD COLUMN wise_payment_request_id VARCHAR(128)'))
-        datetime_column_type = 'DATETIME' if db.engine.dialect.name == 'sqlite' else 'TIMESTAMP'
+        if payment_invoice_columns:
+            payment_invoice_specs = {
+                'payment_status': "VARCHAR(32) DEFAULT 'UNPAID'",
+                'payment_reference': 'VARCHAR(64)',
+                'amount_due': 'FLOAT DEFAULT 0',
+                'due_date': 'VARCHAR(10)',
+                'paid_at': datetime_column_type,
+                'paid_amount': 'FLOAT DEFAULT 0',
+                'payment_note': 'TEXT',
+                'qr_payload': 'TEXT',
+                'qr_code_data_url': 'TEXT',
+                'payment_url': 'VARCHAR(2048)',
+                'wise_payment_request_id': 'VARCHAR(128)',
+                'is_test_invoice': 'BOOLEAN DEFAULT FALSE',
+                'bank_account_holder': 'VARCHAR(128)',
+                'bank_name': 'VARCHAR(128)',
+                'iban': 'VARCHAR(64)',
+                'bic': 'VARCHAR(32)',
+                'booking_items_json': 'TEXT',
+                'misc_items_json': 'TEXT',
+                'created_at': datetime_column_type,
+                'updated_at': datetime_column_type,
+                'updated_by': 'INTEGER',
+            }
+            for column_name, column_spec in payment_invoice_specs.items():
+                if column_name not in payment_invoice_columns:
+                    db.session.execute(db.text(f'ALTER TABLE payment_invoices ADD COLUMN {column_name} {column_spec}'))
+            db.session.execute(db.text("UPDATE payment_invoices SET payment_status = 'UNPAID' WHERE payment_status IS NULL"))
+            db.session.execute(db.text("UPDATE payment_invoices SET amount_due = 0 WHERE amount_due IS NULL"))
+            db.session.execute(db.text("UPDATE payment_invoices SET paid_amount = 0 WHERE paid_amount IS NULL"))
+            db.session.execute(db.text("UPDATE payment_invoices SET is_test_invoice = FALSE WHERE is_test_invoice IS NULL"))
         invoice_payment_columns = {
             "payment_status": "VARCHAR(32) DEFAULT 'UNPAID'",
             'payment_reference': 'VARCHAR(64)',

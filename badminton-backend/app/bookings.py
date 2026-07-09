@@ -454,6 +454,96 @@ def _availability_attendee_payload(user, attendees, default_status='available'):
     return selected
 
 
+def _availability_person_key(attendee, fallback_user_id=None):
+    linked_user_id = attendee.get('linked_user_id')
+    if linked_user_id:
+        return f'user:{linked_user_id}'
+    if attendee.get('type') == 'self' and fallback_user_id:
+        return f'user:{fallback_user_id}'
+    family_member_id = attendee.get('family_member_id')
+    if family_member_id:
+        member = FamilyMember.query.get(family_member_id)
+        if member and member.linked_user_id:
+            return f'user:{member.linked_user_id}'
+        return f'family:{family_member_id}'
+    phone = (attendee.get('phone') or '').strip()
+    if phone:
+        return f'phone:{phone}'
+    name = (attendee.get('name') or '').strip().lower()
+    return f'name:{name}' if name else None
+
+
+def _availability_merge_attendee(attendees_by_key, attendee, status, fallback_user_id=None):
+    key = _availability_person_key(attendee, fallback_user_id=fallback_user_id)
+    if not key:
+        key = f'ad-hoc:{len(attendees_by_key)}:{attendee.get("name") or "Member"}'
+    payload = {**attendee, 'status': status}
+    existing = attendees_by_key.get(key)
+    if not existing or (existing.get('status') != 'available' and status == 'available'):
+        attendees_by_key[key] = payload
+
+
+def _sync_linked_family_owner_votes(user, play_date, attendee_details, notes):
+    linked_members = FamilyMember.query.filter_by(linked_user_id=user.id).all()
+    if not linked_members:
+        return
+    own_attendee = next((attendee for attendee in attendee_details if attendee.get('type') == 'self'), None)
+    own_status = own_attendee.get('status') if own_attendee else 'not_available'
+    for member in linked_members:
+        owner_vote = PlayAvailabilityVote.query.filter_by(user_id=member.user_id, play_date=play_date).first()
+        if not owner_vote:
+            owner_vote = PlayAvailabilityVote(user_id=member.user_id, play_date=play_date)
+            db.session.add(owner_vote)
+        try:
+            owner_attendees = json.loads(owner_vote.attendee_details or '[]')
+        except Exception:
+            owner_attendees = []
+        owner_attendees = [
+            attendee for attendee in owner_attendees
+            if not (attendee.get('type') == 'family' and attendee.get('family_member_id') == member.id)
+        ]
+        if own_status != 'not_available':
+            owner_attendees.append({
+                'type': 'family',
+                'status': own_status,
+                'family_member_id': member.id,
+                'name': member.name,
+                'linked_user_id': user.id,
+                'phone': user.phone,
+            })
+        available_count = len([attendee for attendee in owner_attendees if attendee.get('status', 'available') == 'available'])
+        tentative_count = len([attendee for attendee in owner_attendees if attendee.get('status') == 'tentative'])
+        owner_vote.status = 'available' if available_count else 'tentative' if tentative_count else 'not_available'
+        owner_vote.available = available_count > 0
+        owner_vote.attendee_count = available_count
+        owner_vote.attendee_details = json.dumps(owner_attendees) if owner_attendees else None
+        owner_vote.notes = notes
+
+
+def _linked_family_member_vote_payload(user, vote):
+    if not user or not vote:
+        return None
+    vote_payload = vote.to_dict()
+    for attendee in vote_payload.get('attendee_details') or []:
+        if attendee.get('type') == 'family' and attendee.get('linked_user_id') == user.id:
+            return {
+                'id': vote.id,
+                'user_id': user.id,
+                'play_date': vote.play_date,
+                'available': attendee.get('status', 'available') == 'available',
+                'status': attendee.get('status', 'available'),
+                'attendee_count': 1 if attendee.get('status', 'available') == 'available' else 0,
+                'attendee_details': [{
+                    'type': 'self',
+                    'status': attendee.get('status', 'available'),
+                    'name': attendee.get('name'),
+                    'phone': attendee.get('phone'),
+                }],
+                'notes': vote.notes,
+                'updated_at': vote_payload.get('updated_at'),
+            }
+    return None
+
 def _admin_user_payload(user):
     payload = user.to_dict()
     payload['family_members'] = [
@@ -782,59 +872,74 @@ def list_play_availability():
         owner = _family_owner_for_user(user)
         current_family_user_ids.add(owner.id)
         current_family_user_ids.update(member.linked_user_id for member in owner.family_members if member.linked_user_id)
-    user_votes = {vote.play_date: vote for vote in votes if user and vote.user_id in current_family_user_ids}
+    user_votes = {}
+    if user:
+        for vote in votes:
+            if vote.user_id in current_family_user_ids and vote.play_date not in user_votes:
+                user_votes[vote.play_date] = vote
+        own_votes = PlayAvailabilityVote.query.filter(
+            PlayAvailabilityVote.user_id == user.id,
+            PlayAvailabilityVote.play_date.in_(date_values),
+        ).all()
+        for vote in own_votes:
+            user_votes[vote.play_date] = vote
 
-    totals = {}
+    attendees_by_date = {}
+    family_statuses_by_date = {}
     for vote in votes:
-        if vote.play_date not in totals:
-            totals[vote.play_date] = {
-                'available_families': 0,
-                'tentative_families': 0,
-                'attendee_count': 0,
-                'available_count': 0,
-                'tentative_count': 0,
-                'available_attendees': [],
-                'tentative_attendees': [],
-            }
+        attendees_by_date.setdefault(vote.play_date, {})
+        family_statuses_by_date.setdefault(vote.play_date, {})
         vote_payload = vote.to_dict()
         vote_attendees = vote_payload.get('attendee_details') or []
-        available_attendees = [
-            attendee for attendee in vote_attendees
-            if attendee.get('status', 'available') == 'available'
-        ]
-        tentative_attendees = [
-            attendee for attendee in vote_attendees
-            if attendee.get('status') == 'tentative'
-        ]
         vote_status = vote.status or ('available' if vote.available else 'not_available')
-        fallback_name = vote.user.name or vote.user.email or vote.user.phone if vote.user else None
-        fallback_attendee = {'name': fallback_name or 'Member', 'status': vote_status}
-        if available_attendees:
-            totals[vote.play_date]['available_families'] += 1
-            totals[vote.play_date]['attendee_count'] += len(available_attendees)
-            totals[vote.play_date]['available_count'] += len(available_attendees)
-            totals[vote.play_date]['available_attendees'].extend(available_attendees)
-        elif vote_status == 'available':
-            totals[vote.play_date]['available_families'] += 1
-            totals[vote.play_date]['attendee_count'] += vote.attendee_count or 0
-            totals[vote.play_date]['available_count'] += vote.attendee_count or 0
-            totals[vote.play_date]['available_attendees'].append(fallback_attendee)
-        if tentative_attendees:
-            totals[vote.play_date]['tentative_families'] += 1
-            totals[vote.play_date]['tentative_count'] += len(tentative_attendees)
-            totals[vote.play_date]['tentative_attendees'].extend(tentative_attendees)
-        elif vote_status == 'tentative':
-            totals[vote.play_date]['tentative_families'] += 1
-            totals[vote.play_date]['tentative_count'] += vote.attendee_count or 0
-            totals[vote.play_date]['tentative_attendees'].append(fallback_attendee)
+        for attendee in vote_attendees:
+            attendee_status = attendee.get('status', 'available')
+            if attendee_status in {'available', 'tentative'}:
+                _availability_merge_attendee(attendees_by_date[vote.play_date], attendee, attendee_status, fallback_user_id=vote.user_id)
+                family_statuses_by_date[vote.play_date][vote.user_id or vote.id] = attendee_status
+        if not vote_attendees and vote_status in {'available', 'tentative'}:
+            fallback_name = vote.user.name or vote.user.email or vote.user.phone if vote.user else None
+            fallback_count = max(1, int(vote.attendee_count or 1)) if vote_status == 'available' else 1
+            for index in range(fallback_count):
+                fallback_attendee = {
+                    'type': 'self' if index == 0 else 'guest',
+                    'name': fallback_name or 'Member' if index == 0 else f'{fallback_name or "Member"} guest {index + 1}',
+                    'status': vote_status,
+                }
+                _availability_merge_attendee(
+                    attendees_by_date[vote.play_date],
+                    fallback_attendee,
+                    vote_status,
+                    fallback_user_id=vote.user_id if index == 0 else None,
+                )
+            family_statuses_by_date[vote.play_date][vote.user_id or vote.id] = vote_status
+
+    totals = {}
+    for date_value, attendees_by_key in attendees_by_date.items():
+        attendees = list(attendees_by_key.values())
+        available_attendees = [attendee for attendee in attendees if attendee.get('status') == 'available']
+        tentative_attendees = [attendee for attendee in attendees if attendee.get('status') == 'tentative']
+        family_statuses = family_statuses_by_date.get(date_value, {}).values()
+        totals[date_value] = {
+            'available_families': len([status for status in family_statuses if status == 'available']),
+            'tentative_families': len([status for status in family_statuses if status == 'tentative']),
+            'attendee_count': len(available_attendees),
+            'available_count': len(available_attendees),
+            'tentative_count': len(tentative_attendees),
+            'available_attendees': available_attendees,
+            'tentative_attendees': tentative_attendees,
+        }
 
     days_payload = []
     for date_value in date_values:
         vote = user_votes.get(date_value)
+        vote_payload = vote.to_dict() if vote else None
+        if user and vote and vote.user_id != user.id:
+            vote_payload = _linked_family_member_vote_payload(user, vote) or vote_payload
         days_payload.append({
             'date': date_value,
             'weekday': datetime.strptime(date_value, '%Y-%m-%d').strftime('%A'),
-            'vote': vote.to_dict() if vote else None,
+            'vote': vote_payload,
             'totals': totals.get(date_value, {
                 'available_families': 0,
                 'tentative_families': 0,
@@ -914,6 +1019,7 @@ def save_play_availability():
         linked_vote.attendee_count = 1 if linked_vote.available else 0
         linked_vote.attendee_details = json.dumps([{'type': 'self', 'status': linked_vote.status, 'name': attendee.get('name'), 'phone': attendee.get('phone')}])
         linked_vote.notes = vote.notes
+    _sync_linked_family_owner_votes(user, play_date, attendee_details, vote.notes)
     db.session.commit()
 
     return jsonify(vote.to_dict())

@@ -1910,6 +1910,14 @@ export default {
         ...attendee,
         status: attendee.status || 'available'
       }))
+      if (!attendees.length && status !== 'not_available') {
+        attendees.push({
+          type: 'self',
+          name: getSessionValue('member_name') || getSessionValue('member_email') || getSessionValue('member_phone') || 'You',
+          phone: getSessionValue('member_phone') || '',
+          status
+        })
+      }
       return {
         ...day,
         status,
@@ -2112,20 +2120,38 @@ export default {
     }
 
 
+    function normalizePaymentSettings(settings = {}) {
+      return {
+        qr_enabled: true,
+        test_mode: true,
+        default_due_days: 14,
+        wise_api_base_url: 'https://api.wise.com',
+        ...settings,
+        wise_api_token: '',
+        wise_redirect_url: settings.wise_redirect_url || defaultWiseRedirectUrl,
+        wise_webhook_url: settings.wise_webhook_url || defaultWiseWebhookUrl
+      }
+    }
+
     async function loadPaymentSettings() {
       if (!isSuperAdmin.value) return
-      paymentSettings.value = await fetchJson('/api/admin/payment-settings')
-      paymentSettings.value.wise_api_token = ''
-      paymentSettings.value.wise_redirect_url = paymentSettings.value.wise_redirect_url || defaultWiseRedirectUrl
-      paymentSettings.value.wise_webhook_url = paymentSettings.value.wise_webhook_url || defaultWiseWebhookUrl
-      await Promise.all([loadLatestTestInvoice(), loadWiseWebhookStatus()])
+      const settings = await fetchJson('/api/admin/payment-settings')
+      paymentSettings.value = normalizePaymentSettings(settings)
+      const [latestInvoiceResult, webhookStatusResult] = await Promise.allSettled([
+        loadLatestTestInvoice(),
+        loadWiseWebhookStatus()
+      ])
+      const failedResult = [latestInvoiceResult, webhookStatusResult].find((result) => result.status === 'rejected')
+      if (failedResult) {
+        errorMsg.value = failedResult.reason?.message || 'Some payment status details could not be loaded.'
+      }
     }
 
     async function savePaymentSettings() {
       paymentSettingsSaving.value = true
       try {
-        paymentSettings.value = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
-        paymentSettings.value.wise_api_token = ''
+        const settings = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
+        paymentSettings.value = normalizePaymentSettings(settings)
         msg.value = 'Payment settings saved.'
         errorMsg.value = ''
       } catch (err) {
@@ -2136,16 +2162,15 @@ export default {
     }
 
     async function persistPaymentSettingsForTest() {
-      paymentSettings.value = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
-      paymentSettings.value.wise_api_token = ''
+      const settings = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
+      paymentSettings.value = normalizePaymentSettings(settings)
     }
 
     async function createWiseWebhookSubscription() {
       paymentWebhookSubscribing.value = true
       try {
         const data = await fetchJson('/api/admin/payment-settings/wise-webhook-subscription', { method: 'POST', body: JSON.stringify(paymentSettings.value) })
-        paymentSettings.value = data.settings
-        paymentSettings.value.wise_api_token = ''
+        paymentSettings.value = normalizePaymentSettings(data.settings)
         await loadWiseWebhookStatus()
         msg.value = 'Wise webhook subscription created.'
         errorMsg.value = ''

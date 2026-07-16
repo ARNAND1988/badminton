@@ -252,6 +252,41 @@ def _family_owner_for_user(user):
     return group[0] if group else user
 
 
+def _billable_member_count_for_owner(owner, split_scope='manual'):
+    scope = split_scope or 'manual'
+    if scope == 'manual':
+        return 1
+    count = 1 if scope == 'all_members' or bool(owner.is_club_member) else 0
+    for member in owner.family_members:
+        if scope == 'all_members' or bool(member.is_club_member):
+            count += 1
+    return count
+
+
+def _misc_cost_dynamic_split_count(split_scope='all_members'):
+    owners = User.query.order_by(User.id.asc()).all()
+    seen_owner_ids = set()
+    count = 0
+    for item in owners:
+        owner = _family_owner_for_user(item)
+        if owner.id in seen_owner_ids:
+            continue
+        seen_owner_ids.add(owner.id)
+        count += _billable_member_count_for_owner(owner, split_scope)
+    return max(1, count)
+
+
+def _misc_cost_split_count(cost):
+    if (cost.status or 'open') == 'settled' or (cost.split_scope or 'manual') == 'manual':
+        return max(1, int(cost.split_count or 1))
+    return _misc_cost_dynamic_split_count(cost.split_scope)
+
+
+def _sync_open_misc_cost_splits():
+    for cost in MiscCost.query.filter(MiscCost.status != 'settled').all():
+        cost.split_count = _misc_cost_split_count(cost)
+
+
 def _participant_keys_for_user(user):
     keys = set()
     for group_user in _family_group_users(user):
@@ -385,8 +420,11 @@ def _monthly_invoice_summary(user, month_value):
         .all()
     )
     for cost in misc_costs:
-        split_count = max(1, int(cost.split_count or 1))
-        amount = round(float(cost.amount or 0.0) / split_count, 2)
+        split_count = _misc_cost_split_count(cost)
+        billable_members = _billable_member_count_for_owner(user, cost.split_scope)
+        if billable_members <= 0:
+            continue
+        amount = round((float(cost.amount or 0.0) / split_count) * billable_members, 2)
         misc_total += amount
         misc_items.append({
             'cost_id': cost.id,
@@ -394,6 +432,8 @@ def _monthly_invoice_summary(user, month_value):
             'purchase_date': cost.purchase_date,
             'status': cost.status,
             'split_count': split_count,
+            'split_scope': cost.split_scope or 'manual',
+            'billable_members': billable_members,
             'amount_total': round(float(cost.amount or 0.0), 2),
             'amount': amount,
         })
@@ -1514,6 +1554,7 @@ def list_misc_costs():
         query = query.filter(MiscCost.purchase_date < _archive_cutoff_date())
     elif status_filter != 'all':
         query = query.filter(db.or_(MiscCost.purchase_date.is_(None), MiscCost.purchase_date >= _archive_cutoff_date()))
+    _sync_open_misc_cost_splits()
     costs = query.order_by(MiscCost.purchase_date.desc(), MiscCost.created_at.desc()).all()
     return jsonify({'costs': [cost.to_dict() for cost in costs], 'archive_cutoff_date': _archive_cutoff_date()})
 
@@ -1536,8 +1577,11 @@ def create_misc_cost():
         paid_by=(data.get('paid_by') or '').strip() or None,
         purchase_date=(data.get('purchase_date') or '').strip() or None,
         split_count=max(1, int(data.get('split_count', 1) or 1)),
+        split_scope=data.get('split_scope', 'manual') if data.get('split_scope') in {'manual', 'all_members', 'club_members'} else 'manual',
         status=data.get('status', 'open') or 'open',
     )
+    if cost.status != 'settled':
+        cost.split_count = _misc_cost_split_count(cost)
     db.session.add(cost)
     db.session.flush()
     _record_admin_audit(user, 'create', 'misc_cost', cost.id, f'Created shared cost {cost.title}', {'cost': cost.to_dict()})
@@ -1552,7 +1596,7 @@ def update_misc_cost(cost_id):
         return error
 
     cost = MiscCost.query.get_or_404(cost_id)
-    before = _snapshot_fields(cost, ['title', 'description', 'amount', 'paid_by', 'purchase_date', 'split_count', 'status'])
+    before = _snapshot_fields(cost, ['title', 'description', 'amount', 'paid_by', 'purchase_date', 'split_count', 'split_scope', 'status'])
     data = request.get_json() or {}
     title = (data.get('title', cost.title) or '').strip()
     if not title:
@@ -1564,8 +1608,12 @@ def update_misc_cost(cost_id):
     cost.paid_by = (data.get('paid_by', cost.paid_by) or '').strip() or None
     cost.purchase_date = (data.get('purchase_date', cost.purchase_date) or '').strip() or None
     cost.split_count = max(1, int(data.get('split_count', cost.split_count) or 1))
+    if data.get('split_scope') in {'manual', 'all_members', 'club_members'}:
+        cost.split_scope = data.get('split_scope')
     cost.status = data.get('status', cost.status) or 'open'
-    after = _snapshot_fields(cost, ['title', 'description', 'amount', 'paid_by', 'purchase_date', 'split_count', 'status'])
+    if cost.status != 'settled':
+        cost.split_count = _misc_cost_split_count(cost)
+    after = _snapshot_fields(cost, ['title', 'description', 'amount', 'paid_by', 'purchase_date', 'split_count', 'split_scope', 'status'])
     changes = _changed_fields(before, after)
     if changes:
         _record_admin_audit(user, 'update', 'misc_cost', cost.id, f'Updated shared cost {cost.title}', {'changes': changes})
@@ -2818,7 +2866,7 @@ def _epc_payload(settings, amount, reference):
 
 
 def _wise_payment_url(settings, amount, reference):
-    base_url = (settings.wise_payment_url or '').strip()
+    base_url = (settings.wise_payment_url or 'https://wise.com/pay/business/verenigingnieuwegeinbadminton?utm_source=open_link').strip()
     if not base_url:
         return None
     description = f'{settings.description_prefix or "Invoice"} {reference}'[:140]
@@ -3308,7 +3356,13 @@ def _attach_payment_details(invoice, settings):
     invoice.bank_name = settings.effective_bank_name()
     invoice.iban = settings.effective_iban()
     invoice.bic = settings.effective_bic()
-    invoice.payment_url = _wise_create_payment_request(settings, invoice)
+
+    try:
+        invoice.payment_url = _wise_create_payment_request(settings, invoice)
+    except ValueError as exc:
+        if str(exc) not in {'wise_api_token_required', 'wise_payment_url_missing'}:
+            raise
+        invoice.payment_url = _wise_payment_url(settings, invoice.amount_due, reference)
     invoice.qr_payload = invoice.payment_url
     invoice.qr_code_data_url = _qr_data_url(invoice.qr_payload)
     return invoice
@@ -3877,6 +3931,8 @@ def admin_payment_invoices():
         return error
     status_filter = (request.args.get('status') or 'all').lower()
     query = PaymentInvoice.query.order_by(PaymentInvoice.created_at.desc())
+    if status_filter != 'test':
+        query = query.filter(PaymentInvoice.is_test_invoice.is_(False))
     if status_filter == 'unpaid':
         query = query.filter(PaymentInvoice.payment_status == 'UNPAID')
     elif status_filter == 'paid':

@@ -1966,3 +1966,97 @@ def test_super_admin_payment_settings_schema_matches_frontend(client, app):
     assert isinstance(data['default_due_days'], int)
     assert isinstance(data['qr_enabled'], bool)
     assert isinstance(data['test_mode'], bool)
+
+
+def test_ready_monthly_invoice_uses_club_wise_payment_details_without_api_token(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000104', email='wise-ready-admin@example.com', name='Wise Ready Admin', role='admin')
+        member = User(phone='+31100000105', email='wise-ready-member@example.com', name='Wise Ready Member', role='member')
+        court = Court(name='Wise Ready Court', hourly_rate=40.0, is_active=True)
+        db.session.add_all([admin, member, court, PaymentSettings(test_mode=False)])
+        db.session.commit()
+        booking = Booking(
+            court_id=court.id,
+            booking_date='2031-02-10',
+            start_time='19:00',
+            end_time='20:00',
+            status='completed',
+            cost=40.0,
+        )
+        db.session.add(booking)
+        db.session.flush()
+        db.session.add(BookingParticipant(booking_id=booking.id, phone=member.phone, name=member.name, status='participated'))
+        db.session.commit()
+        admin_token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        member_token = jwt.encode({'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    ready_resp = client.post('/api/admin/invoices/monthly/status', json={'month': '2031-02', 'status': 'READY_FOR_PAYMENT'}, headers={'Authorization': f'Bearer {admin_token}'})
+    assert ready_resp.status_code == 200
+    invoice_resp = client.get('/api/payment-invoices/current?month=2031-02', headers={'Authorization': f'Bearer {member_token}'})
+    assert invoice_resp.status_code == 200
+    invoice = invoice_resp.get_json()
+    assert invoice['iban'] == 'BE17905085574821'
+    assert invoice['account_holder_name'] == 'Vereniging Nieuwegein Badminton'
+    assert invoice['payment_url'].startswith('https://wise.com/pay/business/verenigingnieuwegeinbadminton')
+    assert 'reference=' in invoice['payment_url']
+    assert invoice['qr_code_data_url'].startswith('data:image/png;base64,')
+
+
+def test_admin_payment_invoice_list_hides_test_invoices_by_default(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000106', email='hide-test-admin@example.com', name='Hide Test Admin', role='admin')
+        member = User(phone='+31100000107', email='hide-test-member@example.com', name='Hide Test Member', role='member')
+        regular = PaymentInvoice(user=member, month='2031-03', invoice_number='INV-2031-00001', payment_reference='INV-2031-00001', amount_due=25, is_test_invoice=False)
+        test_invoice = PaymentInvoice(user=admin, month='2031-03', invoice_number='INV-2026-00040', payment_reference='INV-2026-00040', amount_due=1, is_test_invoice=True)
+        db.session.add_all([admin, member, regular, test_invoice])
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    default_resp = client.get('/api/admin/payment-invoices', headers={'Authorization': f'Bearer {token}'})
+    assert default_resp.status_code == 200
+    default_numbers = {invoice['invoice_number'] for invoice in default_resp.get_json()['invoices']}
+    assert 'INV-2031-00001' in default_numbers
+    assert 'INV-2026-00040' not in default_numbers
+
+    test_resp = client.get('/api/admin/payment-invoices?status=test', headers={'Authorization': f'Bearer {token}'})
+    assert test_resp.status_code == 200
+    test_numbers = {invoice['invoice_number'] for invoice in test_resp.get_json()['invoices']}
+    assert 'INV-2026-00040' in test_numbers
+
+
+def test_club_member_misc_cost_split_updates_until_settled(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000108', email='club-split-admin@example.com', name='Club Split Admin', role='admin', is_club_member=False)
+        member = User(phone='+31100000109', email='club-split-member@example.com', name='Club Split Member', role='member', is_club_member=False)
+        db.session.add_all([admin, member])
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        member_id = member.id
+
+    headers = {'Authorization': f'Bearer {token}'}
+    create_resp = client.post('/api/misc-costs', json={
+        'title': 'Club-only shuttles',
+        'amount': 100,
+        'purchase_date': '2031-04-03',
+        'split_scope': 'club_members',
+    }, headers=headers)
+    assert create_resp.status_code == 200
+    cost = create_resp.get_json()
+    assert cost['split_scope'] == 'club_members'
+    initial_split_count = cost['split_count']
+
+    member_update = client.put(f'/api/admin/users/{member_id}', json={'is_club_member': True}, headers=headers)
+    assert member_update.status_code == 200
+    listed = client.get('/api/misc-costs', headers=headers).get_json()['costs']
+    updated_cost = next(item for item in listed if item['id'] == cost['id'])
+    assert updated_cost['split_count'] == initial_split_count + 1
+
+    settle_resp = client.put(f"/api/misc-costs/{cost['id']}", json={**updated_cost, 'status': 'settled'}, headers=headers)
+    assert settle_resp.status_code == 200
+    settled_split_count = settle_resp.get_json()['split_count']
+
+    member_update = client.put(f'/api/admin/users/{member_id}', json={'is_club_member': False}, headers=headers)
+    assert member_update.status_code == 200
+    listed = client.get('/api/misc-costs', headers=headers).get_json()['costs']
+    settled_cost = next(item for item in listed if item['id'] == cost['id'])
+    assert settled_cost['split_count'] == settled_split_count

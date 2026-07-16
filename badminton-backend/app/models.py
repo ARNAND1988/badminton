@@ -301,16 +301,16 @@ class PaymentSettings(db.Model):
     updater = db.relationship('User', lazy=True)
 
     def effective_account_holder_name(self):
-        return self.account_holder_name or ('Nieuwegein Badminton Test' if self.test_mode else '')
+        return self.account_holder_name or 'Vereniging Nieuwegein Badminton'
 
     def effective_bank_name(self):
-        return self.bank_name or ('Test Bank' if self.test_mode else '')
+        return self.bank_name or 'Wise'
 
     def effective_iban(self):
-        return self.iban or ('NL02ABNA0123456789' if self.test_mode else '')
+        return self.iban or 'BE17905085574821'
 
     def effective_bic(self):
-        return self.bic or ('ABNANL2A' if self.test_mode else '')
+        return self.bic or ''
 
     def to_dict(self, include_effective=False):
         payload = {
@@ -512,6 +512,7 @@ class MiscCost(db.Model):
     paid_by = db.Column(db.String(128), nullable=True)
     purchase_date = db.Column(db.String(10), nullable=True)
     split_count = db.Column(db.Integer, default=1)
+    split_scope = db.Column(db.String(32), default='manual')
     status = db.Column(db.String(32), default='open')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -525,6 +526,7 @@ class MiscCost(db.Model):
             'paid_by': self.paid_by,
             'purchase_date': self.purchase_date,
             'split_count': split_count,
+            'split_scope': self.split_scope or 'manual',
             'cost_per_person': round(float(self.amount or 0.0) / split_count, 2),
             'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,

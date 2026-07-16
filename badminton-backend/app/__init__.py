@@ -170,6 +170,8 @@ def create_app():
         misc_cost_columns = {col['name'] for col in inspector.get_columns('misc_costs')}
         if 'purchase_date' not in misc_cost_columns:
             db.session.execute(db.text('ALTER TABLE misc_costs ADD COLUMN purchase_date VARCHAR(10)'))
+        if 'split_scope' not in misc_cost_columns:
+            db.session.execute(db.text("ALTER TABLE misc_costs ADD COLUMN split_scope VARCHAR(32) DEFAULT 'manual'"))
         play_vote_columns = {col['name'] for col in inspector.get_columns('play_availability_votes')}
         if 'status' not in play_vote_columns:
             db.session.execute(db.text("ALTER TABLE play_availability_votes ADD COLUMN status VARCHAR(32) DEFAULT 'not_available'"))

@@ -975,7 +975,11 @@
             <input v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
             <input v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
             <input v-model="newMiscPurchaseDate" type="date" class="form-input" />
-            <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" />
+            <select v-model="newMiscSplitScope" class="form-input">
+              <option value="all_members">All members</option>
+              <option value="club_members">Club members only</option>
+            </select>
+            <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" :disabled="true" />
             <input v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
           </div>
           <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
@@ -987,7 +991,7 @@
               <div>
                 <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
                 <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
-                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }} · {{ cost.purchase_date || 'No date' }} · split {{ cost.split_count }}</p>
+                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }} · {{ cost.purchase_date || 'No date' }} · {{ splitScopeLabel(cost.split_scope) }} · split {{ cost.split_count }}</p>
               </div>
               <div class="flex shrink-0 items-center gap-3">
                 <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
@@ -995,13 +999,17 @@
               </div>
             </button>
             <div v-if="isMiscCostOpen(cost.id)" class="space-y-3 border-t border-slate-100 p-4">
-              <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">Split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each</div>
+              <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">{{ splitScopeLabel(cost.split_scope) }} · split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each</div>
               <div class="grid gap-3 sm:grid-cols-2">
                 <input v-model="cost.title" class="form-input" placeholder="Title" />
                 <input v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
                 <input v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
                 <input v-model="cost.purchase_date" type="date" class="form-input" />
-                <input v-model.number="cost.split_count" type="number" min="1" class="form-input" />
+                <select v-model="cost.split_scope" class="form-input">
+                  <option value="all_members">All members</option>
+                  <option value="club_members">Club members only</option>
+                </select>
+                <input v-model.number="cost.split_count" type="number" min="1" class="form-input" :disabled="cost.status !== 'settled'" />
                 <select v-model="cost.status" class="form-input">
                   <option value="open">Open</option>
                   <option value="settled">Settled</option>
@@ -1651,6 +1659,7 @@ export default {
     const newMiscPaidBy = ref('')
     const newMiscPurchaseDate = ref(localIsoDate())
     const newMiscSplitCount = ref(1)
+    const newMiscSplitScope = ref('all_members')
     const msg = ref('')
     const verificationDetails = ref(null)
     const isAdmin = ref(false)
@@ -3142,6 +3151,10 @@ export default {
       }
     }
 
+    function splitScopeLabel(scope) {
+      return scope === 'club_members' ? 'Club members only' : 'All members'
+    }
+
     async function createMiscCost() {
       try {
         const data = await fetchJson('/api/misc-costs', {
@@ -3153,7 +3166,8 @@ export default {
             amount: parseFloat(newMiscAmount.value || 0),
             paid_by: newMiscPaidBy.value,
             purchase_date: newMiscPurchaseDate.value,
-            split_count: newMiscSplitCount.value
+            split_count: newMiscSplitCount.value,
+            split_scope: newMiscSplitScope.value
           })
         })
         msg.value = `Added cost ${data.title}.`
@@ -3163,6 +3177,7 @@ export default {
         newMiscPaidBy.value = ''
         newMiscPurchaseDate.value = localIsoDate()
         newMiscSplitCount.value = 1
+        newMiscSplitScope.value = 'all_members'
         await loadMiscCosts()
       } catch (err) {
         msg.value = err.message
@@ -3402,6 +3417,7 @@ export default {
       toggleCompletedBooking,
       isMiscCostOpen,
       toggleMiscCost,
+      splitScopeLabel,
       participantCompletedStatusLabel,
       loading,
       errorMsg,
@@ -3448,6 +3464,7 @@ export default {
       newMiscPaidBy,
       newMiscPurchaseDate,
       newMiscSplitCount,
+      newMiscSplitScope,
       attendanceStatuses,
       availabilityStatuses,
       addParticipant,

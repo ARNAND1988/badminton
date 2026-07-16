@@ -49,6 +49,7 @@ function requireBotToken(req, res, next) {
 }
 
 app.get('/health', (_, res) => res.json({ status: 'ok', ready }))
+app.get('/', (_, res) => res.json({ status: 'ok', ready, endpoints: ['/health', '/groups', '/send'] }))
 app.get('/groups', requireBotToken, async (_, res) => {
   if (!ready) return res.status(503).json({ error: 'whatsapp_not_ready' })
   const chats = await client.getChats()
@@ -69,8 +70,13 @@ app.post('/send', requireBotToken, async (req, res) => {
   const recipient = (req.body.recipient || defaultRecipient || '').trim()
   if (!message) return res.status(400).json({ error: 'message required' })
   if (!recipient) return res.status(400).json({ error: 'recipient required' })
-  const result = await client.sendMessage(recipient, message)
-  res.json({ status: 'sent', id: result.id?._serialized || null })
+  try {
+    const result = await client.sendMessage(recipient, message)
+    res.json({ status: 'sent', id: result?.id?._serialized || null })
+  } catch (error) {
+    console.error('Failed to send WhatsApp message:', error)
+    res.status(502).json({ error: 'send_failed', message: error?.message || 'Unknown send error' })
+  }
 })
 
 app.listen(process.env.PORT || 3000, () => console.log(`WhatsApp bot listening`))

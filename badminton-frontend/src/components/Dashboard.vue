@@ -905,28 +905,61 @@
             </details>
           </div>
 
+          <div class="rounded-lg border border-slate-200 bg-white p-3">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h4 class="font-semibold text-slate-900">Payment invoices</h4>
+                <p class="text-sm text-slate-600">Open Wise details or update status after verifying an offline payment.</p>
+              </div>
+              <label class="block sm:w-48">
+                <span class="form-label">Filter</span>
+                <select v-model="paymentFilter" class="form-input" @change="loadPaymentInvoices">
+                  <option value="all">All invoices</option>
+                  <option value="unpaid">Pending</option>
+                  <option value="paid">Paid</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="test">Test invoices</option>
+                </select>
+              </label>
+            </div>
+            <div class="mt-3 overflow-x-auto rounded-lg border border-slate-200">
+              <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th class="px-3 py-2">Invoice</th><th class="px-3 py-2">Family</th><th class="px-3 py-2">Month</th><th class="px-3 py-2 text-right">Due</th><th class="px-3 py-2">Status</th><th class="px-3 py-2 text-right">Actions</th></tr></thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                  <tr v-for="invoice in paymentInvoices" :key="invoice.id">
+                    <td class="px-3 py-2 font-semibold text-slate-900">{{ invoice.invoice_number }}<span v-if="invoice.is_test_invoice" class="ml-2 rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">Test</span><div class="text-xs font-normal text-slate-500">{{ invoice.payment_reference }}</div></td>
+                    <td class="px-3 py-2 text-slate-700">{{ invoice.user?.name || invoice.user?.email || invoice.user?.phone || 'Family invoice' }}</td>
+                    <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ invoice.month || '—' }}<div class="text-xs text-slate-500">Due {{ invoice.due_date || '—' }}</div></td>
+                    <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ invoice.amount_due }}<div class="text-xs font-normal text-emerald-700">Paid €{{ invoice.paid_amount || 0 }}</div></td>
+                    <td class="px-3 py-2"><select :value="invoice.payment_status" class="form-input min-w-36" @change="setPaymentStatus(invoice, $event.target.value)"><option value="UNPAID">Payment pending</option><option value="PARTIALLY_PAID">Partially paid</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option><option value="EXPIRED">Expired</option></select></td>
+                    <td class="px-3 py-2 text-right"><button class="btn-secondary" @click="loadPaymentInvoice(invoice.id)">Wise details</button></td>
+                  </tr>
+                  <tr v-if="!paymentInvoices.length"><td colspan="6" class="px-3 py-4 text-center text-slate-500">No payment invoices match this filter.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div v-if="selectedPaymentInvoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
-            <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h4 class="font-semibold text-slate-900">Wise payment details</h4>
                 <p class="text-sm text-slate-600">{{ selectedPaymentInvoice.user?.name || selectedPaymentInvoice.user?.email || 'Family invoice' }} · {{ paymentStatusLabel(selectedPaymentInvoice.payment_status) }}</p>
               </div>
               <button class="btn-muted" @click="selectedPaymentInvoice = null">Close</button>
             </div>
-            <div class="grid gap-3 md:grid-cols-[140px_1fr]">
-              <img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="w-32 rounded border bg-white p-2" />
-              <div class="overflow-x-auto rounded border border-white/70 bg-white">
-                <p class="border-b border-slate-100 px-3 py-2 text-sm text-slate-600">Scan this QR or open the Wise payment link.</p>
-                <table class="min-w-full text-sm">
-                  <tbody class="divide-y divide-slate-100">
-                    <tr v-if="selectedPaymentInvoice.payment_url"><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Wise link</th><td class="px-3 py-2 text-slate-700"><a :href="selectedPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open Wise payment link</a></td></tr>
-                    <tr><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Amount due</th><td class="px-3 py-2 font-semibold text-slate-900">€{{ selectedPaymentInvoice.amount_due }}</td></tr>
-                    <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Due date</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.due_date }}</td></tr>
-                    <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">IBAN</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.iban)">Copy</button></td></tr>
-                    <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Account holder</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.account_holder_name }}</td></tr>
-                    <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Reference</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(selectedPaymentInvoice.payment_reference)">Copy</button></td></tr>
-                  </tbody>
-                </table>
+            <div class="grid items-start gap-4 md:grid-cols-[160px_minmax(0,1fr)]">
+              <img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="w-40 max-w-full rounded border bg-white p-2" />
+              <div class="rounded border border-white/70 bg-white text-sm">
+                <p class="border-b border-slate-100 px-4 py-3 text-slate-600">Scan this QR or open the Wise payment link.</p>
+                <dl class="grid grid-cols-[9rem_minmax(0,1fr)] divide-y divide-slate-100">
+                  <template v-if="selectedPaymentInvoice.payment_url"><dt class="px-4 py-3 font-semibold text-slate-600">Wise link</dt><dd class="px-4 py-3 text-slate-700"><a :href="selectedPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open Wise payment link</a></dd></template>
+                  <dt class="px-4 py-3 font-semibold text-slate-600">Amount due</dt><dd class="px-4 py-3 font-semibold text-slate-900">€{{ selectedPaymentInvoice.amount_due }}</dd>
+                  <dt class="px-4 py-3 font-semibold text-slate-600">Due date</dt><dd class="px-4 py-3 text-slate-700">{{ selectedPaymentInvoice.due_date }}</dd>
+                  <dt class="px-4 py-3 font-semibold text-slate-600">IBAN</dt><dd class="flex flex-wrap items-center gap-2 px-4 py-3 text-slate-700"><span>{{ selectedPaymentInvoice.iban }}</span><button class="btn-muted" @click="copyText(selectedPaymentInvoice.iban)">Copy</button></dd>
+                  <dt class="px-4 py-3 font-semibold text-slate-600">Account holder</dt><dd class="px-4 py-3 text-slate-700">{{ selectedPaymentInvoice.account_holder_name }}</dd>
+                  <dt class="px-4 py-3 font-semibold text-slate-600">Reference</dt><dd class="flex flex-wrap items-center gap-2 px-4 py-3 text-slate-700"><span>{{ selectedPaymentInvoice.payment_reference }}</span><button class="btn-muted" @click="copyText(selectedPaymentInvoice.payment_reference)">Copy</button></dd>
+                </dl>
               </div>
             </div>
           </div>
@@ -2633,6 +2666,7 @@ export default {
           await Promise.all([
             loadMiscCosts(),
             loadAdminMonthlyInvoices(),
+            loadPaymentInvoices(),
             loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page }),
             loadAdminUsers()
           ])

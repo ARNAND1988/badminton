@@ -2103,3 +2103,45 @@ def test_club_member_misc_cost_split_updates_until_settled(client, app):
     listed = client.get('/api/misc-costs', headers=headers).get_json()['costs']
     settled_cost = next(item for item in listed if item['id'] == cost['id'])
     assert settled_cost['split_count'] == settled_split_count
+
+
+def test_ready_monthly_invoice_status_persists_when_wise_generation_fails(client, app, monkeypatch):
+    def fail_payment_request(settings, invoice):
+        raise ValueError('wise_business_profile_not_found')
+
+    monkeypatch.setattr('app.bookings._wise_create_payment_request', fail_payment_request)
+    with app.app_context():
+        admin = User(phone='+31100000150', email='ready-fail-admin@example.com', name='Ready Fail Admin', role='admin')
+        member = User(phone='+31100000151', email='ready-fail-member@example.com', name='Ready Fail Member', role='member')
+        court = Court(name='Ready Fail Court', hourly_rate=40.0, is_active=True)
+        db.session.add_all([
+            admin,
+            member,
+            court,
+            PaymentSettings(test_mode=False, wise_api_token='bad-token'),
+        ])
+        db.session.commit()
+        booking = Booking(
+            court_id=court.id,
+            booking_date='2031-04-10',
+            start_time='19:00',
+            end_time='20:00',
+            status='completed',
+            cost=40.0,
+        )
+        db.session.add(booking)
+        db.session.flush()
+        db.session.add(BookingParticipant(booking_id=booking.id, phone=member.phone, name=member.name, status='participated'))
+        db.session.commit()
+        admin_token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    ready_resp = client.post('/api/admin/invoices/monthly/status', json={'month': '2031-04', 'status': 'READY_FOR_PAYMENT'}, headers={'Authorization': f'Bearer {admin_token}'})
+    assert ready_resp.status_code == 200
+    data = ready_resp.get_json()
+    assert data['month_status']['status'] == 'READY_FOR_PAYMENT'
+    assert data['generated_invoice_count'] == 1
+    assert data['payment_generation_errors'][0]['code'] == 'wise_business_profile_not_found'
+
+    status_resp = client.get('/api/admin/invoices/monthly?month=2031-04', headers={'Authorization': f'Bearer {admin_token}'})
+    assert status_resp.status_code == 200
+    assert status_resp.get_json()['month_status']['status'] == 'READY_FOR_PAYMENT'

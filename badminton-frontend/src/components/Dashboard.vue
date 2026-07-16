@@ -2375,6 +2375,11 @@ export default {
     async function setMonthlyInvoiceStatus(status) {
       const data = await fetchJson('/api/admin/invoices/monthly/status', { method: 'POST', body: JSON.stringify({ month: monthlyInvoiceMonth.value, status }) })
       msg.value = `${monthStatusLabel(data.month_status?.status)} saved for ${monthName(monthlyInvoiceMonth.value)}.`
+      if (data.payment_generation_errors?.length) {
+        errorMsg.value = 'The month status was saved, but one or more payment invoices need Wise payment details regenerated.'
+      } else {
+        errorMsg.value = ''
+      }
       await loadAdminMonthlyInvoices()
     }
 

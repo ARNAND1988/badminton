@@ -3623,7 +3623,7 @@ def _create_payment_invoices_for_month(month_value, admin_user):
         summary = _monthly_invoice_summary(owner, month_value)
         if not summary or float(summary.get('total') or 0.0) <= 0:
             continue
-        invoice = _create_payment_invoice_for_summary(owner, month_value, summary, settings, False)
+        invoice = _create_payment_invoice_for_summary(owner, month_value, summary, settings, False, allow_payment_failure=True)
         invoice.updated_by = admin_user.id
         created.append(invoice)
     return created
@@ -3961,10 +3961,16 @@ def update_monthly_invoice_status():
         {'old_status': old_status, 'new_status': new_status, 'generated_invoice_count': len(generated)},
     )
     db.session.commit()
+    generation_errors = [
+        invoice._payment_generation_error
+        for invoice in generated
+        if getattr(invoice, '_payment_generation_error', None)
+    ]
     return jsonify({
         'month_status': month_status.to_dict(),
         'generated_invoice_count': len(generated),
         'payment_invoices': [invoice.to_dict(include_qr=False) for invoice in generated],
+        'payment_generation_errors': generation_errors,
     })
 
 

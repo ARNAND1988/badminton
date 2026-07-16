@@ -92,10 +92,16 @@ html, body, #app {
   height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
 @layer base {
   body {
     min-height: 100%;
     background: #022c22;
+    overscroll-behavior-y: contain;
   }
 }
 
@@ -156,6 +162,13 @@ html, body, #app {
   .stat-card,
   .sub-card {
     @apply border-sky-100/70 bg-white/90 shadow-2xl shadow-slate-950/15 backdrop-blur-xl;
+    scroll-margin-top: 5.5rem;
+  }
+
+  .overflow-x-auto,
+  .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
 
   .app-nav-link {

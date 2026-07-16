@@ -2024,6 +2024,49 @@ def test_admin_payment_invoice_list_hides_test_invoices_by_default(client, app):
     assert 'INV-2026-00040' in test_numbers
 
 
+
+def test_club_member_misc_cost_split_counts_linked_family_users_once(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000110', email='club-linked-admin@example.com', name='Club Linked Admin', role='admin', is_club_member=False)
+        db.session.add(admin)
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    headers = {'Authorization': f'Bearer {token}'}
+    baseline_resp = client.post('/api/misc-costs', json={
+        'title': 'Baseline club-only shuttles',
+        'amount': 110,
+        'purchase_date': '2031-04-04',
+        'split_scope': 'club_members',
+    }, headers=headers)
+    assert baseline_resp.status_code == 200
+    baseline_split_count = baseline_resp.get_json()['split_count']
+
+    with app.app_context():
+        owner = User(phone='+31100000111', email='club-linked-owner@example.com', name='Club Linked Owner', role='member', is_club_member=True)
+        partner = User(phone='+31100000112', email='club-linked-partner@example.com', name='Club Linked Partner', role='member', is_club_member=True)
+        child = User(phone='+31100000113', email='club-linked-child@example.com', name='Club Linked Child', role='member', is_club_member=True)
+        db.session.add_all([owner, partner, child])
+        db.session.flush()
+        db.session.add_all([
+            FamilyMember(user_id=owner.id, name='Club Linked Partner', is_club_member=False, linked_user_id=partner.id),
+            FamilyMember(user_id=partner.id, name='Club Linked Child', is_club_member=False, linked_user_id=child.id),
+            FamilyMember(user_id=owner.id, name='Unlinked Child', is_club_member=True),
+        ])
+        db.session.commit()
+
+    create_resp = client.post('/api/misc-costs', json={
+        'title': 'Linked club-only shuttles',
+        'amount': 110,
+        'purchase_date': '2031-04-04',
+        'split_scope': 'club_members',
+    }, headers=headers)
+
+    assert create_resp.status_code == 200
+    cost = create_resp.get_json()
+    assert cost['split_count'] == baseline_split_count + 4
+
+
 def test_club_member_misc_cost_split_updates_until_settled(client, app):
     with app.app_context():
         admin = User(phone='+31100000108', email='club-split-admin@example.com', name='Club Split Admin', role='admin', is_club_member=False)

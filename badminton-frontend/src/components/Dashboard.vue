@@ -461,7 +461,7 @@
               <div>
                 <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
                 <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
-                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }} · {{ cost.purchase_date || 'No date' }} · {{ splitScopeLabel(cost.split_scope) }} · split {{ cost.split_count }}</p>
+                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }}<span v-if="isArchivedMiscCost(cost)" class="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] text-amber-700">Archived</span> · {{ cost.purchase_date || 'No date' }} · {{ splitScopeLabel(cost.split_scope) }} · split {{ cost.split_count }}</p>
               </div>
               <div class="flex shrink-0 items-center gap-3">
                 <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
@@ -1069,7 +1069,30 @@
       </div>
 
       <div v-else class="space-y-4">
-        <article v-for="member in adminUsers" :key="member.id" class="panel-card space-y-4">
+        <section class="panel-card space-y-3 p-4 sm:p-5">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 class="text-base font-semibold text-slate-900">Club member selection</h3>
+              <p class="section-copy mt-1">Select all active club players once. Linked family members are merged with their player account to keep the list unique.</p>
+            </div>
+            <div class="rounded-2xl bg-indigo-50 px-4 py-2 text-center text-indigo-900">
+              <div class="text-xs font-bold uppercase tracking-wide text-indigo-500">Club members</div>
+              <div class="text-2xl font-black">{{ selectedClubMemberKeys.length }}</div>
+            </div>
+          </div>
+          <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <div>
+              <label class="form-label">Players</label>
+              <select v-model="selectedClubMemberKeys" multiple size="6" class="form-input min-h-36">
+                <option v-for="option in clubMemberOptions" :key="option.key" :value="option.key">{{ option.label }}</option>
+              </select>
+              <p class="mt-1 text-xs text-slate-500">Tip: use Ctrl/⌘ or Shift to select multiple players.</p>
+            </div>
+            <button class="btn-dark w-full lg:w-auto" @click="saveClubMemberSelection">Save club members</button>
+          </div>
+        </section>
+
+        <article v-for="member in adminUsers" :key="member.id" class="panel-card space-y-3 p-4 sm:p-5">
           <div class="grid gap-3 lg:grid-cols-[1.1fr_1fr_1fr_auto] lg:items-end">
             <div>
               <label class="form-label">Name</label>
@@ -1089,7 +1112,7 @@
             </div>
           </div>
 
-          <div class="grid gap-3 md:grid-cols-4">
+          <div class="grid gap-3 md:grid-cols-3">
             <div>
               <label class="form-label">Reset password</label>
               <input
@@ -1100,10 +1123,6 @@
                 placeholder="Leave blank to keep"
               />
             </div>
-            <label class="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-              <input v-model="member.is_club_member" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-              Club member
-            </label>
             <label class="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
               <input
                 :checked="['admin', 'super_admin'].includes(member.role)"
@@ -1153,11 +1172,7 @@
                   <option :value="null">No linked account</option>
                   <option v-for="option in linkableUserOptions(member.id)" :key="option.id" :value="option.id">{{ option.label }}</option>
                 </select>
-                <div class="flex items-center gap-2">
-                  <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
-                    <input v-model="familyMember.is_club_member" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                    Club member
-                  </label>
+                <div class="flex items-center justify-end">
                   <button class="btn-secondary" @click="updateAdminFamilyMember(member, familyMember)">Save</button>
                 </div>
                 <button class="btn-muted" @click="deleteAdminFamilyMember(member, familyMember)">Remove</button>
@@ -1595,6 +1610,8 @@ export default {
     const adminUsers = ref([])
     const playDays = ref([])
     const miscCosts = ref([])
+    const miscCostArchiveCutoffDate = ref(null)
+    const selectedClubMemberKeys = ref([])
     const monthlyInvoice = ref(null)
     const currentPaymentInvoice = ref(null)
     const defaultWiseRedirectUrl = `${window.location.origin}/my-invoices`
@@ -1722,6 +1739,7 @@ export default {
     })
     const completedBookings = computed(() => completedBookingHistory.value)
     const archivedBookings = computed(() => archivedBookingHistory.value)
+    const clubMemberOptions = computed(() => buildClubMemberOptions())
     const maxFamilyAttendees = computed(() => familyMembers.value.length + 1)
     const familyAttendancePeople = computed(() => {
       getAuthSessionVersion()
@@ -2161,9 +2179,13 @@ export default {
       playDays.value = (data.days || []).map(normalizePlayDay)
     }
 
-    async function loadMiscCosts() {
-      const data = await fetchJson('/api/misc-costs')
+    async function loadMiscCosts(options = {}) {
+      const params = new URLSearchParams()
+      if (options.status) params.set('status', options.status)
+      const query = params.toString()
+      const data = await fetchJson(`/api/misc-costs${query ? `?${query}` : ''}`)
       miscCosts.value = data.costs || []
+      miscCostArchiveCutoffDate.value = data.archive_cutoff_date || miscCostArchiveCutoffDate.value
     }
 
     async function loadMonthlyInvoice() {
@@ -2185,6 +2207,7 @@ export default {
     async function loadAdminUsers() {
       const data = await fetchJson('/api/admin/users')
       adminUsers.value = data.users || []
+      syncSelectedClubMembers()
     }
 
 
@@ -2655,7 +2678,7 @@ export default {
             loadPlayAvailability(),
             loadCourts(),
             loadAdminUsers(),
-            loadMiscCosts()
+            loadMiscCosts({ status: 'all' })
           ])
         } else if (activeView.value === 'admin-courts') {
           if (!loggedIn) {
@@ -3158,6 +3181,101 @@ export default {
       }
     }
 
+    function isArchivedMiscCost(cost) {
+      return Boolean(cost?.purchase_date && miscCostArchiveCutoffDate.value && cost.purchase_date < miscCostArchiveCutoffDate.value)
+    }
+
+    function clubMemberLabel(person) {
+      return person.name || person.email || person.phone || 'Unnamed player'
+    }
+
+    function buildClubMemberOptions() {
+      const options = []
+      const seenUserIds = new Set()
+      for (const member of adminUsers.value) {
+        const key = `user:${member.id}`
+        seenUserIds.add(Number(member.id))
+        const linkedNames = (member.family_members || [])
+          .filter((familyMember) => Number(familyMember.linked_user_id) === Number(member.id))
+          .map((familyMember) => familyMember.name)
+          .filter(Boolean)
+        options.push({
+          key,
+          type: 'user',
+          id: member.id,
+          familyIds: (member.family_members || [])
+            .filter((familyMember) => Number(familyMember.linked_user_id) === Number(member.id))
+            .map((familyMember) => familyMember.id),
+          label: linkedNames.length ? `${clubMemberLabel(member)} (${linkedNames.join(', ')})` : clubMemberLabel(member),
+          selected: Boolean(member.is_club_member)
+        })
+      }
+      for (const owner of adminUsers.value) {
+        for (const familyMember of owner.family_members || []) {
+          if (familyMember.linked_user_id && seenUserIds.has(Number(familyMember.linked_user_id))) continue
+          options.push({
+            key: `family:${familyMember.id}`,
+            type: 'family',
+            id: familyMember.id,
+            label: `${clubMemberLabel(familyMember)} · family of ${clubMemberLabel(owner)}`,
+            selected: Boolean(familyMember.is_club_member)
+          })
+        }
+      }
+      return options.sort((a, b) => a.label.localeCompare(b.label))
+    }
+
+    function syncSelectedClubMembers() {
+      selectedClubMemberKeys.value = buildClubMemberOptions()
+        .filter((option) => option.selected)
+        .map((option) => option.key)
+    }
+
+    async function saveClubMemberSelection() {
+      const selected = new Set(selectedClubMemberKeys.value)
+      try {
+        const requests = []
+        for (const option of buildClubMemberOptions()) {
+          const isSelected = selected.has(option.key)
+          if (option.type === 'user') {
+            const member = adminUsers.value.find((user) => Number(user.id) === Number(option.id))
+            if (member && Boolean(member.is_club_member) !== isSelected) {
+              requests.push(fetchJson(`/api/admin/users/${member.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_club_member: isSelected })
+              }))
+            }
+            for (const familyId of option.familyIds || []) {
+              const familyMember = adminUsers.value.flatMap((user) => user.family_members || []).find((item) => Number(item.id) === Number(familyId))
+              if (familyMember && Boolean(familyMember.is_club_member) !== isSelected) {
+                requests.push(fetchJson(`/api/admin/family-members/${familyMember.id}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ is_club_member: isSelected })
+                }))
+              }
+            }
+          } else {
+            const familyMember = adminUsers.value.flatMap((user) => user.family_members || []).find((item) => Number(item.id) === Number(option.id))
+            if (familyMember && Boolean(familyMember.is_club_member) !== isSelected) {
+              requests.push(fetchJson(`/api/admin/family-members/${familyMember.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_club_member: isSelected })
+              }))
+            }
+          }
+        }
+        await Promise.all(requests)
+        msg.value = requests.length ? `Updated ${selected.size} club members.` : 'Club member selection is already up to date.'
+        await loadAdminUsers()
+      } catch (err) {
+        msg.value = err.message
+        await loadAdminUsers()
+      }
+    }
+
     function splitScopeLabel(scope) {
       return scope === 'club_members' ? 'Club members only' : 'All members'
     }
@@ -3377,6 +3495,8 @@ export default {
       upcomingBookings,
       completedBookings,
       archivedBookings,
+      selectedClubMemberKeys,
+      clubMemberOptions,
       completedBookingPagination,
       archivedBookingPagination,
       completedBookingTab,
@@ -3388,6 +3508,8 @@ export default {
       familyAttendancePeople,
       availabilityPeople,
       miscCosts,
+      isArchivedMiscCost,
+      saveClubMemberSelection,
       monthlyInvoice,
       currentPaymentInvoice,
       memberOptions,

@@ -256,10 +256,28 @@ def _billable_member_count_for_owner(owner, split_scope='manual'):
     scope = split_scope or 'manual'
     if scope == 'manual':
         return 1
-    count = 1 if scope == 'all_members' or bool(owner.is_club_member) else 0
-    for member in owner.family_members:
-        if scope == 'all_members' or bool(member.is_club_member):
+
+    count = 0
+    counted_user_ids = set()
+    family_users = _family_group_users(owner)
+    for group_user in family_users:
+        if group_user.id not in counted_user_ids and (scope == 'all_members' or bool(group_user.is_club_member)):
             count += 1
+            counted_user_ids.add(group_user.id)
+
+        for member in group_user.family_members:
+            linked_user = member.linked_user
+            if linked_user:
+                if linked_user.id in counted_user_ids:
+                    continue
+                if scope == 'all_members' or bool(linked_user.is_club_member) or bool(member.is_club_member):
+                    count += 1
+                    counted_user_ids.add(linked_user.id)
+                continue
+
+            if scope == 'all_members' or bool(member.is_club_member):
+                count += 1
+
     return count
 
 

@@ -287,34 +287,23 @@ def create_app():
             if column_name not in existing_invoice_columns:
                 db.session.execute(db.text(f'ALTER TABLE invoices ADD COLUMN {column_name} {column_spec}'))
         db.session.commit()
-        should_seed_default_admin = (
+        dummy_user_filters = (
+            User.email.in_(['admin@example.com', 'user@example.com']),
+            User.phone.in_(['+10000000000', '+10000000001']),
+            User.name.in_(['admin', 'user', 'Demo Admin', 'Demo User']),
+        )
+        for dummy_user in User.query.filter(db.or_(*dummy_user_filters)).all():
+            db.session.delete(dummy_user)
+
+        development_defaults_enabled = (
             app.config.get('TESTING')
             or app.config.get('AUTH_MOCK')
-            or os.environ.get('ALLOW_DEFAULT_ADMIN_SEED', '').lower() in ('1', 'true', 'yes')
             or os.environ.get('FLASK_ENV', '').lower() == 'development'
         )
-        if should_seed_default_admin:
-            upsert_login_user(
-                phone='+10000000000',
-                email='admin@example.com',
-                name='admin',
-                role='admin',
-                password=os.environ.get('DEFAULT_ADMIN_PASSWORD', 'admin123'),
-                aliases=('Demo Admin',),
-            )
-            upsert_login_user(
-                phone='+10000000001',
-                email='user@example.com',
-                name='user',
-                role='member',
-                password=os.environ.get('DEFAULT_MEMBER_PASSWORD', 'user123'),
-                aliases=('Demo User',),
-            )
-
         anand_password = (
             os.environ.get('ANAND_SUPER_ADMIN_PASSWORD')
             or os.environ.get('DEFAULT_SUPER_ADMIN_PASSWORD')
-            or ('admin123' if should_seed_default_admin else None)
+            or ('admin123' if development_defaults_enabled else None)
         )
         upsert_login_user(
             phone=os.environ.get('ANAND_SUPER_ADMIN_PHONE', 'email:arnand0413@gmail.com'),

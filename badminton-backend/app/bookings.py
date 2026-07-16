@@ -2756,15 +2756,9 @@ def update_whatsapp_notification(setting_id):
     return jsonify(setting.to_dict())
 
 
-@bookings_bp.route('/admin/whatsapp-notifications/<int:setting_id>/test', methods=['POST'])
-def test_whatsapp_notification(setting_id):
-    user, error = _require_admin()
-    if error:
-        return error
-    from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
-    setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
-    data = request.get_json() or {}
-    sample_context = {
+def _whatsapp_sample_context(setting, data=None):
+    data = data or {}
+    return {
         'court': data.get('court', data.get('court_name', 'Sample court')),
         'court_name': data.get('court_name', data.get('court', 'Sample court')),
         'court.name': data.get('court_name', data.get('court', 'Sample court')),
@@ -2780,7 +2774,52 @@ def test_whatsapp_notification(setting_id):
         'status': data.get('status', 'settled'),
         'amount': data.get('amount', '25.00'),
     }
-    message = _render_template(setting.template, sample_context)
+
+
+@bookings_bp.route('/admin/whatsapp-notifications/<int:setting_id>/preview', methods=['POST'])
+def preview_whatsapp_notification(setting_id):
+    _, error = _require_admin()
+    if error:
+        return error
+    from .models import WhatsAppNotificationSetting
+    setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
+    data = request.get_json() or {}
+    message = data.get('message') or _render_template(setting.template, _whatsapp_sample_context(setting, data))
+    recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id(setting.event_key)
+    return jsonify({'message': message, 'recipient': recipient, 'setting': setting.to_dict(), 'test_recipients': _whatsapp_known_test_recipients()})
+
+
+@bookings_bp.route('/admin/whatsapp-notifications/<int:setting_id>/send', methods=['POST'])
+def send_whatsapp_notification(setting_id):
+    user, error = _require_admin()
+    if error:
+        return error
+    from .models import WhatsAppNotificationSetting
+    setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
+    data = request.get_json() or {}
+    message = (data.get('message') or _render_template(setting.template, _whatsapp_sample_context(setting, data))).strip()
+    if not message:
+        return jsonify({'error': 'message required'}), 400
+    if data.get('test'):
+        recipient = _normalize_whatsapp_test_recipient(data.get('recipient') or setting.test_recipient_number)
+        if not recipient:
+            return jsonify({'error': 'test recipient required'}), 400
+    else:
+        recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id(setting.event_key)
+    log = _log_whatsapp_message(setting, message, recipient)
+    _record_admin_audit(user, 'send', 'whatsapp_notification', log.id, f'Sent WhatsApp notification {setting.title}', {'status': log.status, 'test': bool(data.get('test')), 'recipient': log.recipient})
+    return jsonify({'status': log.status, 'message': message, 'log': log.to_dict()})
+
+
+@bookings_bp.route('/admin/whatsapp-notifications/<int:setting_id>/test', methods=['POST'])
+def test_whatsapp_notification(setting_id):
+    user, error = _require_admin()
+    if error:
+        return error
+    from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
+    setting = WhatsAppNotificationSetting.query.get_or_404(setting_id)
+    data = request.get_json() or {}
+    message = _render_template(setting.template, _whatsapp_sample_context(setting, data))
     recipient = _normalize_whatsapp_test_recipient(data.get('recipient') or setting.test_recipient_number)
     if not recipient:
         recipient = (setting.group_id or '').strip() or None

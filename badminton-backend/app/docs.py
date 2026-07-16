@@ -39,6 +39,8 @@ ENDPOINT_DOCS = {
     '/api/admin/whatsapp-notifications': ('WhatsApp', 'List WhatsApp notification settings and recent logs.'),
     '/api/admin/whatsapp-notifications/{setting_id}': ('WhatsApp', 'Update a WhatsApp notification setting.'),
     '/api/admin/whatsapp-notifications/{setting_id}/test': ('WhatsApp', 'Send a test WhatsApp notification.'),
+    '/api/admin/whatsapp-notifications/{setting_id}/preview': ('WhatsApp', 'Preview a WhatsApp notification before group send.'),
+    '/api/admin/whatsapp-notifications/{setting_id}/send': ('WhatsApp', 'Send a WhatsApp notification to the configured group or test recipient.'),
     '/api/admin/availability-summary/preview': ('WhatsApp', 'Preview the availability overview notification before sending.'),
     '/api/admin/availability-summary/send': ('WhatsApp', 'Send the availability overview notification.'),
     '/api/admin/payment-invoices/monthly/notify/preview': ('WhatsApp', 'Preview the monthly invoice-ready notification before sending.'),

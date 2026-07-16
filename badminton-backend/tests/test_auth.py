@@ -34,16 +34,12 @@ def test_verify_and_me(client):
     assert d3['user']['phone'] == phone
 
 
-def test_seeded_admin_login_credentials(client):
+def test_dummy_admin_login_credentials_are_not_seeded(client):
     resp = client.post('/api/auth/login', json={'username': 'admin', 'password': 'admin123'})
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data.get('status') == 'ok'
-    assert data.get('user', {}).get('role') == 'admin'
+    assert resp.status_code == 401
 
     phone_resp = client.post('/api/auth/login', json={'username': '+10000000000', 'password': 'admin123'})
-    assert phone_resp.status_code == 200
-    assert phone_resp.get_json().get('user', {}).get('role') == 'admin'
+    assert phone_resp.status_code == 401
 
 
 def test_register_and_login_with_email_password(client):
@@ -90,12 +86,9 @@ def test_register_without_whatsapp(client):
     assert data.get('user', {}).get('whatsapp_number') is None
 
 
-def test_seeded_member_login_credentials(client):
+def test_dummy_member_login_credentials_are_not_seeded(client):
     resp = client.post('/api/auth/login', json={'username': 'user', 'password': 'user123'})
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data.get('status') == 'ok'
-    assert data.get('user', {}).get('role') == 'member'
+    assert resp.status_code == 401
 
 
 def test_anand_parasuraman_is_seeded_as_super_admin(client):

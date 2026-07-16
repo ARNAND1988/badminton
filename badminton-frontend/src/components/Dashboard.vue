@@ -8,6 +8,48 @@
     </div>
     <p v-if="msg" class="alert-muted">{{ msg }}</p>
 
+
+    <div v-if="notificationPreview.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+      <div class="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-lg font-bold text-slate-950">{{ notificationPreview.title }}</h3>
+            <p class="mt-1 text-sm text-slate-600">Review and edit the WhatsApp message before sending.</p>
+            <p v-if="notificationPreview.recipient" class="mt-1 text-xs text-slate-500">Group recipient: {{ notificationPreview.recipient }}</p>
+          </div>
+          <button class="btn-muted" @click="closeNotificationPreview">Close</button>
+        </div>
+
+        <label class="mt-4 block">
+          <span class="form-label">Message content</span>
+          <textarea v-model="notificationPreview.message" rows="10" class="form-input font-mono text-sm"></textarea>
+        </label>
+
+        <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <label class="block">
+            <span class="form-label">Send test to saved WhatsApp number</span>
+            <select v-model="notificationPreview.testRecipient" class="form-input">
+              <option value="">Choose saved test number</option>
+              <option v-for="recipient in notificationPreview.testRecipients" :key="recipient.normalized || recipient.value" :value="recipient.value">
+                {{ recipient.label }}
+              </option>
+            </select>
+          </label>
+          <p class="mt-1 text-xs text-slate-500">Saved numbers come from the WhatsApp Management page test recipient fields.</p>
+          <button class="btn-secondary mt-3" :disabled="notificationPreview.sending || !notificationPreview.testRecipient" @click="sendNotificationPreview(true)">
+            {{ notificationPreview.sending ? 'Sending...' : 'Send test notification' }}
+          </button>
+        </div>
+
+        <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <button class="btn-muted" @click="closeNotificationPreview">Cancel</button>
+          <button class="btn-dark" :disabled="notificationPreview.sending || !notificationPreview.message.trim()" @click="sendNotificationPreview(false)">
+            {{ notificationPreview.sending ? 'Sending...' : 'Send to group' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <section v-if="activeView === 'bookings'" class="space-y-6">
       <div class="rounded-lg bg-white p-6 shadow-sm">
         <div class="flex w-full items-center justify-between p-3">
@@ -474,7 +516,7 @@
           <h2 class="section-title">Availability</h2>
           <p class="section-copy mt-1">Next 7 days are always visible. Log in to cast or update your family vote.</p>
         </div>
-        <button v-if="isAdmin" type="button" class="btn-dark w-full sm:w-auto" @click="sendAvailabilitySummary">
+        <button v-if="isAdmin" type="button" class="btn-dark w-full sm:w-auto" @click="openAvailabilitySummaryPreview">
           Send availability overview
         </button>
       </div>
@@ -764,7 +806,7 @@
                 <option value="SETTLED">Settled</option>
               </select>
             </label>
-            <button class="btn-secondary" @click="notifyMonthlyInvoicesReady">Notify group</button>
+            <button class="btn-secondary" @click="openMonthlyInvoiceNotificationPreview">Notify group</button>
           </div>
         </div>
         <div v-if="adminMonthlyInvoices" class="mt-4 space-y-4">
@@ -1504,6 +1546,7 @@ export default {
     const monthlyInvoiceMonth = ref(localIsoMonth())
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
+    const notificationPreview = ref({ open: false, type: '', title: '', endpoint: '', payload: {}, message: '', recipient: '', testRecipient: '', testRecipients: [], sending: false })
     const systemChecks = ref(null)
     const systemCheckQuery = ref('')
     const systemCheckWhatsAppRecipient = ref('')
@@ -2121,7 +2164,19 @@ export default {
 
 
     function normalizePaymentSettings(settings = {}) {
-      return {
+      const textFields = [
+        'account_holder_name',
+        'bank_name',
+        'bic',
+        'iban',
+        'description_prefix',
+        'wise_api_base_url',
+        'wise_client_key',
+        'wise_payment_url',
+        'wise_profile_id',
+        'wise_webhook_subscription_id'
+      ]
+      const normalized = {
         qr_enabled: true,
         test_mode: true,
         default_due_days: 14,
@@ -2131,6 +2186,14 @@ export default {
         wise_redirect_url: settings.wise_redirect_url || defaultWiseRedirectUrl,
         wise_webhook_url: settings.wise_webhook_url || defaultWiseWebhookUrl
       }
+      for (const field of textFields) {
+        normalized[field] = normalized[field] ?? ''
+      }
+      normalized.default_due_days = Number(normalized.default_due_days || 14)
+      normalized.qr_enabled = Boolean(normalized.qr_enabled)
+      normalized.test_mode = Boolean(normalized.test_mode)
+      normalized.wise_api_token_configured = Boolean(normalized.wise_api_token_configured)
+      return normalized
     }
 
     async function loadPaymentSettings() {
@@ -2248,9 +2311,65 @@ export default {
       }
     }
 
-    async function notifyMonthlyInvoicesReady() {
-      const data = await fetchJson('/api/admin/payment-invoices/monthly/notify', { method: 'POST', body: JSON.stringify({ month: monthlyInvoiceMonth.value }) })
-      msg.value = `Monthly payment notification ${data.status}.`
+    async function openNotificationPreview({ type, title, previewEndpoint, sendEndpoint, payload }) {
+      const data = await fetchJson(previewEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload || {})
+      })
+      notificationPreview.value = {
+        open: true,
+        type,
+        title,
+        endpoint: sendEndpoint,
+        payload: payload || {},
+        message: data.message || '',
+        recipient: data.recipient || '',
+        testRecipient: data.test_recipients?.[0]?.value || '',
+        testRecipients: data.test_recipients || [],
+        sending: false
+      }
+      errorMsg.value = ''
+    }
+
+    async function openMonthlyInvoiceNotificationPreview() {
+      await openNotificationPreview({
+        type: 'monthly_invoice_ready',
+        title: 'Monthly invoice notification',
+        previewEndpoint: '/api/admin/payment-invoices/monthly/notify/preview',
+        sendEndpoint: '/api/admin/payment-invoices/monthly/notify',
+        payload: { month: monthlyInvoiceMonth.value }
+      })
+    }
+
+    function closeNotificationPreview() {
+      notificationPreview.value.open = false
+    }
+
+    async function sendNotificationPreview(test = false) {
+      notificationPreview.value.sending = true
+      try {
+        const data = await fetchJson(notificationPreview.value.endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...notificationPreview.value.payload,
+            message: notificationPreview.value.message,
+            test,
+            recipient: test ? notificationPreview.value.testRecipient : undefined
+          })
+        })
+        msg.value = test
+          ? `Test notification ${data.status || data.log?.status || 'sent'} to ${data.log?.recipient || notificationPreview.value.testRecipient}.`
+          : `Notification ${data.status || data.log?.status || 'sent'} to group.`
+        errorMsg.value = ''
+        if (!test) closeNotificationPreview()
+        await loadWhatsAppNotifications().catch(() => {})
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        notificationPreview.value.sending = false
+      }
     }
 
     async function copyText(value) {
@@ -2412,20 +2531,15 @@ export default {
       await loadWhatsAppNotifications()
     }
 
-    async function sendAvailabilitySummary() {
-      const data = await fetchJson('/api/admin/availability-summary/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days: 7 })
+    async function openAvailabilitySummaryPreview() {
+      await openNotificationPreview({
+        type: 'availability_summary',
+        title: 'Availability overview notification',
+        previewEndpoint: '/api/admin/availability-summary/preview',
+        sendEndpoint: '/api/admin/availability-summary/send',
+        payload: { days: 7 }
       })
-      if (data.log) {
-        const statusLabel = data.log.status === 'sent' ? 'sent' : `prepared but ${data.log.status}`
-        msg.value = `Availability overview ${statusLabel}.`
-      } else {
-        msg.value = 'Availability overview was not sent. Check that the WhatsApp availability setting is enabled and set to send to group.'
-      }
       await loadPlayAvailability()
-      if (isAdmin.value) await loadWhatsAppNotifications()
     }
 
     async function loadDashboard() {
@@ -3212,6 +3326,7 @@ export default {
       monthlyInvoiceMonth,
       whatsappSettings,
       whatsappLogs,
+      notificationPreview,
       systemChecks,
       systemCheckQuery,
       systemCheckWhatsAppRecipient,
@@ -3324,7 +3439,9 @@ export default {
       setPaymentStatus,
       setMonthlyInvoiceStatus,
       generateTestInvoice,
-      notifyMonthlyInvoicesReady,
+      openMonthlyInvoiceNotificationPreview,
+      closeNotificationPreview,
+      sendNotificationPreview,
       clearSystemCheckLookup,
       copyText,
       paymentStatusLabel,
@@ -3349,7 +3466,7 @@ export default {
       saveFamilyPersonAttendance,
       saveWhatsAppNotification,
       runWhatsAppConnectionTest,
-      sendAvailabilitySummary,
+      openAvailabilitySummaryPreview,
       testWhatsAppNotification,
       retryWiseWebhookEvent,
       setAvailabilityPersonStatus,

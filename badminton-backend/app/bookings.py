@@ -760,6 +760,43 @@ def _ensure_historical_booking_data():
     db.session.commit()
 
 
+def _participant_related_keys(phone):
+    normalized_phone = (phone or '').strip()
+    keys = {normalized_phone} if normalized_phone else set()
+    if normalized_phone.startswith('family:'):
+        try:
+            member_id = int(normalized_phone.split(':', 1)[1])
+        except (TypeError, ValueError):
+            member_id = None
+        member = FamilyMember.query.get(member_id) if member_id else None
+        if member:
+            keys.add(f'family:{member.id}')
+            if member.linked_user and member.linked_user.phone:
+                keys.add(member.linked_user.phone)
+            for reciprocal in FamilyMember.query.filter_by(linked_user_id=member.linked_user_id).all() if member.linked_user_id else []:
+                keys.add(f'family:{reciprocal.id}')
+    else:
+        linked_user = User.query.filter_by(phone=normalized_phone).first()
+        if linked_user:
+            for member in FamilyMember.query.filter_by(linked_user_id=linked_user.id).all():
+                keys.add(f'family:{member.id}')
+    return {key for key in keys if key}
+
+
+def _canonical_participant_phone(phone):
+    normalized_phone = (phone or '').strip()
+    if not normalized_phone.startswith('family:'):
+        return normalized_phone
+    try:
+        member_id = int(normalized_phone.split(':', 1)[1])
+    except (TypeError, ValueError):
+        return normalized_phone
+    member = FamilyMember.query.get(member_id)
+    if member and member.linked_user and member.linked_user.phone:
+        return member.linked_user.phone
+    return normalized_phone
+
+
 def _upsert_participant(booking, phone, name=None, status='tentative', is_adhoc=False):
     normalized_phone = (phone or '').strip()
     if not normalized_phone:
@@ -767,13 +804,21 @@ def _upsert_participant(booking, phone, name=None, status='tentative', is_adhoc=
     if not _valid_participant_status(status):
         raise ValueError('invalid_status')
 
-    participant = BookingParticipant.query.filter_by(
-        booking_id=booking.id,
-        phone=normalized_phone
-    ).first()
+    related_keys = _participant_related_keys(normalized_phone)
+    canonical_phone = _canonical_participant_phone(normalized_phone)
+    related_keys.add(canonical_phone)
+    matches = BookingParticipant.query.filter(
+        BookingParticipant.booking_id == booking.id,
+        BookingParticipant.phone.in_(related_keys),
+    ).order_by(BookingParticipant.created_at.asc(), BookingParticipant.id.asc()).all()
+    participant = matches[0] if matches else None
     if not participant:
-        participant = BookingParticipant(booking_id=booking.id, phone=normalized_phone)
+        participant = BookingParticipant(booking_id=booking.id, phone=canonical_phone)
         db.session.add(participant)
+    else:
+        participant.phone = canonical_phone
+        for duplicate in matches[1:]:
+            db.session.delete(duplicate)
 
     participant.name = (name or participant.name or '').strip() or None
     participant.status = _participant_status_for_booking(booking, status)
@@ -1322,9 +1367,10 @@ def save_booking_family_attendance(booking_id):
             member = family_members.get(member_id)
             if not member:
                 return jsonify({'error': 'family_member_not_found'}), 404
+            participant_phone = member.linked_user.phone if member.linked_user and member.linked_user.phone else f'family:{member.id}'
             saved.append(_upsert_participant(
                 booking,
-                f'family:{member.id}',
+                participant_phone,
                 name=member.name,
                 status=status,
                 is_adhoc=False
@@ -2312,13 +2358,50 @@ def _send_whatsapp_bot_message(message, recipient=None):
         return 'failed', str(exc)
 
 
-def _send_whatsapp_event(event_key, context, dedupe_key=None):
-    from .models import WhatsAppNotificationLog, WhatsAppNotificationSetting
+def _whatsapp_setting(event_key):
+    from .models import WhatsAppNotificationSetting
     _ensure_whatsapp_notification_settings()
-    setting = WhatsAppNotificationSetting.query.filter_by(event_key=event_key).first()
-    if not setting or not setting.is_enabled or not setting.send_to_group:
+    return WhatsAppNotificationSetting.query.filter_by(event_key=event_key).first()
+
+
+def _whatsapp_known_test_recipients():
+    from .models import WhatsAppNotificationSetting
+    _ensure_whatsapp_notification_settings()
+    recipients = []
+    seen = set()
+    settings = WhatsAppNotificationSetting.query.filter(WhatsAppNotificationSetting.test_recipient_number.isnot(None)).order_by(WhatsAppNotificationSetting.title.asc()).all()
+    for setting in settings:
+        value = (setting.test_recipient_number or '').strip()
+        normalized = _normalize_whatsapp_test_recipient(value)
+        if not value or normalized in seen:
+            continue
+        seen.add(normalized)
+        recipients.append({'label': f'{setting.title}: {value}', 'value': value, 'normalized': normalized})
+    return recipients
+
+
+def _log_whatsapp_message(setting, message, recipient, response_suffix=None):
+    from .models import WhatsAppNotificationLog
+    status, response_text = _send_whatsapp_bot_message(message, recipient)
+    log = WhatsAppNotificationLog(
+        setting_id=setting.id if setting else None,
+        event_key=setting.event_key if setting else 'custom_notification',
+        recipient=recipient,
+        message=message,
+        status=status,
+        response=f'{response_text}\n{response_suffix}' if response_suffix else response_text,
+    )
+    db.session.add(log)
+    db.session.commit()
+    return log
+
+
+def _send_whatsapp_event(event_key, context, dedupe_key=None, message_override=None, recipient_override=None, force=False):
+    setting = _whatsapp_setting(event_key)
+    if not setting or (not force and (not setting.is_enabled or not setting.send_to_group)):
         return None
-    if dedupe_key:
+    if dedupe_key and not force:
+        from .models import WhatsAppNotificationLog
         existing_log = WhatsAppNotificationLog.query.filter(
             WhatsAppNotificationLog.event_key == event_key,
             WhatsAppNotificationLog.response.contains(dedupe_key)
@@ -2326,20 +2409,9 @@ def _send_whatsapp_event(event_key, context, dedupe_key=None):
         if existing_log:
             return None
 
-    message = _render_template(setting.template, context)
-    recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id(event_key)
-    status, response_text = _send_whatsapp_bot_message(message, recipient)
-    log = WhatsAppNotificationLog(
-        setting_id=setting.id,
-        event_key=setting.event_key,
-        recipient=recipient,
-        message=message,
-        status=status,
-        response=f'{response_text}\n{dedupe_key}' if dedupe_key else response_text,
-    )
-    db.session.add(log)
-    db.session.commit()
-    return log
+    message = message_override if message_override is not None else _render_template(setting.template, context)
+    recipient = recipient_override if recipient_override is not None else (setting.group_id or '').strip() or _fallback_whatsapp_group_id(event_key)
+    return _log_whatsapp_message(setting, message, recipient, response_suffix=dedupe_key if dedupe_key else None)
 
 
 
@@ -2406,28 +2478,34 @@ def _availability_days_payload(days=7, start=None):
     date_values = [date_value.strftime('%Y-%m-%d') for date_value in dates]
     votes = PlayAvailabilityVote.query.filter(PlayAvailabilityVote.play_date.in_(date_values)).all()
     totals = {}
+    attendees_by_date = {}
     for vote in votes:
-        if vote.play_date not in totals:
-            totals[vote.play_date] = {
-                'available_count': 0,
-                'tentative_count': 0,
-                'available_attendees': [],
-                'tentative_attendees': [],
-            }
+        totals.setdefault(vote.play_date, {
+            'available_count': 0,
+            'tentative_count': 0,
+            'available_attendees': [],
+            'tentative_attendees': [],
+        })
+        attendees_by_date.setdefault(vote.play_date, {})
         vote_payload = vote.to_dict()
         attendees = vote_payload.get('attendee_details') or []
         status = vote.status or ('available' if vote.available else 'not_available')
         fallback_name = vote.user.name or vote.user.email or vote.user.phone if vote.user else 'Member'
         if not attendees and status in {'available', 'tentative'}:
-            attendees = [{'name': fallback_name, 'status': status}]
+            attendees = [{'type': 'self', 'name': fallback_name, 'status': status, 'phone': vote.user.phone if vote.user else None}]
         for attendee in attendees:
             attendee_status = attendee.get('status', status)
-            if attendee_status == 'available':
-                totals[vote.play_date]['available_count'] += 1
-                totals[vote.play_date]['available_attendees'].append(attendee)
-            elif attendee_status == 'tentative':
-                totals[vote.play_date]['tentative_count'] += 1
-                totals[vote.play_date]['tentative_attendees'].append(attendee)
+            if attendee_status in {'available', 'tentative'}:
+                _availability_merge_attendee(attendees_by_date[vote.play_date], attendee, attendee_status, fallback_user_id=vote.user_id)
+    for date_value, attendees_by_key in attendees_by_date.items():
+        available_attendees = [attendee for attendee in attendees_by_key.values() if attendee.get('status') == 'available']
+        tentative_attendees = [attendee for attendee in attendees_by_key.values() if attendee.get('status') == 'tentative']
+        totals[date_value] = {
+            'available_count': len(available_attendees),
+            'tentative_count': len(tentative_attendees),
+            'available_attendees': available_attendees,
+            'tentative_attendees': tentative_attendees,
+        }
     return [{
         'date': date_value,
         'weekday': datetime.strptime(date_value, '%Y-%m-%d').strftime('%A'),
@@ -2484,19 +2562,54 @@ def run_booking_reminders():
     return jsonify({'sent': len(logs), 'logs': [log.to_dict() for log in logs]})
 
 
+def _availability_summary_preview(days=7):
+    days = min(max(int(days or 7), 1), 14)
+    days_payload = _availability_days_payload(days=days)
+    context = _availability_summary_context(days_payload)
+    setting = _whatsapp_setting('availability_summary')
+    message = _render_template(setting.template if setting else '{{overview}}', context)
+    recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id('availability_summary') if setting else None
+    return setting, context, message, recipient, days
+
+
+@bookings_bp.route('/admin/availability-summary/preview', methods=['POST'])
+def preview_availability_summary():
+    _, error = _require_admin()
+    if error:
+        return error
+    data = request.get_json() or {}
+    setting, context, message, recipient, days = _availability_summary_preview(data.get('days', 7))
+    return jsonify({
+        'message': message,
+        'context': context,
+        'recipient': recipient,
+        'setting': setting.to_dict() if setting else None,
+        'test_recipients': _whatsapp_known_test_recipients(),
+        'days': days,
+    })
+
+
 @bookings_bp.route('/admin/availability-summary/send', methods=['POST'])
 def send_availability_summary():
     user, error = _require_admin()
     if error:
         return error
     data = request.get_json() or {}
-    days = min(max(int(data.get('days', 7) or 7), 1), 14)
-    days_payload = _availability_days_payload(days=days)
-    context = _availability_summary_context(days_payload)
-    log = _send_whatsapp_event('availability_summary', context)
+    setting, context, message, recipient, days = _availability_summary_preview(data.get('days', 7))
+    message = (data.get('message') or message).strip()
+    if not message:
+        return jsonify({'error': 'message required'}), 400
+    send_test = bool(data.get('test'))
+    recipient_override = None
+    if send_test:
+        recipient_override = _normalize_whatsapp_test_recipient(data.get('recipient'))
+        if not recipient_override:
+            return jsonify({'error': 'test recipient required'}), 400
+    log = _send_whatsapp_event('availability_summary', context, message_override=message, recipient_override=recipient_override, force=send_test)
     if log:
-        _record_admin_audit(user, 'send', 'whatsapp_notification', log.id, 'Sent availability overview notification', {'days': days, 'status': log.status})
-    return jsonify({'sent': 1 if log else 0, 'message': context['overview'], 'log': log.to_dict() if log else None})
+        summary = 'Sent availability overview test notification' if send_test else 'Sent availability overview notification'
+        _record_admin_audit(user, 'send', 'whatsapp_notification', log.id, summary, {'days': days, 'status': log.status, 'test': send_test, 'recipient': log.recipient})
+    return jsonify({'sent': 1 if log else 0, 'message': message, 'status': log.status if log else 'skipped', 'log': log.to_dict() if log else None})
 
 
 @bookings_bp.route('/admin/audit-logs', methods=['GET'])
@@ -3855,15 +3968,67 @@ def latest_test_payment_invoice():
     return jsonify({'invoice': payload})
 
 
+def _monthly_invoice_ready_preview(month_value=None):
+    month_value = month_value or datetime.utcnow().strftime('%Y-%m')
+    start_date, _ = _month_bounds(month_value)
+    if not start_date:
+        raise ValueError('month must use YYYY-MM')
+    context = {
+        'month': month_value,
+        'app_url': request.host_url.rstrip('/'),
+        'note': 'Monthly invoices are ready. Please open the app, review your family total, and pay by bank transfer using the displayed reference.',
+    }
+    setting = _whatsapp_setting('monthly_invoice_ready')
+    message = _render_template(setting.template if setting else '💶 Monthly badminton invoices for {{month}} are ready. {{note}} Open: {{app_url}}', context)
+    recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id('monthly_invoice_ready') if setting else None
+    return setting, context, message, recipient, month_value
+
+
+@bookings_bp.route('/admin/payment-invoices/monthly/notify/preview', methods=['POST'])
+def preview_monthly_invoice_ready():
+    _, error = _require_any_admin()
+    if error:
+        return error
+    data = request.get_json() or {}
+    try:
+        setting, context, message, recipient, month_value = _monthly_invoice_ready_preview(data.get('month'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({
+        'message': message,
+        'context': context,
+        'recipient': recipient,
+        'setting': setting.to_dict() if setting else None,
+        'test_recipients': _whatsapp_known_test_recipients(),
+        'month': month_value,
+    })
+
+
 @bookings_bp.route('/admin/payment-invoices/monthly/notify', methods=['POST'])
 def notify_monthly_invoice_ready():
     user, error = _require_any_admin()
     if error:
         return error
-    month_value = (request.get_json() or {}).get('month') or datetime.utcnow().strftime('%Y-%m')
-    start_date, _ = _month_bounds(month_value)
-    if not start_date:
-        return jsonify({'error': 'month must use YYYY-MM'}), 400
-    context = {'month': month_value, 'app_url': request.host_url.rstrip('/'), 'note': 'Monthly invoices are ready. Please open the app, review your family total, and pay by bank transfer using the displayed reference.'}
-    log = _send_whatsapp_event('monthly_invoice_ready', context, dedupe_key=f'monthly_invoice_ready:{month_value}')
-    return jsonify({'status': 'sent' if log else 'skipped', 'log': log.to_dict() if log else None})
+    data = request.get_json() or {}
+    try:
+        setting, context, message, recipient, month_value = _monthly_invoice_ready_preview(data.get('month'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    message = (data.get('message') or message).strip()
+    if not message:
+        return jsonify({'error': 'message required'}), 400
+    send_test = bool(data.get('test'))
+    recipient_override = None
+    if send_test:
+        recipient_override = _normalize_whatsapp_test_recipient(data.get('recipient'))
+        if not recipient_override:
+            return jsonify({'error': 'test recipient required'}), 400
+    log = _send_whatsapp_event(
+        'monthly_invoice_ready',
+        context,
+        dedupe_key=None if send_test else f'monthly_invoice_ready:{month_value}',
+        message_override=message,
+        recipient_override=recipient_override,
+        force=send_test,
+    )
+    return jsonify({'status': 'sent' if log else 'skipped', 'message': message, 'log': log.to_dict() if log else None})

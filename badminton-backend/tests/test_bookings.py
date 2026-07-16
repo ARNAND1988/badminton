@@ -919,6 +919,58 @@ def test_member_can_set_family_attendance_for_booking(client, app):
     assert family_participant['status'] == 'attending'
 
 
+def test_linked_family_booking_attendance_updates_single_participant(client, app):
+    with app.app_context():
+        admin = User(phone='+31100003000', email='linked-booking-admin@example.com', name='Linked Booking Admin', role='admin')
+        owner = User(phone='+31100003001', email='linked-booking-owner@example.com', name='Linked Booking Owner', role='member')
+        child = User(phone='+31100003002', email='linked-booking-child@example.com', name='Linked Booking Child', role='member')
+        court = Court(name='Linked Family Court', hourly_rate=60.0, is_active=True)
+        db.session.add_all([admin, owner, child, court])
+        db.session.commit()
+        family = FamilyMember(user_id=owner.id, name='Linked Child Family Name', linked_user_id=child.id)
+        db.session.add(family)
+        db.session.commit()
+        court_id = court.id
+        family_id = family.id
+        child_phone = child.phone
+        admin_token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        owner_token = jwt.encode({'user_id': owner.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        child_token = jwt.encode({'user_id': child.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    admin_headers = {'Authorization': f'Bearer {admin_token}'}
+    owner_headers = {'Authorization': f'Bearer {owner_token}'}
+    child_headers = {'Authorization': f'Bearer {child_token}'}
+
+    create_resp = client.post('/api/bookings', json={
+        'court_id': court_id,
+        'booking_date': '2030-04-02',
+        'start_time': '18:00',
+        'end_time': '19:00',
+        'cost': 60,
+    }, headers=admin_headers)
+    assert create_resp.status_code == 200
+    booking_id = create_resp.get_json()['id']
+
+    family_resp = client.post(f'/api/bookings/{booking_id}/family-attendance', json={
+        'attendees': [{'type': 'family', 'family_member_id': family_id, 'status': 'attending'}]
+    }, headers=owner_headers)
+    assert family_resp.status_code == 200
+    assert family_resp.get_json()['participants'][0]['phone'] == child_phone
+
+    rsvp_resp = client.post(f'/api/bookings/{booking_id}/rsvp', json={'status': 'not_attending'}, headers=child_headers)
+    assert rsvp_resp.status_code == 200
+
+    list_resp = client.get('/api/bookings')
+    booking = next(item for item in list_resp.get_json()['bookings'] if item['id'] == booking_id)
+    linked_participants = [item for item in booking['participants'] if item['phone'] == child_phone]
+    assert len(linked_participants) == 1
+    assert linked_participants[0]['status'] == 'not_attending'
+    assert booking['cost_split']['attended_count'] == 0
+
+    with app.app_context():
+        assert BookingParticipant.query.filter_by(booking_id=booking_id).count() == 1
+
+
 def test_misc_costs_admin_crud_and_authenticated_list(client, app):
     with app.app_context():
         admin = User(phone='+31100000008', email='misc-admin@example.com', name='Misc Admin', role='admin')
@@ -1513,6 +1565,52 @@ def test_super_admin_generates_one_euro_test_payment_invoice_by_default(client, 
     with app.app_context():
         invoice = PaymentInvoice.query.filter_by(is_test_invoice=True).one()
         assert invoice.amount_due == 1.0
+
+
+def test_admin_previews_edits_and_tests_monthly_invoice_notification(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent = []
+    monkeypatch.setattr(bookings_module, '_send_whatsapp_bot_message', lambda message, recipient=None: sent.append({'message': message, 'recipient': recipient}) or ('sent', 'ok'))
+
+    with app.app_context():
+        admin = User(phone='+31100009995', email='monthly-notify-admin@example.com', name='Monthly Notify Admin', role='admin')
+        setting = WhatsAppNotificationSetting(
+            event_key='monthly_invoice_ready',
+            title='Monthly invoices ready',
+            template='Invoices for {{month}}: {{note}} {{app_url}}',
+            is_enabled=True,
+            send_to_group=True,
+            group_id='group-monthly',
+            test_recipient_number='+31 6 2222 3333',
+        )
+        db.session.add_all([admin, setting])
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    headers = {'Authorization': f'Bearer {token}'}
+    preview_resp = client.post('/api/admin/payment-invoices/monthly/notify/preview', json={'month': '2030-04'}, headers=headers)
+    assert preview_resp.status_code == 200
+    preview = preview_resp.get_json()
+    assert '2030-04' in preview['message']
+    assert preview['recipient'] == 'group-monthly'
+    assert preview['test_recipients'][0]['normalized'] == '31622223333@c.us'
+
+    test_resp = client.post('/api/admin/payment-invoices/monthly/notify', json={
+        'month': '2030-04',
+        'message': 'Edited monthly invoice notification',
+        'test': True,
+        'recipient': '+31 6 2222 3333',
+    }, headers=headers)
+    assert test_resp.status_code == 200
+    assert sent[-1] == {'message': 'Edited monthly invoice notification', 'recipient': '31622223333@c.us'}
+
+    send_resp = client.post('/api/admin/payment-invoices/monthly/notify', json={
+        'month': '2030-04',
+        'message': 'Final monthly invoice notification',
+    }, headers=headers)
+    assert send_resp.status_code == 200
+    assert sent[-1] == {'message': 'Final monthly invoice notification', 'recipient': 'group-monthly'}
 
 
 def test_wise_transfer_state_webhook_matches_invoice_reference_after_error_retry(client, app, monkeypatch):

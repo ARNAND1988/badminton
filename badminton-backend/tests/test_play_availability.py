@@ -103,10 +103,21 @@ def test_admin_can_send_availability_overview_notification(client, app, monkeypa
         db.session.add_all([
             PlayAvailabilityVote(user_id=member.id, play_date=today.strftime('%Y-%m-%d'), available=True, status='available', attendee_count=1, attendee_details='[{"name":"Alex","status":"available"}]'),
             PlayAvailabilityVote(user_id=member.id, play_date=tomorrow.strftime('%Y-%m-%d'), available=False, status='tentative', attendee_count=0, attendee_details='[{"name":"Sam","status":"tentative"}]'),
-            WhatsAppNotificationSetting(event_key='availability_summary', title='Availability overview', template='{{overview}}', is_enabled=True, send_to_group=True, group_id='group-availability'),
+            WhatsAppNotificationSetting(event_key='availability_summary', title='Availability overview', template='{{overview}}', is_enabled=True, send_to_group=True, group_id='group-availability', test_recipient_number='+31 6 1234 5678'),
         ])
         db.session.commit()
         headers = _auth_headers(app, admin)
+
+    preview_resp = client.post('/api/admin/availability-summary/preview', json={'days': 2}, headers=headers)
+    assert preview_resp.status_code == 200
+    preview = preview_resp.get_json()
+    assert 'Alex' in preview['message']
+    assert preview['test_recipients'][0]['normalized'] == '31612345678@c.us'
+
+    test_resp = client.post('/api/admin/availability-summary/send', json={'days': 2, 'message': 'Custom preview message', 'test': True, 'recipient': '+31 6 1234 5678'}, headers=headers)
+    assert test_resp.status_code == 200
+    assert test_resp.get_json()['log']['recipient'] == '31612345678@c.us'
+    assert sent_messages[0] == {'message': 'Custom preview message', 'recipient': '31612345678@c.us'}
 
     resp = client.post('/api/admin/availability-summary/send', json={'days': 2}, headers=headers)
     assert resp.status_code == 200
@@ -115,9 +126,9 @@ def test_admin_can_send_availability_overview_notification(client, app, monkeypa
     assert 'Availability overview' in data['message']
     assert 'Alex' in data['message']
     assert 'Sam' in data['message']
-    assert sent_messages[0]['recipient'] == 'group-availability'
-    assert '✅ Available (1): Alex' in sent_messages[0]['message']
-    assert '🤔 Tentative (1): Sam' in sent_messages[0]['message']
+    assert sent_messages[1]['recipient'] == 'group-availability'
+    assert '✅ Available (1): Alex' in sent_messages[1]['message']
+    assert '🤔 Tentative (1): Sam' in sent_messages[1]['message']
 
     with app.app_context():
         log = WhatsAppNotificationLog.query.filter_by(event_key='availability_summary').first()

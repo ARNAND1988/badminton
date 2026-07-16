@@ -238,9 +238,14 @@
     <section v-if="activeView === 'admin-bookings'" class="space-y-6">
       <div>
         <h2 class="section-title">Manage Bookings</h2>
-        <p class="section-copy mt-1">Create court bookings, update attendance, and generate per-booking invoices.</p>
+        <p class="section-copy mt-1">Create court bookings, update attendance, shared misc costs, and per-booking invoices.</p>
+        <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
+          <button class="btn-secondary w-full justify-center" :class="adminBookingTab === 'bookings' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminBookingTab = 'bookings'">Court bookings</button>
+          <button class="btn-secondary w-full justify-center" :class="adminBookingTab === 'misc' ? 'bg-white text-emerald-800 shadow-sm' : ''" @click="adminBookingTab = 'misc'">Misc costs</button>
+        </div>
       </div>
 
+      <div v-if="adminBookingTab === 'bookings'" class="space-y-6">
       <div class="panel-card p-4 sm:p-5">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div class="min-w-0">
@@ -425,6 +430,65 @@
                   <option value="tentative">Tentative</option>
                 </select>
                 <button class="btn-dark" @click.stop="addParticipant(booking)">Add</button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+      </div>
+
+      <div v-if="adminBookingTab === 'misc'" class="space-y-4">
+        <details class="panel-card" open>
+          <summary class="cursor-pointer text-lg font-semibold text-slate-900">Add shared misc cost</summary>
+          <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
+            <input v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
+            <input v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
+            <input v-model="newMiscPurchaseDate" type="date" class="form-input" />
+            <select v-model="newMiscSplitScope" class="form-input">
+              <option value="all_members">All members</option>
+              <option value="club_members">Club members only</option>
+            </select>
+            <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" :disabled="true" />
+            <input v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
+          </div>
+          <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
+        </details>
+
+        <div class="grid gap-4 lg:grid-cols-2">
+          <article v-for="cost in miscCosts" :key="cost.id" class="sub-card overflow-hidden p-0">
+            <button type="button" class="flex w-full items-start justify-between gap-3 p-4 text-left transition hover:bg-slate-50" :aria-expanded="isMiscCostOpen(cost.id)" @click="toggleMiscCost(cost.id)">
+              <div>
+                <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
+                <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
+                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }} · {{ cost.purchase_date || 'No date' }} · {{ splitScopeLabel(cost.split_scope) }} · split {{ cost.split_count }}</p>
+              </div>
+              <div class="flex shrink-0 items-center gap-3">
+                <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
+                <span class="text-slate-400" aria-hidden="true">{{ isMiscCostOpen(cost.id) ? '−' : '+' }}</span>
+              </div>
+            </button>
+            <div v-if="isMiscCostOpen(cost.id)" class="space-y-3 border-t border-slate-100 p-4">
+              <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">{{ splitScopeLabel(cost.split_scope) }} · split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each</div>
+              <div class="grid gap-3 sm:grid-cols-2">
+                <input v-model="cost.title" class="form-input" placeholder="Title" />
+                <input v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
+                <input v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
+                <input v-model="cost.purchase_date" type="date" class="form-input" />
+                <select v-model="cost.split_scope" class="form-input">
+                  <option value="all_members">All members</option>
+                  <option value="club_members">Club members only</option>
+                </select>
+                <input v-model.number="cost.split_count" type="number" min="1" class="form-input" :disabled="cost.status !== 'settled'" />
+                <select v-model="cost.status" class="form-input">
+                  <option value="open">Open</option>
+                  <option value="settled">Settled</option>
+                </select>
+                <textarea v-model="cost.description" class="form-input sm:col-span-2" placeholder="Description"></textarea>
+              </div>
+              <div class="grid gap-2 sm:grid-cols-2">
+                <button class="btn-secondary" @click="updateMiscCost(cost)">Save changes</button>
+                <button class="btn-muted" @click="deleteMiscCost(cost)">Delete</button>
               </div>
             </div>
           </article>
@@ -782,7 +846,6 @@
         <p class="section-copy mt-1">Review family totals, prepare monthly invoices, and reconcile payments in one place.</p>
         <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
           <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'invoices' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'invoices'">Monthly invoices</button>
-          <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'misc' ? 'bg-white text-emerald-800 shadow-sm' : ''" @click="adminCostTab = 'misc'">Misc costs</button>
           <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'booking' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'booking'">Booking costs</button>
         </div>
       </div>
@@ -967,63 +1030,6 @@
         </div>
       </div>
 
-      <div v-if="adminCostTab === 'misc'" class="space-y-4">
-        <details class="panel-card" open>
-          <summary class="cursor-pointer text-lg font-semibold text-slate-900">Add shared misc cost</summary>
-          <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
-            <input v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
-            <input v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
-            <input v-model="newMiscPurchaseDate" type="date" class="form-input" />
-            <select v-model="newMiscSplitScope" class="form-input">
-              <option value="all_members">All members</option>
-              <option value="club_members">Club members only</option>
-            </select>
-            <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" :disabled="true" />
-            <input v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
-          </div>
-          <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
-        </details>
-
-        <div class="grid gap-4 lg:grid-cols-2">
-          <article v-for="cost in miscCosts" :key="cost.id" class="sub-card overflow-hidden p-0">
-            <button type="button" class="flex w-full items-start justify-between gap-3 p-4 text-left transition hover:bg-slate-50" :aria-expanded="isMiscCostOpen(cost.id)" @click="toggleMiscCost(cost.id)">
-              <div>
-                <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
-                <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
-                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }} · {{ cost.purchase_date || 'No date' }} · {{ splitScopeLabel(cost.split_scope) }} · split {{ cost.split_count }}</p>
-              </div>
-              <div class="flex shrink-0 items-center gap-3">
-                <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
-                <span class="text-slate-400" aria-hidden="true">{{ isMiscCostOpen(cost.id) ? '−' : '+' }}</span>
-              </div>
-            </button>
-            <div v-if="isMiscCostOpen(cost.id)" class="space-y-3 border-t border-slate-100 p-4">
-              <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">{{ splitScopeLabel(cost.split_scope) }} · split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each</div>
-              <div class="grid gap-3 sm:grid-cols-2">
-                <input v-model="cost.title" class="form-input" placeholder="Title" />
-                <input v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
-                <input v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
-                <input v-model="cost.purchase_date" type="date" class="form-input" />
-                <select v-model="cost.split_scope" class="form-input">
-                  <option value="all_members">All members</option>
-                  <option value="club_members">Club members only</option>
-                </select>
-                <input v-model.number="cost.split_count" type="number" min="1" class="form-input" :disabled="cost.status !== 'settled'" />
-                <select v-model="cost.status" class="form-input">
-                  <option value="open">Open</option>
-                  <option value="settled">Settled</option>
-                </select>
-                <textarea v-model="cost.description" class="form-input sm:col-span-2" placeholder="Description"></textarea>
-              </div>
-              <div class="grid gap-2 sm:grid-cols-2">
-                <button class="btn-secondary" @click="updateMiscCost(cost)">Save changes</button>
-                <button class="btn-muted" @click="deleteMiscCost(cost)">Delete</button>
-              </div>
-            </div>
-          </article>
-        </div>
-      </div>
 
       <div v-if="adminCostTab === 'booking'" class="mt-8 space-y-4">
         <div>
@@ -2648,7 +2654,8 @@ export default {
             loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
             loadPlayAvailability(),
             loadCourts(),
-            loadAdminUsers()
+            loadAdminUsers(),
+            loadMiscCosts()
           ])
         } else if (activeView.value === 'admin-courts') {
           if (!loggedIn) {

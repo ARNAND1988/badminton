@@ -480,7 +480,7 @@
                   <option value="club_members">Club members only</option>
                 </select>
                 <input v-model.number="cost.split_count" type="number" min="1" class="form-input" :disabled="cost.status !== 'settled'" />
-                <select v-model="cost.status" class="form-input">
+                <select v-model="cost.status" class="form-input" @change="updateMiscCost(cost)">
                   <option value="open">Open</option>
                   <option value="settled">Settled</option>
                 </select>
@@ -1505,6 +1505,7 @@
             </div>
             <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
               <button class="btn-secondary" @click="testWhatsAppNotification(setting)">Send test</button>
+              <button class="btn-secondary" @click="openSettingNotificationPreview(setting)">Notify group</button>
               <button class="btn-dark" @click="saveWhatsAppNotification(setting)">Save template</button>
             </div>
           </article>
@@ -2416,6 +2417,16 @@ export default {
       errorMsg.value = ''
     }
 
+    async function openSettingNotificationPreview(setting) {
+      await openNotificationPreview({
+        type: setting.event_key,
+        title: `${setting.title || 'WhatsApp'} notification`,
+        previewEndpoint: `/api/admin/whatsapp-notifications/${setting.id}/preview`,
+        sendEndpoint: `/api/admin/whatsapp-notifications/${setting.id}/send`,
+        payload: {}
+      })
+    }
+
     async function openMonthlyInvoiceNotificationPreview() {
       await openNotificationPreview({
         type: 'monthly_invoice_ready',
@@ -2933,7 +2944,7 @@ export default {
           })
         })
         msg.value = 'Booking updated successfully.'
-        if (activeView.value === 'admin-bookings') await loadDashboard()
+        if (activeView.value === 'admin-bookings' || activeView.value === 'admin-costs') await loadDashboard()
         else await loadBookings({ status: 'upcoming', perPage: 100 })
         resetBookingForm()
       } catch (err) {
@@ -3632,6 +3643,7 @@ export default {
       setPaymentStatus,
       setMonthlyInvoiceStatus,
       generateTestInvoice,
+      openSettingNotificationPreview,
       openMonthlyInvoiceNotificationPreview,
       closeNotificationPreview,
       sendNotificationPreview,

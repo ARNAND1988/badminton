@@ -1059,12 +1059,22 @@
             </label>
             <label class="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
               <input
-                :checked="member.role === 'admin'"
+                :checked="['admin', 'super_admin'].includes(member.role)"
                 type="checkbox"
                 class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                :disabled="member.role === 'super_admin' && !isSuperAdmin"
                 @change="member.role = $event.target.checked ? 'admin' : 'member'"
               />
               Admin
+            </label>
+            <label v-if="isSuperAdmin" class="flex items-center gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+              <input
+                :checked="member.role === 'super_admin'"
+                type="checkbox"
+                class="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                @change="member.role = $event.target.checked ? 'super_admin' : 'admin'"
+              />
+              Super Admin
             </label>
             <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
               Login id: {{ member.email || member.phone }}
@@ -2164,6 +2174,7 @@ export default {
 
 
     function normalizePaymentSettings(settings = {}) {
+      settings = settings || {}
       const textFields = [
         'account_holder_name',
         'bank_name',
@@ -2174,6 +2185,8 @@ export default {
         'wise_client_key',
         'wise_payment_url',
         'wise_profile_id',
+        'wise_redirect_url',
+        'wise_webhook_url',
         'wise_webhook_subscription_id'
       ]
       const normalized = {

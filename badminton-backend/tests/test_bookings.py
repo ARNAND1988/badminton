@@ -1901,3 +1901,68 @@ def test_wise_webhook_records_concise_error_when_wise_dns_fails(client, app, mon
     with app.app_context():
         event = WiseWebhookEvent.query.filter_by(incoming_transfer_id='2238838788').one()
         assert event.error_message == data['event']['error_message']
+
+
+def test_only_super_admin_can_grant_super_admin_role(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000100', email='role-admin@example.com', name='Role Admin', role='admin')
+        super_admin = User(phone='+31100000101', email='role-super@example.com', name='Role Super', role='super_admin')
+        member = User(phone='+31100000102', email='role-member@example.com', name='Role Member', role='member')
+        db.session.add_all([admin, super_admin, member])
+        db.session.commit()
+        admin_token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        super_token = jwt.encode({'user_id': super_admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        member_id = member.id
+
+    admin_headers = {'Authorization': f'Bearer {admin_token}'}
+    super_headers = {'Authorization': f'Bearer {super_token}'}
+
+    denied_resp = client.put(f'/api/admin/users/{member_id}', json={'role': 'super_admin'}, headers=admin_headers)
+    assert denied_resp.status_code == 403
+    assert denied_resp.get_json()['error'] == 'super_admin_required_for_role_changes'
+
+    allowed_resp = client.put(f'/api/admin/users/{member_id}', json={'role': 'super_admin'}, headers=super_headers)
+    assert allowed_resp.status_code == 200
+    assert allowed_resp.get_json()['role'] == 'super_admin'
+
+
+def test_super_admin_payment_settings_schema_matches_frontend(client, app):
+    with app.app_context():
+        super_admin = User(phone='+31100000103', email='payment-super@example.com', name='Payment Super', role='super_admin')
+        db.session.add(super_admin)
+        db.session.add(PaymentSettings(
+            account_holder_name='Club Treasurer',
+            bank_name='Club Bank',
+            iban='NL02ABNA0123456789',
+            bic='ABNANL2A',
+            wise_api_token='secret-token',
+            wise_profile_id='12345',
+            wise_api_base_url='https://api.wise.com',
+            wise_redirect_url='https://example.test/my-invoices',
+            wise_client_key='client-key',
+            wise_webhook_url='https://example.test/api/webhooks/wise/incoming-transfer',
+            description_prefix='Club Invoice',
+            default_due_days=21,
+            qr_enabled=True,
+            test_mode=False,
+        ))
+        db.session.commit()
+        token = jwt.encode({'user_id': super_admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    resp = client.get('/api/admin/payment-settings', headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    expected_fields = {
+        'id', 'account_holder_name', 'bank_name', 'iban', 'bic', 'payment_provider',
+        'wise_payment_url', 'wise_profile_id', 'wise_api_base_url', 'wise_redirect_url',
+        'wise_client_key', 'wise_webhook_url', 'wise_webhook_subscription_id',
+        'wise_api_token_configured', 'description_prefix', 'default_due_days', 'qr_enabled',
+        'test_mode', 'created_at', 'updated_at', 'updated_by', 'effective_account_holder_name',
+        'effective_bank_name', 'effective_iban', 'effective_bic',
+    }
+    assert expected_fields.issubset(data.keys())
+    assert 'wise_api_token' not in data
+    assert data['wise_api_token_configured'] is True
+    assert isinstance(data['default_due_days'], int)
+    assert isinstance(data['qr_enabled'], bool)
+    assert isinstance(data['test_mode'], bool)

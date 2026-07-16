@@ -461,7 +461,7 @@
               <div>
                 <h3 class="font-semibold text-slate-900">{{ cost.title }}</h3>
                 <p class="text-sm text-slate-600">{{ cost.description || 'No description' }}</p>
-                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }} · {{ cost.purchase_date || 'No date' }} · {{ splitScopeLabel(cost.split_scope) }} · split {{ cost.split_count }}</p>
+                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ cost.status }}<span v-if="isArchivedMiscCost(cost)" class="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[0.65rem] text-amber-700">Archived</span> · {{ cost.purchase_date || 'No date' }} · {{ splitScopeLabel(cost.split_scope) }} · split {{ cost.split_count }}</p>
               </div>
               <div class="flex shrink-0 items-center gap-3">
                 <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">€{{ cost.amount }}</span>
@@ -1595,6 +1595,7 @@ export default {
     const adminUsers = ref([])
     const playDays = ref([])
     const miscCosts = ref([])
+    const miscCostArchiveCutoffDate = ref(null)
     const monthlyInvoice = ref(null)
     const currentPaymentInvoice = ref(null)
     const defaultWiseRedirectUrl = `${window.location.origin}/my-invoices`
@@ -2161,9 +2162,13 @@ export default {
       playDays.value = (data.days || []).map(normalizePlayDay)
     }
 
-    async function loadMiscCosts() {
-      const data = await fetchJson('/api/misc-costs')
+    async function loadMiscCosts(options = {}) {
+      const params = new URLSearchParams()
+      if (options.status) params.set('status', options.status)
+      const query = params.toString()
+      const data = await fetchJson(`/api/misc-costs${query ? `?${query}` : ''}`)
       miscCosts.value = data.costs || []
+      miscCostArchiveCutoffDate.value = data.archive_cutoff_date || miscCostArchiveCutoffDate.value
     }
 
     async function loadMonthlyInvoice() {
@@ -2655,7 +2660,7 @@ export default {
             loadPlayAvailability(),
             loadCourts(),
             loadAdminUsers(),
-            loadMiscCosts()
+            loadMiscCosts({ status: 'all' })
           ])
         } else if (activeView.value === 'admin-courts') {
           if (!loggedIn) {
@@ -3158,6 +3163,10 @@ export default {
       }
     }
 
+    function isArchivedMiscCost(cost) {
+      return Boolean(cost?.purchase_date && miscCostArchiveCutoffDate.value && cost.purchase_date < miscCostArchiveCutoffDate.value)
+    }
+
     function splitScopeLabel(scope) {
       return scope === 'club_members' ? 'Club members only' : 'All members'
     }
@@ -3388,6 +3397,7 @@ export default {
       familyAttendancePeople,
       availabilityPeople,
       miscCosts,
+      isArchivedMiscCost,
       monthlyInvoice,
       currentPaymentInvoice,
       memberOptions,

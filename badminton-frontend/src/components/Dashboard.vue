@@ -766,80 +766,52 @@
 
 
     <section v-if="activeView === 'payment-settings'" class="space-y-6">
-      <div><h2 class="section-title">Payment settings</h2><p class="section-copy mt-1">Configure the business bank account and personal Tikkie used for monthly invoices.</p></div>
-      <div v-if="!isSuperAdmin" class="alert-warning">Only Super Admin can manage payment settings.</div>
-      <div v-else class="panel-card space-y-4">
-        <div class="grid gap-3 sm:grid-cols-2">
-          <label><span class="form-label">Wise API token</span><input v-model="paymentSettings.wise_api_token" type="password" class="form-input" :placeholder="paymentSettings.wise_api_token_configured ? 'Token configured - leave blank to keep' : 'Wise API token'" /></label>
-          <label><span class="form-label">Wise business profile ID</span><input v-model="paymentSettings.wise_profile_id" class="form-input" placeholder="Optional; fetched from Wise if blank" /></label>
-          <label><span class="form-label">Wise API base URL</span><input v-model="paymentSettings.wise_api_base_url" class="form-input" placeholder="https://api.wise.com" /></label>
-          <label><span class="form-label">Wise redirect URL</span><input v-model="paymentSettings.wise_redirect_url" class="form-input" :placeholder="defaultWiseRedirectUrl" /></label>
-          <label><span class="form-label">Wise client key</span><input v-model="paymentSettings.wise_client_key" class="form-input" placeholder="Application client key from Wise" /></label>
-          <label><span class="form-label">Wise webhook URL</span><input v-model="paymentSettings.wise_webhook_url" class="form-input" :placeholder="defaultWiseWebhookUrl" /></label>
-          <label><span class="form-label">Personal Tikkie link</span><input v-model="paymentSettings.tikkie_payment_url" type="url" class="form-input" placeholder="https://tikkie.me/pay/..." /><span class="mt-1 block text-xs text-slate-500">Optional placeholders: {amount} and {reference}.</span></label>
-          <label><span class="form-label">Personal account holder</span><input v-model="paymentSettings.tikkie_account_holder_name" class="form-input" placeholder="Name shown with Tikkie invoices" /></label>
-          <label><span class="form-label">Account holder name</span><input v-model="paymentSettings.account_holder_name" class="form-input" /></label><label><span class="form-label">Business bank name</span><input v-model="paymentSettings.bank_name" class="form-input" /></label><label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input" /></label><label><span class="form-label">BIC optional</span><input v-model="paymentSettings.bic" class="form-input" /></label><label><span class="form-label">Payment description prefix</span><input v-model="paymentSettings.description_prefix" class="form-input" /></label><label><span class="form-label">Default due days</span><input v-model.number="paymentSettings.default_due_days" type="number" min="1" class="form-input" /></label></div>
-        <label class="flex gap-2"><input v-model="paymentSettings.test_mode" type="checkbox" /> Test mode</label>
-        <p class="text-sm text-slate-600">Wise incoming-transfer webhooks reconcile received transfers by matching the invoice reference.</p>
-        <div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-          <p v-if="paymentSettings.wise_webhook_subscription_id" class="font-semibold text-emerald-700">Webhook subscription active: {{ paymentSettings.wise_webhook_subscription_id }}</p>
-          <p v-else class="font-semibold text-amber-700">No Wise webhook subscription ID is saved yet.</p>
-          <p class="mt-1 text-slate-600">{{ wiseWebhookHealthText }}</p>
-          <p v-if="paymentWebhookStatus?.latest_event" class="mt-1 text-slate-600">Latest webhook: {{ paymentWebhookStatus.latest_event.status }} · {{ paymentWebhookStatus.latest_event.reference || paymentWebhookStatus.latest_event.incoming_transfer_id || 'no reference' }} · {{ dateTimeLabel(paymentWebhookStatus.latest_event.created_at) }}</p>
-        </div>
-        <div class="flex flex-wrap gap-2"><button class="btn-dark" :disabled="paymentSettingsSaving" @click="savePaymentSettings">{{ paymentSettingsSaving ? 'Saving...' : 'Save settings' }}</button><button v-if="!paymentSettings.wise_webhook_subscription_id" class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentWebhookSubscribing || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="createWiseWebhookSubscription">{{ paymentWebhookSubscribing ? 'Subscribing...' : 'Create Wise webhook subscription' }}</button><button class="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" :disabled="paymentTestGenerating || (!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token)" @click="generateTestInvoice">{{ paymentTestGenerating ? 'Generating...' : 'Generate New Test Invoice' }}</button><button class="btn-muted" :disabled="paymentWebhookStatusLoading" @click="loadWiseWebhookStatus">{{ paymentWebhookStatusLoading ? 'Checking...' : 'Check webhook connection' }}</button></div>
-        <p v-if="!paymentSettings.wise_api_token_configured && !paymentSettings.wise_api_token" class="text-sm text-amber-700">Enter a real Wise API token before generating a test invoice with a payment link.</p>
-        <div v-if="selectedPaymentInvoice?.is_test_invoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
-          <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 class="font-semibold text-slate-900">Latest test invoice</h3>
-              <p class="text-sm text-slate-600">{{ selectedPaymentInvoice.invoice_number }} · {{ paymentStatusLabel(selectedPaymentInvoice.payment_status) }}</p>
-              <p v-if="selectedPaymentInvoice.payment_generation_error" class="mt-1 text-sm text-amber-700">{{ selectedPaymentInvoice.payment_generation_error.error }}</p>
-            </div>
-            <button class="btn-muted" :disabled="paymentTestRefreshing" @click="loadLatestTestInvoice">{{ paymentTestRefreshing ? 'Refreshing...' : 'Refresh' }}</button>
-          </div>
-          <div class="grid gap-3 md:grid-cols-[140px_1fr]">
-            <img v-if="selectedPaymentInvoice.qr_code_data_url" :src="selectedPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="w-32 rounded border bg-white p-2" />
-            <div v-else class="flex h-32 w-32 items-center justify-center rounded border border-amber-200 bg-amber-50 p-3 text-center text-xs font-semibold text-amber-700">Wise link unavailable</div>
-            <div class="overflow-x-auto rounded border border-white/70 bg-white">
-              <p class="border-b border-slate-100 px-3 py-2 text-sm text-slate-600">Pay by bank transfer using the exact invoice reference, then refresh to check webhook reconciliation.</p>
-              <table class="min-w-full text-sm">
-                <tbody class="divide-y divide-slate-100">
-                  <tr v-if="selectedPaymentInvoice.payment_url"><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Wise link</th><td class="px-3 py-2 text-slate-700"><a :href="selectedPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open Wise payment link</a></td></tr>
-                  <tr v-else-if="selectedPaymentInvoice.payment_generation_error"><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Wise link</th><td class="px-3 py-2 text-amber-700">{{ selectedPaymentInvoice.payment_generation_error.error }}</td></tr>
-                  <tr><th class="w-40 px-3 py-2 text-left font-semibold text-slate-600">Amount due</th><td class="px-3 py-2 font-semibold text-slate-900">€{{ selectedPaymentInvoice.amount_due }}</td></tr>
-                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Due date</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.due_date }}</td></tr>
-                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">IBAN</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.iban }}</td></tr>
-                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Account holder</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.account_holder_name }}</td></tr>
-                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Reference</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.payment_reference }}</td></tr>
-                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Paid amount</th><td class="px-3 py-2 text-slate-700">€{{ selectedPaymentInvoice.paid_amount || 0 }}</td></tr>
-                  <tr><th class="px-3 py-2 text-left font-semibold text-slate-600">Webhook events</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.webhook_events?.length || 0 }}</td></tr>
-                  <tr v-if="selectedPaymentInvoice.webhook_events?.length"><th class="px-3 py-2 text-left font-semibold text-slate-600">Latest event status</th><td class="px-3 py-2 text-slate-700">{{ selectedPaymentInvoice.webhook_events[0].status }} · €{{ selectedPaymentInvoice.webhook_events[0].amount || 0 }}</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        <div v-else class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">No test invoice yet. Use Generate New Test Invoice when you want to create one.</div>
-        <div v-if="paymentWebhookStatus?.recent_test_invoices?.length" class="rounded-lg border border-slate-200 bg-white p-3">
-          <h3 class="font-semibold text-slate-900">Recent Wise test invoices</h3>
-          <p class="text-sm text-slate-600">Use this list to confirm whether your latest test payments were matched by webhook events.</p>
-          <div class="mt-3 overflow-x-auto">
-            <table class="min-w-full text-sm">
-              <thead><tr class="border-b text-left text-slate-600"><th class="px-2 py-2">Invoice</th><th class="px-2 py-2">Reference</th><th class="px-2 py-2">Due</th><th class="px-2 py-2">Paid</th><th class="px-2 py-2">Status</th></tr></thead>
-              <tbody class="divide-y divide-slate-100">
-                <tr v-for="invoice in paymentWebhookStatus.recent_test_invoices" :key="invoice.id">
-                  <td class="px-2 py-2 font-semibold text-slate-900">{{ invoice.invoice_number }}</td>
-                  <td class="px-2 py-2 text-slate-700">{{ invoice.payment_reference }}</td>
-                  <td class="px-2 py-2 text-slate-700">€{{ invoice.amount_due }}</td>
-                  <td class="px-2 py-2 text-slate-700">€{{ invoice.paid_amount || 0 }}</td>
-                  <td class="px-2 py-2 text-slate-700">{{ paymentStatusLabel(invoice.payment_status) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div>
+        <h2 class="section-title">Payment settings</h2>
+        <p class="section-copy mt-1">Add the two ways members can pay their monthly invoice.</p>
       </div>
+      <div v-if="!isSuperAdmin" class="alert-warning">Only Super Admin can manage payment settings.</div>
+      <form v-else class="space-y-5" @submit.prevent="savePaymentSettings">
+        <section class="panel-card space-y-4">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Business bank account</h3>
+            <p class="section-copy mt-1">These details appear when Business bank account is selected for a month.</p>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label><span class="form-label">Account holder</span><input v-model="paymentSettings.account_holder_name" class="form-input" placeholder="Club or business name" /></label>
+            <label><span class="form-label">Bank name</span><input v-model="paymentSettings.bank_name" class="form-input" placeholder="Bank name" /></label>
+            <label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input uppercase" placeholder="NL00 BANK 0000 0000 00" /></label>
+            <label><span class="form-label">BIC <span class="font-normal text-slate-400">(optional)</span></span><input v-model="paymentSettings.bic" class="form-input uppercase" placeholder="BIC" /></label>
+          </div>
+        </section>
+
+        <section class="panel-card space-y-4">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Personal Tikkie</h3>
+            <p class="section-copy mt-1">Paste the personal Tikkie link members should use.</p>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label><span class="form-label">Account holder</span><input v-model="paymentSettings.tikkie_account_holder_name" class="form-input" placeholder="Personal account holder name" /></label>
+            <label><span class="form-label">Tikkie link</span><input v-model="paymentSettings.tikkie_payment_url" type="url" class="form-input" placeholder="https://tikkie.me/pay/..." /></label>
+          </div>
+        </section>
+
+        <section class="panel-card space-y-4">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Invoice defaults</h3>
+            <p class="section-copy mt-1">Used for every newly generated monthly invoice.</p>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label><span class="form-label">Payment description</span><input v-model="paymentSettings.description_prefix" class="form-input" placeholder="Nieuwegein Badminton Invoice" /></label>
+            <label><span class="form-label">Payment due after</span><div class="flex items-center gap-2"><input v-model.number="paymentSettings.default_due_days" type="number" min="1" max="60" class="form-input" /><span class="text-sm text-slate-600">days</span></div></label>
+          </div>
+        </section>
+
+        <div class="flex items-center gap-3">
+          <button type="submit" class="btn-dark" :disabled="paymentSettingsSaving">{{ paymentSettingsSaving ? 'Saving...' : 'Save payment settings' }}</button>
+          <span class="text-sm text-slate-500">Choose the payment method later on the monthly invoice page.</span>
+        </div>
+      </form>
     </section>
 
     <section v-if="activeView === 'admin-costs'" class="space-y-6">
@@ -858,7 +830,7 @@
             <h3 class="text-lg font-semibold text-slate-900">Monthly family invoices</h3>
             <p class="section-copy">Review each family's booking, shared-cost, and total amount for the selected month.</p>
           </div>
-          <div class="grid gap-2 sm:grid-cols-[minmax(10rem,12rem)_minmax(12rem,16rem)_auto] sm:items-end">
+          <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(10rem,12rem)_minmax(12rem,16rem)_minmax(12rem,16rem)_auto] xl:items-end">
             <label class="block sm:w-48">
               <span class="form-label">Month</span>
               <input v-model="monthlyInvoiceMonth" type="month" class="form-input" @change="loadAdminMonthlyInvoices" />
@@ -2296,14 +2268,6 @@ export default {
       if (!isSuperAdmin.value) return
       const settings = await fetchJson('/api/admin/payment-settings')
       paymentSettings.value = normalizePaymentSettings(settings)
-      const [latestInvoiceResult, webhookStatusResult] = await Promise.allSettled([
-        loadLatestTestInvoice(),
-        loadWiseWebhookStatus()
-      ])
-      const failedResult = [latestInvoiceResult, webhookStatusResult].find((result) => result.status === 'rejected')
-      if (failedResult) {
-        errorMsg.value = failedResult.reason?.message || 'Some payment status details could not be loaded.'
-      }
     }
 
     async function savePaymentSettings() {

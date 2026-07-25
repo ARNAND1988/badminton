@@ -2145,3 +2145,38 @@ def test_ready_monthly_invoice_status_persists_when_wise_generation_fails(client
     status_resp = client.get('/api/admin/invoices/monthly?month=2031-04', headers={'Authorization': f'Bearer {admin_token}'})
     assert status_resp.status_code == 200
     assert status_resp.get_json()['month_status']['status'] == 'READY_FOR_PAYMENT'
+
+
+def test_monthly_invoice_can_use_personal_tikkie(client, app):
+    with app.app_context():
+        admin = User(phone='+31100000160', email='tikkie-admin@example.com', name='Tikkie Admin', role='admin')
+        member = User(phone='+31100000161', email='tikkie-member@example.com', name='Tikkie Member', role='member')
+        court = Court(name='Tikkie Court', hourly_rate=24.0, is_active=True)
+        settings = PaymentSettings(
+            tikkie_payment_url='https://tikkie.me/pay/example?amount={amount}&ref={reference}',
+            tikkie_account_holder_name='Personal Treasurer',
+        )
+        db.session.add_all([admin, member, court, settings])
+        db.session.commit()
+        booking = Booking(court_id=court.id, booking_date='2031-05-10', start_time='19:00', end_time='20:00', status='completed', cost=24.0)
+        db.session.add(booking)
+        db.session.flush()
+        db.session.add(BookingParticipant(booking_id=booking.id, phone=member.phone, name=member.name, status='participated'))
+        db.session.commit()
+        admin_token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        member_token = jwt.encode({'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    ready_resp = client.post('/api/admin/invoices/monthly/status', json={
+        'month': '2031-05',
+        'status': 'READY_FOR_PAYMENT',
+        'payment_method': 'PERSONAL_TIKKIE',
+    }, headers={'Authorization': f'Bearer {admin_token}'})
+    assert ready_resp.status_code == 200
+    assert ready_resp.get_json()['month_status']['payment_method'] == 'PERSONAL_TIKKIE'
+
+    invoice_resp = client.get('/api/payment-invoices/current?month=2031-05', headers={'Authorization': f'Bearer {member_token}'})
+    assert invoice_resp.status_code == 200
+    invoice = invoice_resp.get_json()
+    assert invoice['payment_method'] == 'PERSONAL_TIKKIE'
+    assert invoice['account_holder_name'] == 'Personal Treasurer'
+    assert invoice['payment_url'].startswith('https://tikkie.me/pay/example?amount=24.00&ref=INV-')

@@ -203,6 +203,8 @@ def create_app():
                 'wise_client_key': 'VARCHAR(128)',
                 'wise_webhook_url': 'VARCHAR(1024)',
                 'wise_webhook_subscription_id': 'VARCHAR(128)',
+                'tikkie_payment_url': 'VARCHAR(1024)',
+                'tikkie_account_holder_name': 'VARCHAR(128)',
                 'description_prefix': 'VARCHAR(255)',
                 'default_due_days': 'INTEGER DEFAULT 14',
                 'qr_enabled': 'BOOLEAN DEFAULT TRUE',
@@ -214,7 +216,7 @@ def create_app():
             for column_name, column_spec in payment_setting_specs.items():
                 if column_name not in payment_setting_columns:
                     db.session.execute(db.text(f'ALTER TABLE payment_settings ADD COLUMN {column_name} {column_spec}'))
-            db.session.execute(db.text("UPDATE payment_settings SET payment_provider = 'WISE_API' WHERE payment_provider IS NULL OR payment_provider != 'WISE_API'"))
+            db.session.execute(db.text("UPDATE payment_settings SET payment_provider = 'WISE_API' WHERE payment_provider IS NULL"))
             db.session.execute(db.text("UPDATE payment_settings SET wise_api_base_url = 'https://api.wise.com' WHERE wise_api_base_url IS NULL OR wise_api_base_url = 'https://api.transferwise.com'"))
             db.session.execute(db.text("UPDATE payment_settings SET default_due_days = 14 WHERE default_due_days IS NULL"))
             db.session.execute(db.text("UPDATE payment_settings SET qr_enabled = TRUE WHERE qr_enabled IS NULL"))
@@ -251,6 +253,7 @@ def create_app():
                 'qr_payload': 'TEXT',
                 'qr_code_data_url': 'TEXT',
                 'payment_url': 'VARCHAR(2048)',
+                'payment_method': "VARCHAR(32) DEFAULT 'BUSINESS_BANK'",
                 'wise_payment_request_id': 'VARCHAR(128)',
                 'is_test_invoice': 'BOOLEAN DEFAULT FALSE',
                 'bank_account_holder': 'VARCHAR(128)',
@@ -270,6 +273,10 @@ def create_app():
             db.session.execute(db.text("UPDATE payment_invoices SET amount_due = 0 WHERE amount_due IS NULL"))
             db.session.execute(db.text("UPDATE payment_invoices SET paid_amount = 0 WHERE paid_amount IS NULL"))
             db.session.execute(db.text("UPDATE payment_invoices SET is_test_invoice = FALSE WHERE is_test_invoice IS NULL"))
+            db.session.execute(db.text("UPDATE payment_invoices SET payment_method = 'BUSINESS_BANK' WHERE payment_method IS NULL"))
+        monthly_status_columns = {col['name'] for col in inspector.get_columns('monthly_invoice_statuses')} if inspector.has_table('monthly_invoice_statuses') else set()
+        if monthly_status_columns and 'payment_method' not in monthly_status_columns:
+            db.session.execute(db.text("ALTER TABLE monthly_invoice_statuses ADD COLUMN payment_method VARCHAR(32) DEFAULT 'BUSINESS_BANK' NOT NULL"))
         invoice_payment_columns = {
             "payment_status": "VARCHAR(32) DEFAULT 'UNPAID'",
             'payment_reference': 'VARCHAR(64)',

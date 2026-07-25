@@ -716,9 +716,9 @@
         </div>
 
         <div v-if="currentPaymentInvoice" class="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
-          <div class="mb-3 flex items-center justify-between gap-3"><div><h4 class="font-semibold text-slate-900">Pay with Wise</h4><p class="text-sm text-slate-600">Scan the QR or open the Wise payment link to pay this invoice.</p></div><span class="rounded-full bg-white px-3 py-1 text-sm font-bold text-indigo-800">{{ paymentStatusLabel(currentPaymentInvoice.payment_status) }}</span></div>
+          <div class="mb-3 flex items-center justify-between gap-3"><div><h4 class="font-semibold text-slate-900">{{ currentPaymentInvoice.payment_method === 'PERSONAL_TIKKIE' ? 'Pay with Tikkie' : 'Pay by business bank account' }}</h4><p class="text-sm text-slate-600">Scan the QR or open the payment link to pay this invoice.</p></div><span class="rounded-full bg-white px-3 py-1 text-sm font-bold text-indigo-800">{{ paymentStatusLabel(currentPaymentInvoice.payment_status) }}</span></div>
           <div v-if="currentPaymentInvoice.is_test_invoice" class="alert-warning">TEST MODE - This invoice is for testing only</div>
-          <div class="grid gap-4 md:grid-cols-[180px_1fr]"><img v-if="currentPaymentInvoice.qr_code_data_url" :src="currentPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p v-if="currentPaymentInvoice.payment_url"><a :href="currentPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open Wise payment link</a></p><p><strong>Total amount due:</strong> €{{ currentPaymentInvoice.amount_due }}</p><p><strong>Due date:</strong> {{ currentPaymentInvoice.due_date }}</p><p><strong>IBAN:</strong> {{ currentPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ currentPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ currentPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.payment_reference)">Copy payment reference</button></p></div></div>
+          <div class="grid gap-4 md:grid-cols-[180px_1fr]"><img v-if="currentPaymentInvoice.qr_code_data_url" :src="currentPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="rounded border bg-white p-2" /><div class="space-y-2 text-sm"><p v-if="currentPaymentInvoice.payment_url"><a :href="currentPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open {{ currentPaymentInvoice.payment_method === 'PERSONAL_TIKKIE' ? 'Tikkie' : 'payment link' }}</a></p><p><strong>Total amount due:</strong> €{{ currentPaymentInvoice.amount_due }}</p><p><strong>Due date:</strong> {{ currentPaymentInvoice.due_date }}</p><p v-if="currentPaymentInvoice.payment_method !== 'PERSONAL_TIKKIE'"><strong>IBAN:</strong> {{ currentPaymentInvoice.iban }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ currentPaymentInvoice.account_holder_name }}</p><p><strong>Payment reference:</strong> {{ currentPaymentInvoice.payment_reference }} <button class="btn-muted ml-2" @click="copyText(currentPaymentInvoice.payment_reference)">Copy payment reference</button></p></div></div>
         </div>
 
         <div v-if="monthlyInvoice" class="space-y-5">
@@ -766,7 +766,7 @@
 
 
     <section v-if="activeView === 'payment-settings'" class="space-y-6">
-      <div><h2 class="section-title">Payment settings</h2><p class="section-copy mt-1">Configure Wise Payment Requests for invoice checkout links and QR codes.</p></div>
+      <div><h2 class="section-title">Payment settings</h2><p class="section-copy mt-1">Configure the business bank account and personal Tikkie used for monthly invoices.</p></div>
       <div v-if="!isSuperAdmin" class="alert-warning">Only Super Admin can manage payment settings.</div>
       <div v-else class="panel-card space-y-4">
         <div class="grid gap-3 sm:grid-cols-2">
@@ -776,6 +776,8 @@
           <label><span class="form-label">Wise redirect URL</span><input v-model="paymentSettings.wise_redirect_url" class="form-input" :placeholder="defaultWiseRedirectUrl" /></label>
           <label><span class="form-label">Wise client key</span><input v-model="paymentSettings.wise_client_key" class="form-input" placeholder="Application client key from Wise" /></label>
           <label><span class="form-label">Wise webhook URL</span><input v-model="paymentSettings.wise_webhook_url" class="form-input" :placeholder="defaultWiseWebhookUrl" /></label>
+          <label><span class="form-label">Personal Tikkie link</span><input v-model="paymentSettings.tikkie_payment_url" type="url" class="form-input" placeholder="https://tikkie.me/pay/..." /><span class="mt-1 block text-xs text-slate-500">Optional placeholders: {amount} and {reference}.</span></label>
+          <label><span class="form-label">Personal account holder</span><input v-model="paymentSettings.tikkie_account_holder_name" class="form-input" placeholder="Name shown with Tikkie invoices" /></label>
           <label><span class="form-label">Account holder name</span><input v-model="paymentSettings.account_holder_name" class="form-input" /></label><label><span class="form-label">Business bank name</span><input v-model="paymentSettings.bank_name" class="form-input" /></label><label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input" /></label><label><span class="form-label">BIC optional</span><input v-model="paymentSettings.bic" class="form-input" /></label><label><span class="form-label">Payment description prefix</span><input v-model="paymentSettings.description_prefix" class="form-input" /></label><label><span class="form-label">Default due days</span><input v-model.number="paymentSettings.default_due_days" type="number" min="1" class="form-input" /></label></div>
         <label class="flex gap-2"><input v-model="paymentSettings.test_mode" type="checkbox" /> Test mode</label>
         <p class="text-sm text-slate-600">Wise incoming-transfer webhooks reconcile received transfers by matching the invoice reference.</p>
@@ -860,6 +862,13 @@
             <label class="block sm:w-48">
               <span class="form-label">Month</span>
               <input v-model="monthlyInvoiceMonth" type="month" class="form-input" @change="loadAdminMonthlyInvoices" />
+            </label>
+            <label class="block">
+              <span class="form-label">Payment method</span>
+              <select v-model="monthlyPaymentMethod" class="form-input">
+                <option value="BUSINESS_BANK">Business bank account</option>
+                <option value="PERSONAL_TIKKIE">Personal Tikkie</option>
+              </select>
             </label>
             <label class="block">
               <span class="form-label">Month status</span>
@@ -1619,6 +1628,7 @@ export default {
     const defaultWiseWebhookUrl = `${window.location.origin}/api/webhooks/wise/incoming-transfer`
     const adminMonthlyInvoices = ref(null)
     const monthlyInvoiceMonth = ref(localIsoMonth())
+    const monthlyPaymentMethod = ref('BUSINESS_BANK')
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
     const notificationPreview = ref({ open: false, type: '', title: '', endpoint: '', payload: {}, message: '', recipient: '', testRecipient: '', testRecipients: [], sending: false })
@@ -2201,6 +2211,7 @@ export default {
     async function loadAdminMonthlyInvoices() {
       const data = await fetchJson(`/api/admin/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
       adminMonthlyInvoices.value = data
+      monthlyPaymentMethod.value = data.month_status?.payment_method || 'BUSINESS_BANK'
       completedBookingPagination.value = { ...completedBookingPagination.value, page: 1 }
       await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
     }
@@ -2373,7 +2384,7 @@ export default {
     }
 
     async function setMonthlyInvoiceStatus(status) {
-      const data = await fetchJson('/api/admin/invoices/monthly/status', { method: 'POST', body: JSON.stringify({ month: monthlyInvoiceMonth.value, status }) })
+      const data = await fetchJson('/api/admin/invoices/monthly/status', { method: 'POST', body: JSON.stringify({ month: monthlyInvoiceMonth.value, status, payment_method: monthlyPaymentMethod.value }) })
       msg.value = `${monthStatusLabel(data.month_status?.status)} saved for ${monthName(monthlyInvoiceMonth.value)}.`
       if (data.payment_generation_errors?.length) {
         errorMsg.value = 'The month status was saved, but one or more payment invoices need Wise payment details regenerated.'
@@ -3531,6 +3542,7 @@ export default {
       memberOptions,
       adminMonthlyInvoices,
       monthlyInvoiceMonth,
+      monthlyPaymentMethod,
       whatsappSettings,
       whatsappLogs,
       notificationPreview,

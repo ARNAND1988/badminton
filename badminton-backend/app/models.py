@@ -290,6 +290,8 @@ class PaymentSettings(db.Model):
     wise_client_key = db.Column(db.String(128), nullable=True)
     wise_webhook_url = db.Column(db.String(1024), nullable=True)
     wise_webhook_subscription_id = db.Column(db.String(128), nullable=True)
+    tikkie_payment_url = db.Column(db.String(1024), nullable=True)
+    tikkie_account_holder_name = db.Column(db.String(128), nullable=True)
     description_prefix = db.Column(db.String(255), default='Nieuwegein Badminton Invoice')
     default_due_days = db.Column(db.Integer, default=14)
     qr_enabled = db.Column(db.Boolean, default=True)
@@ -327,6 +329,8 @@ class PaymentSettings(db.Model):
             'wise_client_key': self.wise_client_key,
             'wise_webhook_url': self.wise_webhook_url,
             'wise_webhook_subscription_id': self.wise_webhook_subscription_id,
+            'tikkie_payment_url': self.tikkie_payment_url,
+            'tikkie_account_holder_name': self.tikkie_account_holder_name,
             'wise_api_token_configured': bool(self.wise_api_token),
             'description_prefix': self.description_prefix,
             'default_due_days': self.default_due_days,
@@ -362,6 +366,7 @@ class PaymentInvoice(db.Model):
     qr_payload = db.Column(db.Text, nullable=True)
     qr_code_data_url = db.Column(db.Text, nullable=True)
     payment_url = db.Column(db.String(2048), nullable=True)
+    payment_method = db.Column(db.String(32), default='BUSINESS_BANK')
     wise_payment_request_id = db.Column(db.String(128), nullable=True)
     is_test_invoice = db.Column(db.Boolean, default=False)
     bank_account_holder = db.Column(db.String(128), nullable=True)
@@ -399,6 +404,7 @@ class PaymentInvoice(db.Model):
             'qr_payload': self.qr_payload,
             'qr_code_data_url': self.qr_code_data_url if include_qr else None,
             'payment_url': self.payment_url,
+            'payment_method': self.payment_method or 'BUSINESS_BANK',
             'wise_payment_request_id': self.wise_payment_request_id,
             'is_test_invoice': self.is_test_invoice,
             'account_holder_name': self.bank_account_holder,
@@ -454,6 +460,7 @@ class MonthlyInvoiceStatus(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     month = db.Column(db.String(7), unique=True, nullable=False)
     status = db.Column(db.String(32), default='OPEN', nullable=False)
+    payment_method = db.Column(db.String(32), default='BUSINESS_BANK', nullable=False)
     ready_at = db.Column(db.DateTime, nullable=True)
     settled_at = db.Column(db.DateTime, nullable=True)
     note = db.Column(db.Text, nullable=True)
@@ -467,6 +474,7 @@ class MonthlyInvoiceStatus(db.Model):
             'id': self.id,
             'month': self.month,
             'status': self.status,
+            'payment_method': self.payment_method or 'BUSINESS_BANK',
             'ready_at': self.ready_at.isoformat() if self.ready_at else None,
             'settled_at': self.settled_at.isoformat() if self.settled_at else None,
             'note': self.note,

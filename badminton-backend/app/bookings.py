@@ -2843,6 +2843,7 @@ except Exception:  # pragma: no cover - dependency is declared, fallback keeps a
 from .models import PaymentAuditLog, PaymentInvoice, PaymentSettings, WiseWebhookEvent
 
 PAYMENT_STATUSES = {'UNPAID', 'PAID', 'PARTIALLY_PAID', 'CANCELLED', 'EXPIRED'}
+PAYMENT_METHODS = {'BUSINESS_BANK', 'PERSONAL_TIKKIE'}
 
 
 def _is_admin_user(user):
@@ -2892,9 +2893,6 @@ def _payment_settings():
     if not settings:
         settings = PaymentSettings(payment_provider='WISE_API', test_mode=True, qr_enabled=True, default_due_days=14)
         db.session.add(settings)
-        db.session.flush()
-    elif settings.payment_provider != 'WISE_API':
-        settings.payment_provider = 'WISE_API'
         db.session.flush()
     return settings
 
@@ -2950,6 +2948,14 @@ def _wise_payment_url(settings, amount, reference):
     query.setdefault('iban', values['iban'])
     query.setdefault('accountHolder', values['account_holder_name'])
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
+
+
+def _tikkie_payment_url(settings, amount, reference):
+    url = (settings.tikkie_payment_url or '').strip()
+    if not url:
+        raise ValueError('tikkie_payment_url_required')
+    return (url.replace('{amount}', f'{float(amount or 0):.2f}')
+            .replace('{reference}', reference))
 
 
 def _wise_api_base_url(settings):
@@ -3347,6 +3353,11 @@ def _wise_payment_error_payload(exc):
             'error': 'Wise API token is required before generating payment invoices.',
             'code': 'wise_api_token_required',
         }, 400
+    if isinstance(exc, ValueError) and str(exc) == 'tikkie_payment_url_required':
+        return {
+            'error': 'Configure a personal Tikkie payment link before generating Tikkie invoices.',
+            'code': 'tikkie_payment_url_required',
+        }, 400
     if isinstance(exc, ValueError) and str(exc) == 'wise_business_profile_not_found':
         return {
             'error': 'No Wise business profile was found for this API token.',
@@ -3405,21 +3416,26 @@ def _qr_data_url(payload):
     return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('ascii')
 
 
-def _attach_payment_details(invoice, settings):
+def _attach_payment_details(invoice, settings, payment_method='BUSINESS_BANK'):
     reference = invoice.payment_reference or invoice.invoice_number or _next_payment_reference()
     invoice.payment_reference = reference
     invoice.invoice_number = invoice.invoice_number or reference
-    invoice.bank_account_holder = settings.effective_account_holder_name()
+    invoice.payment_method = payment_method
+    invoice.bank_account_holder = (settings.tikkie_account_holder_name or settings.effective_account_holder_name()) if payment_method == 'PERSONAL_TIKKIE' else settings.effective_account_holder_name()
     invoice.bank_name = settings.effective_bank_name()
     invoice.iban = settings.effective_iban()
     invoice.bic = settings.effective_bic()
 
-    try:
-        invoice.payment_url = _wise_create_payment_request(settings, invoice)
-    except ValueError as exc:
-        if str(exc) not in {'wise_api_token_required', 'wise_payment_url_missing'}:
-            raise
-        invoice.payment_url = _wise_payment_url(settings, invoice.amount_due, reference)
+    if payment_method == 'PERSONAL_TIKKIE':
+        invoice.payment_url = _tikkie_payment_url(settings, invoice.amount_due, reference)
+        invoice.wise_payment_request_id = None
+    else:
+        try:
+            invoice.payment_url = _wise_create_payment_request(settings, invoice)
+        except ValueError as exc:
+            if str(exc) not in {'wise_api_token_required', 'wise_payment_url_missing'}:
+                raise
+            invoice.payment_url = _wise_payment_url(settings, invoice.amount_due, reference)
     invoice.qr_payload = invoice.payment_url
     invoice.qr_code_data_url = _qr_data_url(invoice.qr_payload)
     return invoice
@@ -3586,7 +3602,7 @@ def _user_can_view_payment_invoice(user, invoice):
     return False
 
 
-def _create_payment_invoice_for_summary(user, month_value, summary, settings, is_test=False, allow_payment_failure=False):
+def _create_payment_invoice_for_summary(user, month_value, summary, settings, is_test=False, allow_payment_failure=False, payment_method='BUSINESS_BANK'):
     existing = None if is_test else PaymentInvoice.query.filter_by(user_id=user.id, month=month_value, is_test_invoice=False).first()
     invoice = existing or PaymentInvoice(user_id=user.id, month=month_value)
     if not existing:
@@ -3602,7 +3618,7 @@ def _create_payment_invoice_for_summary(user, month_value, summary, settings, is
     invoice.is_test_invoice = bool(is_test)
     invoice.payment_status = invoice.payment_status or 'UNPAID'
     try:
-        _attach_payment_details(invoice, settings)
+        _attach_payment_details(invoice, settings, payment_method)
     except (ValueError, requests.exceptions.RequestException) as exc:
         if not allow_payment_failure:
             raise
@@ -3610,7 +3626,7 @@ def _create_payment_invoice_for_summary(user, month_value, summary, settings, is
     return invoice
 
 
-def _create_payment_invoices_for_month(month_value, admin_user):
+def _create_payment_invoices_for_month(month_value, admin_user, payment_method='BUSINESS_BANK'):
     settings = _payment_settings()
     users = User.query.order_by(User.name.asc(), User.email.asc(), User.phone.asc()).all()
     created = []
@@ -3623,7 +3639,7 @@ def _create_payment_invoices_for_month(month_value, admin_user):
         summary = _monthly_invoice_summary(owner, month_value)
         if not summary or float(summary.get('total') or 0.0) <= 0:
             continue
-        invoice = _create_payment_invoice_for_summary(owner, month_value, summary, settings, False, allow_payment_failure=True)
+        invoice = _create_payment_invoice_for_summary(owner, month_value, summary, settings, False, allow_payment_failure=True, payment_method=payment_method)
         invoice.updated_by = admin_user.id
         created.append(invoice)
     return created
@@ -3641,15 +3657,11 @@ def admin_payment_settings():
     iban = (data.get('iban') or '').replace(' ', '').upper() or None
     if iban and not _valid_iban(iban):
         return jsonify({'error': 'invalid_iban'}), 400
-    payment_provider = 'WISE_API'
     wise_api_token = (data.get('wise_api_token') or '').strip()
-    if not (wise_api_token or settings.wise_api_token):
-        return jsonify({'error': 'wise_api_token_required'}), 400
     for field in ['account_holder_name', 'bank_name', 'bic', 'description_prefix']:
         if field in data:
             setattr(settings, field, (data.get(field) or '').strip() or None)
     settings.iban = iban
-    settings.payment_provider = payment_provider
     if wise_api_token:
         settings.wise_api_token = wise_api_token
     if 'wise_profile_id' in data:
@@ -3662,6 +3674,10 @@ def admin_payment_settings():
         settings.wise_client_key = (data.get('wise_client_key') or '').strip() or None
     if 'wise_webhook_url' in data:
         settings.wise_webhook_url = (data.get('wise_webhook_url') or '').strip() or None
+    if 'tikkie_payment_url' in data:
+        settings.tikkie_payment_url = (data.get('tikkie_payment_url') or '').strip() or None
+    if 'tikkie_account_holder_name' in data:
+        settings.tikkie_account_holder_name = (data.get('tikkie_account_holder_name') or '').strip() or None
     if 'default_due_days' in data:
         settings.default_due_days = max(1, min(60, int(data.get('default_due_days') or 14)))
     if 'qr_enabled' in data:
@@ -3937,8 +3953,12 @@ def update_monthly_invoice_status():
     if new_status not in MONTHLY_INVOICE_STATUSES:
         return jsonify({'error': 'invalid_month_status'}), 400
     month_status = _monthly_invoice_status(month_value, create=True)
+    payment_method = (data.get('payment_method') or month_status.payment_method or 'BUSINESS_BANK').upper()
+    if payment_method not in PAYMENT_METHODS:
+        return jsonify({'error': 'invalid_payment_method'}), 400
     old_status = month_status.status
     month_status.status = new_status
+    month_status.payment_method = payment_method
     month_status.note = data.get('note') or month_status.note
     month_status.updated_by = user.id
     generated = []
@@ -3946,7 +3966,7 @@ def update_monthly_invoice_status():
         if not month_status.ready_at:
             month_status.ready_at = datetime.utcnow()
         try:
-            generated = _create_payment_invoices_for_month(month_value, user)
+            generated = _create_payment_invoices_for_month(month_value, user, payment_method)
         except (ValueError, requests.exceptions.RequestException) as exc:
             return _wise_payment_error_response(exc)
     if new_status == 'SETTLED':

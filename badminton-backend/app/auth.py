@@ -1,7 +1,7 @@
 from flask import Blueprint, request, current_app, jsonify
 import os
 from .models import User
-from . import db
+from . import db, limiter
 from .utils import send_whatsapp_message
 from passlib.hash import pbkdf2_sha256
 import jwt
@@ -79,6 +79,18 @@ def _get_and_pop_otp(phone):
         if int(time.time()) > expires:
             return None
         return hashed
+
+
+def _password_reset_key(user):
+    return f'password-reset:{user.id}'
+
+
+def _password_reset_recipient(user):
+    whatsapp_number = _normalize_whatsapp(user.whatsapp_number)
+    if whatsapp_number:
+        return whatsapp_number
+    phone = _normalize_whatsapp(user.phone)
+    return phone if phone and not phone.startswith('email:') else None
 
 
 @auth_bp.route('/send-otp', methods=['POST'])
@@ -193,6 +205,61 @@ def login():
         return _issue_token(user)
 
     return jsonify({'error': 'invalid_credentials'}), 401
+
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+@limiter.limit('5 per 15 minutes')
+def forgot_password():
+    """Send a password-reset code to the WhatsApp number already on the account."""
+    data = request.get_json() or {}
+    identifier = data.get('identifier') or data.get('username') or data.get('email') or ''
+    user = _find_login_user(identifier)
+    recipient = _password_reset_recipient(user) if user else None
+    response = {'status': 'reset_code_sent'}
+
+    # Always return the same production response so this endpoint cannot be used
+    # to discover registered accounts or whether they have a WhatsApp number.
+    if not user or not recipient:
+        return jsonify(response)
+
+    otp = f"{random.randint(0, 999999):06d}"
+    _store_otp(_password_reset_key(user), pbkdf2_sha256.hash(otp), ttl=300)
+    message = f"Your badminton password reset code is {otp}. It expires in 5 minutes. Do not share this code."
+
+    auth_mock = current_app.config.get('AUTH_MOCK', False)
+    env_dev = (current_app.config.get('ENV', '').lower() == 'development') or (os.environ.get('FLASK_ENV', '').lower() == 'development')
+    if auth_mock and env_dev:
+        current_app.logger.info('AUTH_MOCK enabled (dev) - password reset OTP for user %s: %s', user.id, otp)
+        response['mock_otp'] = otp
+        return jsonify(response)
+    if auth_mock:
+        current_app.logger.warning('AUTH_MOCK requested but not allowed outside development')
+        return jsonify({'error': 'mock_not_allowed'}), 403
+
+    send_whatsapp_message(recipient, message)
+    return jsonify(response)
+
+
+@auth_bp.route('/reset-password', methods=['POST'])
+@limiter.limit('10 per 15 minutes')
+def reset_password():
+    data = request.get_json() or {}
+    identifier = data.get('identifier') or data.get('username') or data.get('email') or ''
+    otp = (data.get('otp') or '').strip()
+    password = data.get('password') or ''
+    if not identifier or not otp:
+        return jsonify({'error': 'identifier_and_otp_required'}), 400
+    if len(password) < 6:
+        return jsonify({'error': 'password_too_short'}), 400
+
+    user = _find_login_user(identifier)
+    hashed = _get_and_pop_otp(_password_reset_key(user)) if user else None
+    if not hashed or not pbkdf2_sha256.verify(otp, hashed):
+        return jsonify({'error': 'otp_invalid_or_expired'}), 400
+
+    user.password_hash = pbkdf2_sha256.hash(password)
+    db.session.commit()
+    return jsonify({'status': 'password_reset'})
 
 
 @auth_bp.route('/me', methods=['GET'])

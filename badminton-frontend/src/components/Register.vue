@@ -1,7 +1,7 @@
 <template>
   <div class="flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-8">
     <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-lg sm:p-8">
-      <div class="mb-6">
+      <div v-if="mode !== 'forgot'" class="mb-6">
         <div class="grid grid-cols-2 rounded-lg bg-slate-100 p-1">
           <button
             type="button"
@@ -23,10 +23,16 @@
       </div>
 
       <h2 class="mb-2 text-center text-2xl font-bold text-slate-900">
-        {{ mode === 'login' ? 'Welcome back' : 'Create your account' }}
+        {{ mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : 'Reset your password' }}
       </h2>
       <p class="mb-6 text-center text-sm text-slate-600">
-        {{ mode === 'login' ? 'Use your email and password to continue.' : 'Add WhatsApp now if you want future updates there.' }}
+        {{ mode === 'login'
+          ? 'Use your email and password to continue.'
+          : mode === 'register'
+            ? 'Add WhatsApp now if you want future updates there.'
+            : resetCodeSent
+              ? 'Enter the code sent to the WhatsApp number linked to your account.'
+              : 'We will send a reset code to the WhatsApp number linked to your account.' }}
       </p>
 
       <form class="space-y-4" @submit.prevent="submitAuth">
@@ -41,19 +47,19 @@
         </div>
 
         <div>
-          <label class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'login' ? 'Name or email' : 'Email' }}</label>
+          <label class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'register' ? 'Email' : 'Name or email' }}</label>
           <input
             v-model="email"
-            :type="mode === 'login' ? 'text' : 'email'"
+            :type="mode === 'register' ? 'email' : 'text'"
             autocomplete="email"
             required
             class="w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
-            :placeholder="mode === 'login' ? 'Your name or you@example.com' : 'you@example.com'"
+            :placeholder="mode === 'register' ? 'you@example.com' : 'Your name or you@example.com'"
           />
         </div>
 
-        <div>
-          <label class="mb-1 block text-sm font-medium text-slate-700">Password</label>
+        <div v-if="mode !== 'forgot' || resetCodeSent">
+          <label class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'forgot' ? 'New password' : 'Password' }}</label>
           <input
             v-model="password"
             type="password"
@@ -62,6 +68,21 @@
             minlength="6"
             class="w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
             placeholder="At least 6 characters"
+          />
+        </div>
+
+        <div v-if="mode === 'forgot' && resetCodeSent">
+          <label class="mb-1 block text-sm font-medium text-slate-700">WhatsApp code</label>
+          <input
+            v-model="resetCode"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            required
+            maxlength="6"
+            pattern="[0-9]{6}"
+            class="w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+            placeholder="6-digit code"
           />
         </div>
 
@@ -75,7 +96,7 @@
           />
         </div>
 
-        <label class="flex items-center">
+        <label v-if="mode !== 'forgot'" class="flex items-center">
           <input v-model="rememberMe" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
           <span class="ml-2 text-sm text-slate-600">Remember me</span>
         </label>
@@ -84,19 +105,41 @@
           class="w-full rounded-lg bg-indigo-600 py-2.5 font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
           :disabled="isSubmitting"
         >
-          {{ isSubmitting ? 'Please wait...' : mode === 'login' ? 'Login' : 'Create account' }}
+          {{ isSubmitting ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'register' ? 'Create account' : resetCodeSent ? 'Set new password' : 'Send WhatsApp code' }}
         </button>
       </form>
+
+      <button
+        v-if="mode === 'login'"
+        type="button"
+        class="mt-4 w-full text-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
+        @click="setMode('forgot')"
+      >
+        Forgot password?
+      </button>
+      <button
+        v-if="mode === 'forgot' && resetCodeSent"
+        type="button"
+        class="mt-4 w-full text-center text-sm font-medium text-indigo-600 hover:text-indigo-500 disabled:text-slate-400"
+        :disabled="isSubmitting"
+        @click="requestAnotherCode"
+      >
+        Request a new code
+      </button>
 
       <div v-if="msg" class="mt-4 rounded-lg border p-3 text-sm leading-6" :class="messageClass">
         {{ msg }}
       </div>
 
-      <div class="mt-6 text-center text-sm text-slate-600">
+      <div v-if="mode !== 'forgot'" class="mt-6 text-center text-sm text-slate-600">
         {{ mode === 'login' ? 'Need a new account?' : 'Already registered?' }}
         <button type="button" class="font-medium text-indigo-600 hover:text-indigo-500" @click="toggleMode">
           {{ mode === 'login' ? 'Register' : 'Login' }}
         </button>
+      </div>
+      <div v-else class="mt-6 text-center text-sm text-slate-600">
+        Remembered your password?
+        <button type="button" class="font-medium text-indigo-600 hover:text-indigo-500" @click="setMode('login')">Back to login</button>
       </div>
     </div>
   </div>
@@ -114,6 +157,8 @@ export default {
     const password = ref('')
     const name = ref('')
     const whatsappNumber = ref('')
+    const resetCode = ref('')
+    const resetCodeSent = ref(false)
     const msg = ref('')
     const hasError = ref(false)
     const isSubmitting = ref(false)
@@ -131,6 +176,8 @@ export default {
       mode.value = nextMode
       msg.value = ''
       hasError.value = false
+      resetCode.value = ''
+      resetCodeSent.value = false
     }
 
     function toggleMode() {
@@ -150,6 +197,11 @@ export default {
       msg.value = ''
       hasError.value = false
       isSubmitting.value = true
+
+      if (mode.value === 'forgot') {
+        await submitPasswordReset()
+        return
+      }
 
       const isRegister = mode.value === 'register'
       const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login'
@@ -192,13 +244,57 @@ export default {
       }
     }
 
+    async function submitPasswordReset() {
+      isSubmitting.value = true
+      msg.value = ''
+      hasError.value = false
+      const endpoint = resetCodeSent.value ? '/api/auth/reset-password' : '/api/auth/forgot-password'
+      const payload = resetCodeSent.value
+        ? { identifier: email.value, otp: resetCode.value, password: password.value }
+        : { identifier: email.value }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          hasError.value = true
+          msg.value = readableError(data.error, false)
+        } else if (!resetCodeSent.value) {
+          resetCodeSent.value = true
+          msg.value = 'If that account has a linked WhatsApp number, a code has been sent.'
+        } else {
+          setMode('login')
+          password.value = ''
+          msg.value = 'Password reset. You can now log in.'
+        }
+      } catch (err) {
+        hasError.value = true
+        msg.value = 'Password reset is unavailable right now. Please try again.'
+      } finally {
+        isSubmitting.value = false
+      }
+    }
+
+    async function requestAnotherCode() {
+      resetCodeSent.value = false
+      resetCode.value = ''
+      password.value = ''
+      await submitPasswordReset()
+    }
+
     function readableError(error, isRegister) {
       const messages = {
         valid_email_required: 'Please enter a valid email address.',
         password_too_short: 'Password must be at least 6 characters.',
         email_already_registered: 'That email is already registered. Try logging in.',
         whatsapp_already_registered: 'That WhatsApp number is already in use.',
-        invalid_credentials: 'Email or password is incorrect.'
+        invalid_credentials: 'Email or password is incorrect.',
+        identifier_and_otp_required: 'Enter your account name or email and the WhatsApp code.',
+        otp_invalid_or_expired: 'That code is invalid or expired. Request a new code and try again.'
       }
       return messages[error] || (isRegister ? 'Registration failed.' : 'Login failed.')
     }
@@ -209,13 +305,16 @@ export default {
       password,
       name,
       whatsappNumber,
+      resetCode,
+      resetCodeSent,
       rememberMe,
       msg,
       messageClass,
       isSubmitting,
       setMode,
       toggleMode,
-      submitAuth
+      submitAuth,
+      requestAnotherCode
     }
   }
 }

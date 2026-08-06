@@ -10,6 +10,8 @@ ENDPOINT_DOCS = {
     '/api/auth/verify': ('Auth', 'Verify an OTP and return a bearer token.'),
     '/api/auth/register': ('Auth', 'Register a user account.'),
     '/api/auth/login': ('Auth', 'Login with username/email and password.'),
+    '/api/auth/forgot-password': ('Auth', 'Send a password reset code to the WhatsApp number on an account.'),
+    '/api/auth/reset-password': ('Auth', 'Reset a password with a WhatsApp verification code.'),
     '/api/auth/me': ('Auth', 'Return the current authenticated user.'),
     '/api/bookings/availability': ('Bookings', 'Check court availability for a date.'),
     '/api/bookings': ('Bookings', 'List or create bookings.'),
@@ -116,7 +118,16 @@ def build_openapi_spec():
             body = _request_body(method)
             if body:
                 operation['requestBody'] = body
-            if path.startswith('/api/') and not path.startswith('/api/auth/login') and path != '/api/health':
+            public_paths = {
+                '/api/health',
+                '/api/auth/login',
+                '/api/auth/register',
+                '/api/auth/send-otp',
+                '/api/auth/verify',
+                '/api/auth/forgot-password',
+                '/api/auth/reset-password',
+            }
+            if path.startswith('/api/') and path not in public_paths:
                 operation['security'] = [{'bearerAuth': []}]
             paths[path][method.lower()] = operation
 

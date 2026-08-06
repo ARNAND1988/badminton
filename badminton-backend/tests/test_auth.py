@@ -109,3 +109,70 @@ def test_anand_parasuraman_is_seeded_as_super_admin(client):
     })
     assert email_resp.status_code == 200
     assert email_resp.get_json().get('user', {}).get('role') == 'super_admin'
+
+
+def test_reset_password_with_linked_whatsapp(client):
+    client.post('/api/auth/register', json={
+        'email': 'reset.member@example.com',
+        'password': 'old-secret',
+        'name': 'Reset Member',
+        'whatsapp_number': '+31611112222',
+    })
+
+    request_resp = client.post('/api/auth/forgot-password', json={
+        'identifier': 'reset.member@example.com',
+    })
+    assert request_resp.status_code == 200
+    otp = request_resp.get_json().get('mock_otp')
+    assert otp
+
+    reset_resp = client.post('/api/auth/reset-password', json={
+        'identifier': 'reset.member@example.com',
+        'otp': otp,
+        'password': 'new-secret',
+    })
+    assert reset_resp.status_code == 200
+    assert reset_resp.get_json() == {'status': 'password_reset'}
+
+    old_login = client.post('/api/auth/login', json={
+        'username': 'reset.member@example.com',
+        'password': 'old-secret',
+    })
+    assert old_login.status_code == 401
+    new_login = client.post('/api/auth/login', json={
+        'username': 'reset.member@example.com',
+        'password': 'new-secret',
+    })
+    assert new_login.status_code == 200
+
+
+def test_forgot_password_does_not_reveal_account_or_whatsapp_status(client):
+    no_account = client.post('/api/auth/forgot-password', json={'identifier': 'missing@example.com'})
+    assert no_account.status_code == 200
+    assert no_account.get_json() == {'status': 'reset_code_sent'}
+
+    client.post('/api/auth/register', json={
+        'email': 'no.whatsapp@example.com',
+        'password': 'secret123',
+    })
+    no_whatsapp = client.post('/api/auth/forgot-password', json={'identifier': 'no.whatsapp@example.com'})
+    assert no_whatsapp.status_code == 200
+    assert no_whatsapp.get_json() == {'status': 'reset_code_sent'}
+
+
+def test_reset_password_rejects_invalid_code_and_short_password(client):
+    short_password = client.post('/api/auth/reset-password', json={
+        'identifier': 'somebody@example.com',
+        'otp': '123456',
+        'password': 'short',
+    })
+    assert short_password.status_code == 400
+    assert short_password.get_json().get('error') == 'password_too_short'
+
+    invalid_code = client.post('/api/auth/reset-password', json={
+        'identifier': 'somebody@example.com',
+        'otp': '123456',
+        'password': 'long-enough',
+    })
+    assert invalid_code.status_code == 400
+    assert invalid_code.get_json().get('error') == 'otp_invalid_or_expired'

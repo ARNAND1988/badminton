@@ -981,7 +981,7 @@
                 <tbody class="divide-y divide-slate-100 bg-white">
                   <tr v-for="invoice in paymentInvoices" :key="invoice.id">
                     <td class="px-3 py-2 font-semibold text-slate-900">{{ invoice.invoice_number }}<span v-if="invoice.is_test_invoice" class="ml-2 rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">Test</span><div class="text-xs font-normal text-slate-500">{{ invoice.payment_reference }}</div></td>
-                    <td class="px-3 py-2 text-slate-700">{{ invoice.user?.name || invoice.user?.email || invoice.user?.phone || 'Family invoice' }}</td>
+                    <td class="px-3 py-2 text-slate-700">{{ invoice.user?.name || invoice.user?.email || invoice.user?.phone || invoice.billing_name || 'Ad hoc player' }}</td>
                     <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ invoice.month || '—' }}<div class="text-xs text-slate-500">Due {{ invoice.due_date || '—' }}</div></td>
                     <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ invoice.amount_due }}<div class="text-xs font-normal text-emerald-700">Paid €{{ invoice.paid_amount || 0 }}</div></td>
                     <td class="px-3 py-2"><select :value="invoice.payment_status" class="form-input min-w-36" @change="setPaymentStatus(invoice, $event.target.value)"><option value="UNPAID">Payment pending</option><option value="PARTIALLY_PAID">Partially paid</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option><option value="EXPIRED">Expired</option></select></td>
@@ -997,7 +997,7 @@
             <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h4 class="font-semibold text-slate-900">Wise payment details</h4>
-                <p class="text-sm text-slate-600">{{ selectedPaymentInvoice.user?.name || selectedPaymentInvoice.user?.email || 'Family invoice' }} · {{ paymentStatusLabel(selectedPaymentInvoice.payment_status) }}</p>
+                <p class="text-sm text-slate-600">{{ selectedPaymentInvoice.user?.name || selectedPaymentInvoice.user?.email || selectedPaymentInvoice.billing_name || 'Ad hoc player' }} · {{ paymentStatusLabel(selectedPaymentInvoice.payment_status) }}</p>
               </div>
               <button class="btn-muted" @click="selectedPaymentInvoice = null">Close</button>
             </div>
@@ -1354,6 +1354,27 @@
         </div>
 
         <section class="panel-card space-y-4">
+          <div>
+            <h3 class="font-semibold text-slate-900">Password-reset WhatsApp test</h3>
+            <p class="mt-1 text-sm text-slate-600">Send a harmless test through the exact WhatsApp delivery path used for reset codes. This does not create or reveal a reset code.</p>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+            <label class="block">
+              <span class="form-label">Member email, name, or phone</span>
+              <input v-model="passwordResetTestIdentifier" class="form-input" placeholder="member@example.com" />
+            </label>
+            <button class="btn-dark" :disabled="passwordResetTesting || !passwordResetTestIdentifier.trim()" @click="runPasswordResetDeliveryTest">
+              {{ passwordResetTesting ? 'Sending...' : 'Test reset delivery' }}
+            </button>
+          </div>
+          <div v-if="passwordResetTestResult" class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            <strong>Status:</strong> {{ connectionStatusLabel(passwordResetTestResult.status) }} ·
+            <strong>Recipient:</strong> {{ passwordResetTestResult.recipient }}
+            <span v-if="passwordResetTestResult.provider"> · <strong>Provider:</strong> {{ passwordResetTestResult.provider }}</span>
+          </div>
+        </section>
+
+        <section class="panel-card space-y-4">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h3 class="font-semibold text-slate-900">Wise payment lookup</h3>
@@ -1616,6 +1637,8 @@ export default {
     const systemChecks = ref(null)
     const systemCheckQuery = ref('')
     const systemCheckWhatsAppRecipient = ref('')
+    const passwordResetTestIdentifier = ref('')
+    const passwordResetTestResult = ref(null)
     const adminAuditLogs = ref([])
     const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
     const archivedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
@@ -1631,6 +1654,7 @@ export default {
     const paymentWebhookStatusLoading = ref(false)
     const systemCheckRefreshing = ref(false)
     const systemCheckWhatsAppTesting = ref(false)
+    const passwordResetTesting = ref(false)
     const retryingWiseEventId = ref(null)
     const errorMsg = ref('')
     const editingBookingId = ref(null)
@@ -2600,6 +2624,24 @@ export default {
       }
     }
 
+    async function runPasswordResetDeliveryTest() {
+      passwordResetTesting.value = true
+      passwordResetTestResult.value = null
+      try {
+        const payload = await fetchJson('/api/admin/system-checks/password-reset-test', {
+          method: 'POST',
+          body: JSON.stringify({ identifier: passwordResetTestIdentifier.value.trim() })
+        })
+        passwordResetTestResult.value = payload
+        msg.value = `Password-reset delivery test sent to ${payload.recipient}.`
+        errorMsg.value = ''
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        passwordResetTesting.value = false
+      }
+    }
+
     async function retryWiseWebhookEvent(event) {
       retryingWiseEventId.value = event.id
       try {
@@ -3553,6 +3595,8 @@ export default {
       systemChecks,
       systemCheckQuery,
       systemCheckWhatsAppRecipient,
+      passwordResetTestIdentifier,
+      passwordResetTestResult,
       isLoggedIn,
       isAdmin,
       isSuperAdmin,
@@ -3563,6 +3607,7 @@ export default {
       paymentWebhookStatusLoading,
       systemCheckRefreshing,
       systemCheckWhatsAppTesting,
+      passwordResetTesting,
       retryingWiseEventId,
       paymentSettings,
       paymentWebhookStatus,
@@ -3694,6 +3739,7 @@ export default {
       saveFamilyPersonAttendance,
       saveWhatsAppNotification,
       runWhatsAppConnectionTest,
+      runPasswordResetDeliveryTest,
       openAvailabilitySummaryPreview,
       testWhatsAppNotification,
       retryWiseWebhookEvent,

@@ -47,6 +47,7 @@ ENDPOINT_DOCS = {
     '/api/admin/availability-summary/send': ('WhatsApp', 'Send the availability overview notification.'),
     '/api/admin/payment-invoices/monthly/notify/preview': ('WhatsApp', 'Preview the monthly invoice-ready notification before sending.'),
     '/api/admin/payment-invoices/monthly/notify': ('WhatsApp', 'Send the monthly invoice-ready notification.'),
+    '/api/admin/system-checks/password-reset-test': ('Diagnostics', 'Test password-reset WhatsApp delivery without creating a code.'),
     '/api/admin/system-checks': ('Admin Diagnostics', 'Check backend, WhatsApp bot, Wise profile, and Wise webhook subscription status.'),
     '/api/admin/system-checks/whatsapp-test': ('Admin Diagnostics', 'Send a direct WhatsApp connection test to the configured or provided recipient.'),
     '/api/admin/wise-webhook-events/{event_id}/retry': ('Admin Diagnostics', 'Retry reconciliation for a stored Wise webhook event.'),

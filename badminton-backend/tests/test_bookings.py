@@ -1535,6 +1535,18 @@ def test_admin_monthly_invoice_keeps_distinct_people_with_same_first_name(client
     registered = next((invoice for invoice in invoices if invoice['user']['name'] == 'Anand Parasuraman'), None)
     assert registered is None or registered['booking_total'] == 0.0
 
+    ready_resp = client.post('/api/admin/invoices/monthly/status', json={
+        'month': '2026-08',
+        'status': 'READY_FOR_PAYMENT',
+        'payment_method': 'BUSINESS_BANK',
+    }, headers={'Authorization': f'Bearer {token}'})
+    assert ready_resp.status_code == 200
+    refreshed = client.get('/api/admin/invoices/monthly?month=2026-08', headers={'Authorization': f'Bearer {token}'}).get_json()
+    adhoc = next(invoice for invoice in refreshed['invoices'] if invoice['user']['name'] == 'Anand Chandrasekaran')
+    assert adhoc['payment_invoice']['billing_name'] == 'Anand Chandrasekaran'
+    assert adhoc['payment_invoice']['payment_status'] == 'UNPAID'
+    assert adhoc['payment_invoice']['amount_due'] == 20.0
+
 
 def test_current_user_monthly_invoice_deduplicates_name_matched_participant(client, app):
     with app.app_context():
@@ -2002,6 +2014,25 @@ def test_admin_can_run_whatsapp_connection_test_from_system_checks(client, app, 
     checks_payload = checks_resp.get_json()
     assert checks_payload['whatsapp']['default_test_recipient'] == '+31 6 1111 2222'
     assert checks_payload['whatsapp']['last_test_log']['recipient'] == '31611112222@c.us'
+
+
+def test_admin_can_test_password_reset_delivery_path(client, app, monkeypatch):
+    from app import utils as utils_module
+
+    sent = []
+    monkeypatch.setattr(utils_module, 'send_whatsapp_message', lambda recipient, message: sent.append((recipient, message)) or {'status': 'sent', 'provider': 'whatsapp_bot'})
+    with app.app_context():
+        admin = User(phone='+31100009995', email='reset-test-admin@example.com', name='Reset Test Admin', role='admin')
+        member = User(phone='email:reset-target@example.com', email='reset-target@example.com', name='Reset Target', whatsapp_number='+31699998888', role='member')
+        db.session.add_all([admin, member])
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    response = client.post('/api/admin/system-checks/password-reset-test', json={'identifier': 'reset-target@example.com'}, headers={'Authorization': f'Bearer {token}'})
+    assert response.status_code == 200
+    assert response.get_json()['provider'] == 'whatsapp_bot'
+    assert sent[0][0] == '+31699998888'
+    assert 'No password reset code was created' in sent[0][1]
 
 
 def test_wise_webhook_records_concise_error_when_wise_dns_fails(client, app, monkeypatch):

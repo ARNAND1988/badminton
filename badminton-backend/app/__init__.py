@@ -262,6 +262,8 @@ def create_app():
                 'payment_method': "VARCHAR(32) DEFAULT 'BUSINESS_BANK'",
                 'wise_payment_request_id': 'VARCHAR(128)',
                 'is_test_invoice': 'BOOLEAN DEFAULT FALSE',
+                'subject_key': 'VARCHAR(255)',
+                'billing_name': 'VARCHAR(255)',
                 'bank_account_holder': 'VARCHAR(128)',
                 'bank_name': 'VARCHAR(128)',
                 'iban': 'VARCHAR(64)',

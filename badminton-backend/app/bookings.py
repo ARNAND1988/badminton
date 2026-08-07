@@ -1956,6 +1956,10 @@ def admin_monthly_invoices():
             payment_invoice = PaymentInvoice.query.filter_by(user_id=user_id, month=month_value, is_test_invoice=False).first()
             if payment_invoice:
                 subject['payment_invoice'] = payment_invoice.to_dict(include_qr=False)
+        elif not user_id and expose_payment_details:
+            payment_invoice = PaymentInvoice.query.filter_by(subject_key=subject['id'], month=month_value, is_test_invoice=False).first()
+            if payment_invoice:
+                subject['payment_invoice'] = payment_invoice.to_dict(include_qr=False)
         subject['total'] = round(subject['booking_total'] + subject['misc_total'], 2)
         subject['booking_total'] = round(subject['booking_total'], 2)
         subject['paid_count'] = len([item for item in subject['booking_items'] if item.get('invoice_status') == 'settled' and item.get('booking_status') == 'settled'])
@@ -3681,6 +3685,30 @@ def _create_payment_invoice_for_summary(user, month_value, summary, settings, is
     return invoice
 
 
+def _create_adhoc_payment_invoice(subject, month_value, settings, admin_user, payment_method):
+    subject_key = subject['id']
+    existing = PaymentInvoice.query.filter_by(subject_key=subject_key, month=month_value, is_test_invoice=False).first()
+    invoice = existing or PaymentInvoice(subject_key=subject_key, month=month_value)
+    if not existing:
+        invoice.invoice_number = _next_payment_reference()
+        invoice.payment_reference = invoice.invoice_number
+        invoice.due_date = (datetime.utcnow().date() + timedelta(days=int(settings.default_due_days or 14))).strftime('%Y-%m-%d')
+        db.session.add(invoice)
+        db.session.flush()
+    invoice.billing_name = subject.get('family_title') or (subject.get('user') or {}).get('name') or 'Ad hoc player'
+    invoice.amount_due = round(float(subject.get('total') or 0.0), 2)
+    invoice.booking_items_json = json.dumps(subject.get('booking_items') or [])
+    invoice.misc_items_json = json.dumps(subject.get('misc_items') or [])
+    invoice.is_test_invoice = False
+    invoice.payment_status = invoice.payment_status or 'UNPAID'
+    invoice.updated_by = admin_user.id
+    try:
+        _attach_payment_details(invoice, settings, payment_method, _monthly_invoice_status(month_value))
+    except (ValueError, requests.exceptions.RequestException) as exc:
+        _attach_payment_error(invoice, exc)
+    return invoice
+
+
 def _create_payment_invoices_for_month(month_value, admin_user, payment_method='BUSINESS_BANK'):
     settings = _payment_settings()
     users = User.query.order_by(User.name.asc(), User.email.asc(), User.phone.asc()).all()
@@ -3697,6 +3725,14 @@ def _create_payment_invoices_for_month(month_value, admin_user, payment_method='
         invoice = _create_payment_invoice_for_summary(owner, month_value, summary, settings, False, allow_payment_failure=True, payment_method=payment_method)
         invoice.updated_by = admin_user.id
         created.append(invoice)
+    # The admin summary also contains standalone ad hoc players, who do not have
+    # a User row but still need a payable invoice and reconciliation controls.
+    summary_response = admin_monthly_invoices()
+    summary_payload = summary_response.get_json() if hasattr(summary_response, 'get_json') else {}
+    for subject in summary_payload.get('invoices', []):
+        if isinstance((subject.get('user') or {}).get('id'), int) or float(subject.get('total') or 0.0) <= 0:
+            continue
+        created.append(_create_adhoc_payment_invoice(subject, month_value, settings, admin_user, payment_method))
     return created
 
 
@@ -3905,6 +3941,29 @@ def admin_system_checks_whatsapp_test():
         'message': 'WhatsApp connection test sent.' if status == 'sent' else 'WhatsApp connection test completed with a non-sent status.',
         'log': log.to_dict(),
     })
+
+
+@bookings_bp.route('/admin/system-checks/password-reset-test', methods=['POST'])
+def admin_system_checks_password_reset_test():
+    """Exercise the same provider and recipient resolution used by password reset."""
+    user, error = _require_any_admin()
+    if error:
+        return error
+    from .auth import _find_login_user, _password_reset_recipient
+    from .utils import send_whatsapp_message
+
+    identifier = ((request.get_json() or {}).get('identifier') or '').strip()
+    target = _find_login_user(identifier)
+    if not target:
+        return jsonify({'error': 'Account not found for this diagnostic test.'}), 404
+    recipient = _password_reset_recipient(target)
+    if not recipient:
+        return jsonify({'error': 'This account has no WhatsApp number for password reset.'}), 400
+    result = send_whatsapp_message(recipient, 'Badminton password-reset delivery test. No password reset code was created.') or {}
+    status = result.get('status') or 'failed'
+    _record_admin_audit(user, 'send', 'password_reset_delivery_test', target.id, f'Tested password-reset delivery for {target.name or target.email or target.phone}', {'status': status, 'recipient': recipient})
+    db.session.commit()
+    return jsonify({'status': status, 'recipient': recipient, 'provider': result.get('provider'), 'error': result.get('error')}), (200 if status == 'sent' else 502)
 
 
 @bookings_bp.route('/admin/wise-webhook-events/<int:event_id>/retry', methods=['POST'])
@@ -4238,7 +4297,7 @@ def notify_monthly_invoice_ready():
         dedupe_key=None if send_test else f'monthly_invoice_ready:{month_value}',
         message_override=message,
         recipient_override=recipient_override,
-        force=send_test,
+        force=True,
     )
     return jsonify({'status': 'sent' if log else 'skipped', 'message': message, 'log': log.to_dict() if log else None})
 
@@ -4259,6 +4318,10 @@ def _monthly_pending_payment_preview(month_value=None):
         .order_by(PaymentInvoice.user_id.asc())
         .all()
     )
+    invoices = [
+        invoice for invoice in invoices
+        if round(float(invoice.amount_due or 0.0) - float(invoice.paid_amount or 0.0), 2) > 0
+    ]
     method = month_status.payment_method or 'BUSINESS_BANK'
     month_label = datetime.strptime(month_value, '%Y-%m').strftime('%B %Y')
     lines = [
@@ -4281,7 +4344,7 @@ def _monthly_pending_payment_preview(month_value=None):
         paid_amount = float(payload.get('paid_amount') or 0.0)
         balance = max(0.0, round(float(payload.get('amount_due') or 0.0) - paid_amount, 2))
         pending_total += balance
-        family_name = _family_display_name(invoice.user) if invoice.user else f'Invoice {invoice.invoice_number}'
+        family_name = _family_display_name(invoice.user) if invoice.user else (invoice.billing_name or f'Invoice {invoice.invoice_number}')
         item_count = len(booking_items) + len(misc_items)
         lines.append(f'• *{family_name}* — {item_count} item(s) — *€{balance:.2f}*')
         if invoice.due_date:
@@ -4351,7 +4414,7 @@ def notify_monthly_pending_payments():
         dedupe_key=None if send_test else f'monthly_payment_pending:{month_value}',
         message_override=message,
         recipient_override=recipient_override,
-        force=send_test,
+        force=True,
     )
     _record_admin_audit(user, 'send', 'whatsapp_notification', log.id if log else None, f'Sent pending payment reminder for {month_value}', {'pending_count': len(invoices), 'test': send_test})
     db.session.commit()

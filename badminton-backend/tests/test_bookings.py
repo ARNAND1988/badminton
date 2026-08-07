@@ -1474,6 +1474,39 @@ def test_admin_monthly_invoice_lists_family_and_name_matched_participants_once(c
     assert data['totals']['booking_total'] == 80.01
 
 
+def test_admin_monthly_invoice_keeps_distinct_people_with_same_first_name(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(name='Anand Parasuraman').first()
+        if not admin:
+            admin = User(phone='+31100001011', email='anand-parasuraman@example.com', name='Anand Parasuraman', role='admin')
+            db.session.add(admin)
+        court = Court(name='Same first name court', hourly_rate=20.0, is_active=True)
+        db.session.add(court)
+        db.session.commit()
+        booking = Booking(court_id=court.id, booking_date='2026-08-03', start_time='19:30', end_time='20:30', cost=20, status='completed')
+        db.session.add(booking)
+        db.session.commit()
+        db.session.add(BookingParticipant(
+            booking_id=booking.id,
+            phone='adhoc-anand-chandrasekaran',
+            name='Anand Chandrasekaran',
+            status='participated',
+            is_adhoc=True,
+        ))
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    resp = client.get('/api/admin/invoices/monthly?month=2026-08', headers={'Authorization': f'Bearer {token}'})
+
+    assert resp.status_code == 200
+    invoices = resp.get_json()['invoices']
+    adhoc = next(invoice for invoice in invoices if invoice['user']['name'] == 'Anand Chandrasekaran')
+    assert adhoc['user']['is_club_member'] is False
+    assert adhoc['booking_total'] == 20.0
+    registered = next((invoice for invoice in invoices if invoice['user']['name'] == 'Anand Parasuraman'), None)
+    assert registered is None or registered['booking_total'] == 0.0
+
+
 def test_current_user_monthly_invoice_deduplicates_name_matched_participant(client, app):
     with app.app_context():
         member = User(phone='+31100001003', email='renjith-current@example.com', name='Renjith R', role='member')
@@ -1611,6 +1644,53 @@ def test_admin_previews_edits_and_tests_monthly_invoice_notification(client, app
     }, headers=headers)
     assert send_resp.status_code == 200
     assert sent[-1] == {'message': 'Final monthly invoice notification', 'recipient': 'group-monthly'}
+
+
+def test_pending_payment_preview_requires_ready_status_and_lists_family_details(client, app):
+    from app.models import MonthlyInvoiceStatus
+
+    with app.app_context():
+        admin = User(phone='+31100009985', email='pending-admin@example.com', name='Pending Admin', role='admin')
+        family = User(phone='+31100009986', email='pending-family@example.com', name='Pending Family', role='member')
+        setting = WhatsAppNotificationSetting(event_key='monthly_invoice_ready', title='Monthly invoices', template='unused', is_enabled=True, send_to_group=True, group_id='pending-group')
+        db.session.add_all([admin, family, setting])
+        db.session.commit()
+        invoice = PaymentInvoice(
+            user_id=family.id,
+            month='2030-05',
+            invoice_number='INV-PENDING-1',
+            payment_reference='REF-PENDING-1',
+            payment_status='UNPAID',
+            payment_method='PERSONAL_TIKKIE',
+            amount_due=24.5,
+            paid_amount=4.5,
+            due_date='2030-06-14',
+            payment_url='https://example.test/pay',
+            booking_items_json='[{"booking_id": 1}, {"booking_id": 2}]',
+            misc_items_json='[{"cost_id": 1}]',
+        )
+        db.session.add(invoice)
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    headers = {'Authorization': f'Bearer {token}'}
+    blocked = client.post('/api/admin/payment-invoices/monthly/pending/preview', json={'month': '2030-05'}, headers=headers)
+    assert blocked.status_code == 400
+
+    with app.app_context():
+        db.session.add(MonthlyInvoiceStatus(month='2030-05', status='READY_FOR_PAYMENT', payment_method='PERSONAL_TIKKIE'))
+        db.session.commit()
+
+    preview_resp = client.post('/api/admin/payment-invoices/monthly/pending/preview', json={'month': '2030-05'}, headers=headers)
+    assert preview_resp.status_code == 200
+    preview = preview_resp.get_json()
+    assert preview['pending_count'] == 1
+    assert preview['payment_method'] == 'PERSONAL_TIKKIE'
+    assert 'Pending Family' in preview['message']
+    assert '2 booking(s), 1 shared cost(s)' in preview['message']
+    assert 'Family share: €24.50 | Paid: €4.50 | Pending: €20.00' in preview['message']
+    assert 'Payment method: Personal Tikkie' in preview['message']
+    assert 'https://example.test/pay' in preview['message']
 
 
 def test_wise_transfer_state_webhook_matches_invoice_reference_after_error_retry(client, app, monkeypatch):

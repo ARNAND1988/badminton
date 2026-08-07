@@ -830,7 +830,7 @@
             <h3 class="text-lg font-semibold text-slate-900">Monthly family invoices</h3>
             <p class="section-copy">Review each family's booking, shared-cost, and total amount for the selected month.</p>
           </div>
-          <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(10rem,12rem)_minmax(12rem,16rem)_minmax(12rem,16rem)_auto] xl:items-end">
+          <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(10rem,12rem)_minmax(12rem,16rem)_minmax(12rem,16rem)_auto_auto] xl:items-end">
             <label class="block sm:w-48">
               <span class="form-label">Month</span>
               <input v-model="monthlyInvoiceMonth" type="month" class="form-input" @change="loadAdminMonthlyInvoices" />
@@ -851,6 +851,13 @@
               </select>
             </label>
             <button class="btn-secondary" @click="openMonthlyInvoiceNotificationPreview">Notify group</button>
+            <button
+              v-if="adminMonthlyInvoices?.month_status?.status === 'READY_FOR_PAYMENT'"
+              class="btn-secondary border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+              @click="openPendingPaymentNotificationPreview"
+            >
+              Pending notification
+            </button>
           </div>
         </div>
         <div v-if="adminMonthlyInvoices" class="mt-4 space-y-4">
@@ -2417,6 +2424,16 @@ export default {
       })
     }
 
+    async function openPendingPaymentNotificationPreview() {
+      await openNotificationPreview({
+        type: 'monthly_payment_pending',
+        title: `Pending payment reminder · ${monthName(monthlyInvoiceMonth.value)}`,
+        previewEndpoint: '/api/admin/payment-invoices/monthly/pending/preview',
+        sendEndpoint: '/api/admin/payment-invoices/monthly/pending',
+        payload: { month: monthlyInvoiceMonth.value, payment_method: monthlyPaymentMethod.value }
+      })
+    }
+
     function closeNotificationPreview() {
       notificationPreview.value.open = false
     }
@@ -3626,6 +3643,7 @@ export default {
       generateTestInvoice,
       openSettingNotificationPreview,
       openMonthlyInvoiceNotificationPreview,
+      openPendingPaymentNotificationPreview,
       closeNotificationPreview,
       sendNotificationPreview,
       clearSystemCheckLookup,

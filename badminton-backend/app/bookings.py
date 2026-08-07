@@ -173,6 +173,21 @@ def _names_match(left, right):
     return bool(left_parts and right_parts and left_parts[0] == right_parts[0] and (left.startswith(right + ' ') or right.startswith(left + ' ')))
 
 
+def _participant_name_matches_alias(participant_name, alias):
+    """Match abbreviated participant names without claiming a different full name.
+
+    A one-word booking entry (for example ``Renjith``) may identify a registered
+    ``Renjith R``.  The reverse is deliberately not true: ``Anand
+    Chandrasekaran`` must not be assigned to an account whose only matching alias
+    is the generic first name ``Anand``.
+    """
+    participant = _normalize_person_name(participant_name)
+    registered_alias = _normalize_person_name(alias)
+    if len(participant.split()) > 1 and len(registered_alias.split()) == 1:
+        return False
+    return _names_match(participant, registered_alias)
+
+
 
 
 def _sync_booking_invoice(booking):
@@ -1725,7 +1740,7 @@ def admin_monthly_invoices():
                 continue
             candidate_aliases = [candidate.name, candidate.email, candidate.phone]
             matching_alias = any(
-                _names_match(candidate_alias, owner_alias)
+                _participant_name_matches_alias(candidate_alias, owner_alias)
                 for candidate_alias in candidate_aliases
                 if candidate_alias
                 for owner_alias in owner_aliases.get(item.id, set())
@@ -1825,7 +1840,7 @@ def admin_monthly_invoices():
             return by_key[participant.phone]
         label = participant.name or participant.phone or 'Player'
         for subject in subjects:
-            if any(_names_match(label, alias) for alias in subject['aliases']):
+            if any(_participant_name_matches_alias(label, alias) for alias in subject['aliases']):
                 return subject
         key = f'adhoc:{_normalize_person_name(label) or participant.id}'
         subject = by_key.get(key)
@@ -4170,4 +4185,103 @@ def notify_monthly_invoice_ready():
         recipient_override=recipient_override,
         force=send_test,
     )
+    return jsonify({'status': 'sent' if log else 'skipped', 'message': message, 'log': log.to_dict() if log else None})
+
+
+def _monthly_pending_payment_preview(month_value=None):
+    month_value = month_value or datetime.utcnow().strftime('%Y-%m')
+    start_date, _ = _month_bounds(month_value)
+    if not start_date:
+        raise ValueError('month must use YYYY-MM')
+    month_status = _monthly_invoice_status(month_value)
+    if not month_status or month_status.status != 'READY_FOR_PAYMENT':
+        raise ValueError('Pending payment reminders are available only when the month is ready for payment.')
+
+    invoices = (
+        PaymentInvoice.query
+        .filter_by(month=month_value, is_test_invoice=False)
+        .filter(PaymentInvoice.payment_status.in_({'UNPAID', 'PARTIALLY_PAID'}))
+        .order_by(PaymentInvoice.user_id.asc())
+        .all()
+    )
+    method = month_status.payment_method or 'BUSINESS_BANK'
+    method_label = 'Personal Tikkie' if method == 'PERSONAL_TIKKIE' else 'Business bank account'
+    lines = [f'⏰ Pending badminton payments for {month_value}', f'Payment method: {method_label}', '']
+    pending_total = 0.0
+    for invoice in invoices:
+        payload = invoice.to_dict(include_qr=False)
+        booking_items = payload.get('booking_items') or []
+        misc_items = payload.get('misc_items') or []
+        paid_amount = float(payload.get('paid_amount') or 0.0)
+        balance = max(0.0, round(float(payload.get('amount_due') or 0.0) - paid_amount, 2))
+        pending_total += balance
+        family_name = _family_display_name(invoice.user) if invoice.user else f'Invoice {invoice.invoice_number}'
+        lines.extend([
+            f'{family_name}: {len(booking_items)} booking(s), {len(misc_items)} shared cost(s)',
+            f'Family share: €{float(payload.get("amount_due") or 0.0):.2f} | Paid: €{paid_amount:.2f} | Pending: €{balance:.2f}',
+            f'Reference: {invoice.payment_reference} | Due: {invoice.due_date or "not set"}',
+        ])
+        if invoice.payment_url:
+            lines.append(f'Pay: {invoice.payment_url}')
+        elif method == 'BUSINESS_BANK' and invoice.iban:
+            lines.append(f'IBAN: {invoice.iban} | Account: {invoice.bank_account_holder or ""}'.rstrip())
+        lines.append('')
+    if not invoices:
+        lines.append('There are no pending family payments for this month.')
+    else:
+        lines.append(f'Total pending: €{pending_total:.2f}')
+    lines.append(f'Open the app: {request.host_url.rstrip("/")}')
+
+    setting = _whatsapp_setting('monthly_invoice_ready')
+    recipient = ((setting.group_id or '').strip() or _fallback_whatsapp_group_id('monthly_invoice_ready')) if setting else None
+    return setting, '\n'.join(lines), recipient, invoices, method
+
+
+@bookings_bp.route('/admin/payment-invoices/monthly/pending/preview', methods=['POST'])
+def preview_monthly_pending_payments():
+    _, error = _require_any_admin()
+    if error:
+        return error
+    try:
+        setting, message, recipient, invoices, method = _monthly_pending_payment_preview((request.get_json() or {}).get('month'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    return jsonify({
+        'message': message,
+        'recipient': recipient,
+        'setting': setting.to_dict() if setting else None,
+        'test_recipients': _whatsapp_known_test_recipients(),
+        'pending_count': len(invoices),
+        'payment_method': method,
+    })
+
+
+@bookings_bp.route('/admin/payment-invoices/monthly/pending', methods=['POST'])
+def notify_monthly_pending_payments():
+    user, error = _require_any_admin()
+    if error:
+        return error
+    data = request.get_json() or {}
+    try:
+        _, default_message, _, invoices, _ = _monthly_pending_payment_preview(data.get('month'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    message = (data.get('message') or default_message).strip()
+    if not message:
+        return jsonify({'error': 'message required'}), 400
+    send_test = bool(data.get('test'))
+    recipient_override = _normalize_whatsapp_test_recipient(data.get('recipient')) if send_test else None
+    if send_test and not recipient_override:
+        return jsonify({'error': 'test recipient required'}), 400
+    month_value = data.get('month') or datetime.utcnow().strftime('%Y-%m')
+    log = _send_whatsapp_event(
+        'monthly_invoice_ready',
+        {'month': month_value, 'note': 'Pending payment reminder', 'app_url': request.host_url.rstrip('/')},
+        dedupe_key=None if send_test else f'monthly_payment_pending:{month_value}',
+        message_override=message,
+        recipient_override=recipient_override,
+        force=send_test,
+    )
+    _record_admin_audit(user, 'send', 'whatsapp_notification', log.id if log else None, f'Sent pending payment reminder for {month_value}', {'pending_count': len(invoices), 'test': send_test})
+    db.session.commit()
     return jsonify({'status': 'sent' if log else 'skipped', 'message': message, 'log': log.to_dict() if log else None})

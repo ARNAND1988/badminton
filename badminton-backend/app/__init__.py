@@ -187,6 +187,12 @@ def create_app():
 
         datetime_column_type = 'DATETIME' if db.engine.dialect.name == 'sqlite' else 'TIMESTAMP'
         payment_invoice_columns = {col['name'] for col in inspector.get_columns('payment_invoices')} if inspector.has_table('payment_invoices') else set()
+        monthly_status_columns = {col['name'] for col in inspector.get_columns('monthly_invoice_statuses')} if inspector.has_table('monthly_invoice_statuses') else set()
+        if monthly_status_columns:
+            if 'tikkie_payment_url' not in monthly_status_columns:
+                db.session.execute(db.text('ALTER TABLE monthly_invoice_statuses ADD COLUMN tikkie_payment_url VARCHAR(1024)'))
+            if 'tikkie_account_holder_name' not in monthly_status_columns:
+                db.session.execute(db.text('ALTER TABLE monthly_invoice_statuses ADD COLUMN tikkie_account_holder_name VARCHAR(128)'))
         payment_setting_columns = {col['name'] for col in inspector.get_columns('payment_settings')} if inspector.has_table('payment_settings') else set()
         if payment_setting_columns:
             payment_setting_specs = {

@@ -53,4 +53,4 @@ def send_whatsapp_message(to_phone, message):
     else:
         # fallback: log message so developer can see it
         logging.getLogger('whatsapp_fallback').info('WhatsApp to %s: %s', to_phone, message)
-        return {'status': 'logged'}
+        return {'status': 'unavailable', 'error': 'No WhatsApp provider is configured'}

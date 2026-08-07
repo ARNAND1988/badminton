@@ -332,6 +332,28 @@ def _participant_keys_for_user(user):
     return keys
 
 
+def _participant_aliases_for_user(user):
+    aliases = set()
+    for group_user in _family_group_users(user):
+        aliases.update(filter(None, [group_user.name, group_user.email, group_user.phone]))
+        for member in group_user.family_members:
+            aliases.add(member.name)
+            if member.linked_user:
+                aliases.update(filter(None, [
+                    member.linked_user.name,
+                    member.linked_user.email,
+                    member.linked_user.phone,
+                ]))
+    return aliases
+
+
+def _participant_belongs_to_user(participant, participant_keys, aliases):
+    if participant.phone in participant_keys:
+        return True
+    label = participant.name or participant.phone
+    return any(_participant_name_matches_alias(label, alias) for alias in aliases)
+
+
 MONTHLY_INVOICE_STATUSES = {'OPEN', 'READY_FOR_PAYMENT', 'SETTLED'}
 TEST_PAYMENT_INVOICE_AMOUNT = 1.00
 
@@ -397,7 +419,7 @@ def _monthly_invoice_summary(user, month_value):
             known_names = [label for label in participant_labels.values() if label]
             matching = [
                 participant for participant in attending
-                if any(_names_match(participant.name or participant.phone, label) for label in known_names)
+                if any(_participant_name_matches_alias(participant.name or participant.phone, label) for label in known_names)
             ]
         if not matching:
             continue
@@ -415,7 +437,7 @@ def _monthly_invoice_summary(user, month_value):
             matched_key = participant.phone if participant.phone in participant_keys else None
             if not matched_key:
                 for label in known_names:
-                    if _names_match(participant_label, label):
+                    if _participant_name_matches_alias(participant_label, label):
                         matched_key = f'name:{_normalize_person_name(label)}'
                         break
             matched_key = matched_key or f'participant:{participant.id}'
@@ -1362,8 +1384,25 @@ def list_bookings():
     else:
         query = Booking.query.order_by(Booking.booking_date.asc(), Booking.start_time.asc())
 
-    total = query.count()
-    bookings = query.offset((page - 1) * per_page).limit(per_page).all()
+    if request.args.get('scope') == 'mine':
+        user, error = _require_login()
+        if error:
+            return error
+        participant_keys = _participant_keys_for_user(user)
+        aliases = _participant_aliases_for_user(user)
+        matching_bookings = [
+            booking for booking in query.all()
+            if any(
+                _is_cost_split_status(participant.status)
+                and _participant_belongs_to_user(participant, participant_keys, aliases)
+                for participant in booking.participants
+            )
+        ]
+        total = len(matching_bookings)
+        bookings = matching_bookings[(page - 1) * per_page:page * per_page]
+    else:
+        total = query.count()
+        bookings = query.offset((page - 1) * per_page).limit(per_page).all()
     return jsonify({
         'bookings': [_booking_payload(b, today_value, current_time) for b in bookings],
         'pagination': {
@@ -2965,8 +3004,8 @@ def _wise_payment_url(settings, amount, reference):
     return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
 
 
-def _tikkie_payment_url(settings, amount, reference):
-    url = (settings.tikkie_payment_url or '').strip()
+def _tikkie_payment_url(settings, amount, reference, month_status=None):
+    url = ((month_status.tikkie_payment_url if month_status else None) or settings.tikkie_payment_url or '').strip()
     if not url:
         raise ValueError('tikkie_payment_url_required')
     return (url.replace('{amount}', f'{float(amount or 0):.2f}')
@@ -3431,18 +3470,19 @@ def _qr_data_url(payload):
     return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('ascii')
 
 
-def _attach_payment_details(invoice, settings, payment_method='BUSINESS_BANK'):
+def _attach_payment_details(invoice, settings, payment_method='BUSINESS_BANK', month_status=None):
     reference = invoice.payment_reference or invoice.invoice_number or _next_payment_reference()
     invoice.payment_reference = reference
     invoice.invoice_number = invoice.invoice_number or reference
     invoice.payment_method = payment_method
-    invoice.bank_account_holder = (settings.tikkie_account_holder_name or settings.effective_account_holder_name()) if payment_method == 'PERSONAL_TIKKIE' else settings.effective_account_holder_name()
+    monthly_tikkie_holder = month_status.tikkie_account_holder_name if month_status else None
+    invoice.bank_account_holder = (monthly_tikkie_holder or settings.tikkie_account_holder_name or settings.effective_account_holder_name()) if payment_method == 'PERSONAL_TIKKIE' else settings.effective_account_holder_name()
     invoice.bank_name = settings.effective_bank_name()
     invoice.iban = settings.effective_iban()
     invoice.bic = settings.effective_bic()
 
     if payment_method == 'PERSONAL_TIKKIE':
-        invoice.payment_url = _tikkie_payment_url(settings, invoice.amount_due, reference)
+        invoice.payment_url = _tikkie_payment_url(settings, invoice.amount_due, reference, month_status)
         invoice.wise_payment_request_id = None
     else:
         try:
@@ -3633,7 +3673,7 @@ def _create_payment_invoice_for_summary(user, month_value, summary, settings, is
     invoice.is_test_invoice = bool(is_test)
     invoice.payment_status = invoice.payment_status or 'UNPAID'
     try:
-        _attach_payment_details(invoice, settings, payment_method)
+        _attach_payment_details(invoice, settings, payment_method, _monthly_invoice_status(month_value))
     except (ValueError, requests.exceptions.RequestException) as exc:
         if not allow_payment_failure:
             raise
@@ -3667,7 +3707,10 @@ def admin_payment_settings():
         return error
     settings = _payment_settings()
     if request.method == 'GET':
-        return jsonify(settings.to_dict(include_effective=True))
+        payload = settings.to_dict(include_effective=True)
+        payload['monthly_tikkie_links'] = [status.to_dict() for status in MonthlyInvoiceStatus.query.filter(MonthlyInvoiceStatus.tikkie_payment_url.isnot(None)).order_by(MonthlyInvoiceStatus.month.desc()).all()]
+        payload['tikkie_month'] = datetime.utcnow().strftime('%Y-%m')
+        return jsonify(payload)
     data = request.get_json() or {}
     iban = (data.get('iban') or '').replace(' ', '').upper() or None
     if iban and not _valid_iban(iban):
@@ -3693,6 +3736,15 @@ def admin_payment_settings():
         settings.tikkie_payment_url = (data.get('tikkie_payment_url') or '').strip() or None
     if 'tikkie_account_holder_name' in data:
         settings.tikkie_account_holder_name = (data.get('tikkie_account_holder_name') or '').strip() or None
+    tikkie_month = (data.get('tikkie_month') or '').strip()
+    if tikkie_month:
+        start_date, _ = _month_bounds(tikkie_month)
+        if not start_date:
+            return jsonify({'error': 'month must use YYYY-MM'}), 400
+        month_status = _monthly_invoice_status(tikkie_month, create=True)
+        month_status.tikkie_payment_url = (data.get('monthly_tikkie_payment_url') or '').strip() or None
+        month_status.tikkie_account_holder_name = (data.get('monthly_tikkie_account_holder_name') or '').strip() or None
+        month_status.updated_by = user.id
     if 'default_due_days' in data:
         settings.default_due_days = max(1, min(60, int(data.get('default_due_days') or 14)))
     if 'qr_enabled' in data:
@@ -3702,7 +3754,10 @@ def admin_payment_settings():
     settings.updated_by = user.id
     _record_admin_audit(user, 'update', 'payment_settings', settings.id, 'Updated payment account settings', {'settings': settings.to_dict()})
     db.session.commit()
-    return jsonify(settings.to_dict(include_effective=True))
+    payload = settings.to_dict(include_effective=True)
+    payload['monthly_tikkie_links'] = [status.to_dict() for status in MonthlyInvoiceStatus.query.filter(MonthlyInvoiceStatus.tikkie_payment_url.isnot(None)).order_by(MonthlyInvoiceStatus.month.desc()).all()]
+    payload['tikkie_month'] = tikkie_month or datetime.utcnow().strftime('%Y-%m')
+    return jsonify(payload)
 
 
 @bookings_bp.route('/admin/payment-settings/wise-webhook-subscription', methods=['POST'])
@@ -4205,9 +4260,20 @@ def _monthly_pending_payment_preview(month_value=None):
         .all()
     )
     method = month_status.payment_method or 'BUSINESS_BANK'
-    method_label = 'Personal Tikkie' if method == 'PERSONAL_TIKKIE' else 'Business bank account'
-    lines = [f'⏰ Pending badminton payments for {month_value}', f'Payment method: {method_label}', '']
+    month_label = datetime.strptime(month_value, '%Y-%m').strftime('%B %Y')
+    lines = [
+        '🏸✨ *Nieuwegein Badminton Club* ✨🏸',
+        '',
+        f'📢 *{month_label} Payment Reminder*',
+        '',
+        'Dear Members,',
+        '',
+        f'Please find the outstanding family payments for *{month_label}*.',
+        '',
+        '👨‍👩‍👧 *Family payment summary*',
+    ]
     pending_total = 0.0
+    due_dates = []
     for invoice in invoices:
         payload = invoice.to_dict(include_qr=False)
         booking_items = payload.get('booking_items') or []
@@ -4216,21 +4282,26 @@ def _monthly_pending_payment_preview(month_value=None):
         balance = max(0.0, round(float(payload.get('amount_due') or 0.0) - paid_amount, 2))
         pending_total += balance
         family_name = _family_display_name(invoice.user) if invoice.user else f'Invoice {invoice.invoice_number}'
-        lines.extend([
-            f'{family_name}: {len(booking_items)} booking(s), {len(misc_items)} shared cost(s)',
-            f'Family share: €{float(payload.get("amount_due") or 0.0):.2f} | Paid: €{paid_amount:.2f} | Pending: €{balance:.2f}',
-            f'Reference: {invoice.payment_reference} | Due: {invoice.due_date or "not set"}',
-        ])
-        if invoice.payment_url:
-            lines.append(f'Pay: {invoice.payment_url}')
-        elif method == 'BUSINESS_BANK' and invoice.iban:
-            lines.append(f'IBAN: {invoice.iban} | Account: {invoice.bank_account_holder or ""}'.rstrip())
-        lines.append('')
+        item_count = len(booking_items) + len(misc_items)
+        lines.append(f'• *{family_name}* — {item_count} item(s) — *€{balance:.2f}*')
+        if invoice.due_date:
+            due_dates.append(invoice.due_date)
     if not invoices:
-        lines.append('There are no pending family payments for this month.')
+        lines.extend(['', '✅ There are no pending family payments for this month.'])
     else:
-        lines.append(f'Total pending: €{pending_total:.2f}')
-    lines.append(f'Open the app: {request.host_url.rstrip("/")}')
+        lines.extend(['', '━━━━━━━━━━━━━━━━━━━━━━', '', f'💰 *Total Outstanding:* *€{pending_total:.2f}*'])
+        if due_dates:
+            due_label = datetime.strptime(min(due_dates), '%Y-%m-%d').strftime('%d %B %Y')
+            lines.extend(['', f'📅 *Payment Due:* *{due_label}*'])
+        if method == 'PERSONAL_TIKKIE':
+            payment_url = (month_status.tikkie_payment_url or next((invoice.payment_url for invoice in invoices if invoice.payment_url), '')).strip()
+            if payment_url:
+                lines.extend(['', '💳 *Pay via Tikkie*', f'🔗 {payment_url}'])
+        else:
+            bank_invoice = next((invoice for invoice in invoices if invoice.iban), None)
+            if bank_invoice:
+                lines.extend(['', '🏦 *Pay by bank transfer*', f'IBAN: *{bank_invoice.iban}*', f'Account: {bank_invoice.bank_account_holder or "Nieuwegein Badminton Club"}'])
+        lines.extend(['', '🌐 *Member Portal*', f'🔗 {request.host_url.rstrip("/")}', '', '🙏 Thank you for your prompt payment and continued support.'])
 
     setting = _whatsapp_setting('monthly_invoice_ready')
     recipient = ((setting.group_id or '').strip() or _fallback_whatsapp_group_id('monthly_invoice_ready')) if setting else None

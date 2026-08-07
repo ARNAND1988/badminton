@@ -461,6 +461,8 @@ class MonthlyInvoiceStatus(db.Model):
     month = db.Column(db.String(7), unique=True, nullable=False)
     status = db.Column(db.String(32), default='OPEN', nullable=False)
     payment_method = db.Column(db.String(32), default='BUSINESS_BANK', nullable=False)
+    tikkie_payment_url = db.Column(db.String(1024), nullable=True)
+    tikkie_account_holder_name = db.Column(db.String(128), nullable=True)
     ready_at = db.Column(db.DateTime, nullable=True)
     settled_at = db.Column(db.DateTime, nullable=True)
     note = db.Column(db.Text, nullable=True)
@@ -475,6 +477,8 @@ class MonthlyInvoiceStatus(db.Model):
             'month': self.month,
             'status': self.status,
             'payment_method': self.payment_method or 'BUSINESS_BANK',
+            'tikkie_payment_url': self.tikkie_payment_url,
+            'tikkie_account_holder_name': self.tikkie_account_holder_name,
             'ready_at': self.ready_at.isoformat() if self.ready_at else None,
             'settled_at': self.settled_at.isoformat() if self.settled_at else None,
             'note': self.note,

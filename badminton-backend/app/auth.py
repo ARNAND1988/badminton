@@ -121,7 +121,10 @@ def send_otp():
         return jsonify({'error': 'mock_not_allowed'}), 403
 
     # production: try sending via WhatsApp (Twilio) or fallback to logging
-    send_whatsapp_message(phone, msg)
+    result = send_whatsapp_message(phone, msg) or {}
+    if result.get('status') != 'sent':
+        current_app.logger.error('Unable to deliver login OTP to %s: %s', phone, result)
+        return jsonify({'error': 'whatsapp_delivery_failed'}), 502
 
     return jsonify({'status': 'otp_sent'})
 
@@ -236,7 +239,10 @@ def forgot_password():
         current_app.logger.warning('AUTH_MOCK requested but not allowed outside development')
         return jsonify({'error': 'mock_not_allowed'}), 403
 
-    send_whatsapp_message(recipient, message)
+    result = send_whatsapp_message(recipient, message) or {}
+    if result.get('status') != 'sent':
+        current_app.logger.error('Unable to deliver password reset OTP for user %s: %s', user.id, result)
+        return jsonify({'error': 'whatsapp_delivery_failed'}), 502
     return jsonify(response)
 
 

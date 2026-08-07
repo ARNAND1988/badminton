@@ -294,7 +294,8 @@ export default {
         whatsapp_already_registered: 'That WhatsApp number is already in use.',
         invalid_credentials: 'Email or password is incorrect.',
         identifier_and_otp_required: 'Enter your account name or email and the WhatsApp code.',
-        otp_invalid_or_expired: 'That code is invalid or expired. Request a new code and try again.'
+        otp_invalid_or_expired: 'That code is invalid or expired. Request a new code and try again.',
+        whatsapp_delivery_failed: 'WhatsApp could not deliver the reset code. Check the configured WhatsApp connection and try again.'
       }
       return messages[error] || (isRegister ? 'Registration failed.' : 'Login failed.')
     }

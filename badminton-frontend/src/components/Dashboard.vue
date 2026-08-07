@@ -787,13 +787,15 @@
 
         <section class="panel-card space-y-4">
           <div>
-            <h3 class="text-lg font-semibold text-slate-900">Personal Tikkie</h3>
-            <p class="section-copy mt-1">Paste the personal Tikkie link members should use.</p>
+            <h3 class="text-lg font-semibold text-slate-900">Monthly Tikkie link</h3>
+            <p class="section-copy mt-1">Choose a month and save the Tikkie link that belongs only to that month's invoices and reminders.</p>
           </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label><span class="form-label">Account holder</span><input v-model="paymentSettings.tikkie_account_holder_name" class="form-input" placeholder="Personal account holder name" /></label>
-            <label><span class="form-label">Tikkie link</span><input v-model="paymentSettings.tikkie_payment_url" type="url" class="form-input" placeholder="https://tikkie.me/pay/..." /></label>
+          <div class="grid gap-4 sm:grid-cols-3">
+            <label><span class="form-label">Invoice month</span><select v-model="paymentSettings.tikkie_month" class="form-input" @change="applyMonthlyTikkieLink"><option v-for="month in paymentMonthOptions" :key="month" :value="month">{{ monthName(month) }}</option></select></label>
+            <label><span class="form-label">Account holder</span><input v-model="paymentSettings.monthly_tikkie_account_holder_name" class="form-input" placeholder="Personal account holder name" /></label>
+            <label><span class="form-label">Tikkie link</span><input v-model="paymentSettings.monthly_tikkie_payment_url" type="url" class="form-input" placeholder="https://tikkie.me/pay/..." /></label>
           </div>
+          <p class="text-xs text-slate-500">Changing the month loads its saved link. Saving updates only the selected month.</p>
         </section>
 
         <section class="panel-card space-y-4">
@@ -1679,6 +1681,15 @@ export default {
     const isSuperAdmin = ref(false)
     const paymentSettings = ref({ qr_enabled: true, test_mode: true, default_due_days: 14 })
     const paymentWebhookStatus = ref(null)
+    const paymentMonthOptions = computed(() => {
+      const options = []
+      const current = new Date()
+      for (let offset = 12; offset >= -12; offset -= 1) {
+        const date = new Date(current.getFullYear(), current.getMonth() - offset, 1)
+        options.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`)
+      }
+      return options
+    })
 
     const wiseWebhookHealthText = computed(() => {
       const status = paymentWebhookStatus.value
@@ -2129,6 +2140,7 @@ export default {
     async function loadBookings(options = {}) {
       const params = new URLSearchParams()
       if (options.status) params.set('status', options.status)
+      if (options.scope) params.set('scope', options.scope)
       if (options.page) params.set('page', options.page)
       if (options.perPage) params.set('per_page', options.perPage)
       if (options.month) params.set('month', options.month)
@@ -2261,6 +2273,8 @@ export default {
         wise_redirect_url: settings.wise_redirect_url || defaultWiseRedirectUrl,
         wise_webhook_url: settings.wise_webhook_url || defaultWiseWebhookUrl
       }
+      normalized.tikkie_month = settings.tikkie_month || localIsoMonth()
+      normalized.monthly_tikkie_links = settings.monthly_tikkie_links || []
       for (const field of textFields) {
         normalized[field] = normalized[field] ?? ''
       }
@@ -2271,10 +2285,17 @@ export default {
       return normalized
     }
 
+    function applyMonthlyTikkieLink() {
+      const saved = (paymentSettings.value.monthly_tikkie_links || []).find((item) => item.month === paymentSettings.value.tikkie_month)
+      paymentSettings.value.monthly_tikkie_payment_url = saved?.tikkie_payment_url || ''
+      paymentSettings.value.monthly_tikkie_account_holder_name = saved?.tikkie_account_holder_name || ''
+    }
+
     async function loadPaymentSettings() {
       if (!isSuperAdmin.value) return
       const settings = await fetchJson('/api/admin/payment-settings')
       paymentSettings.value = normalizePaymentSettings(settings)
+      applyMonthlyTikkieLink()
     }
 
     async function savePaymentSettings() {
@@ -2282,6 +2303,7 @@ export default {
       try {
         const settings = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
         paymentSettings.value = normalizePaymentSettings(settings)
+        applyMonthlyTikkieLink()
         msg.value = 'Payment settings saved.'
         errorMsg.value = ''
       } catch (err) {
@@ -2651,7 +2673,7 @@ export default {
           ])
           if (loggedIn) {
             await loadFamilyMembers()
-            await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
+            await loadBookings({ status: 'completed', scope: 'mine', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
           }
           if (loggedIn && isAdmin.value) {
             await loadCourts()
@@ -3523,6 +3545,7 @@ export default {
       memberOptions,
       adminMonthlyInvoices,
       monthlyInvoiceMonth,
+      paymentMonthOptions,
       monthlyPaymentMethod,
       whatsappSettings,
       whatsappLogs,
@@ -3633,6 +3656,7 @@ export default {
       loadWhatsAppNotifications,
       loadPaymentSettings,
       savePaymentSettings,
+      applyMonthlyTikkieLink,
       createWiseWebhookSubscription,
       loadWiseWebhookStatus,
       loadPaymentInvoices,

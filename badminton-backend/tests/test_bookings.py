@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta, timezone
 
 from app import db
-from app.models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, PaymentInvoice, PaymentSettings, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting, WiseWebhookEvent
+from app.models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, MonthlyInvoiceStatus, PaymentInvoice, PaymentSettings, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting, WiseWebhookEvent
 
 
 def test_booking_availability_and_invoice(client, app):
@@ -1150,6 +1150,35 @@ def test_completed_bookings_can_be_filtered_by_invoice_month(client, app):
     assert bad_resp.get_json()['error'] == 'month must use YYYY-MM'
 
 
+def test_my_completed_bookings_exclude_another_person_with_same_first_name(client, app):
+    with app.app_context():
+        user = User(phone='+31100001919', email='anand-parasuraman@example.com', name='Anand Parasuraman', role='admin')
+        court = Court(name='Identity Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([user, court])
+        db.session.commit()
+        booking = Booking(court_id=court.id, booking_date='2026-08-04', start_time='18:00', end_time='19:00', cost=20, status='completed')
+        db.session.add(booking)
+        db.session.commit()
+        db.session.add(BookingParticipant(
+            booking_id=booking.id,
+            phone='adhoc-anand-chandrasekaran',
+            name='Anand Chandrasekaran',
+            status='participated',
+            is_adhoc=True,
+        ))
+        db.session.commit()
+        token = jwt.encode({'user_id': user.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    resp = client.get(
+        '/api/bookings?status=completed&scope=mine&month=2026-08&page=1&per_page=100',
+        headers={'Authorization': f'Bearer {token}'},
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()['bookings'] == []
+    assert resp.get_json()['pagination']['total'] == 0
+
+
 def test_completed_bookings_for_july_so_far_include_yesterday_and_ended_today(client, app, monkeypatch):
     from app import bookings as bookings_module
 
@@ -1531,6 +1560,32 @@ def test_current_user_monthly_invoice_deduplicates_name_matched_participant(clie
     assert data['booking_items'][0]['participants'] == ['Renjith R']
 
 
+def test_current_user_monthly_invoice_excludes_different_full_name(client, app):
+    with app.app_context():
+        member = User(phone='+31100001013', email='anand-p@example.com', name='Anand Parasuraman', role='member')
+        court = Court(name='Distinct Anand Court', hourly_rate=20.0, is_active=True)
+        db.session.add_all([member, court])
+        db.session.commit()
+        booking = Booking(court_id=court.id, booking_date='2026-08-03', start_time='19:30', end_time='20:30', cost=20, status='completed')
+        db.session.add(booking)
+        db.session.commit()
+        db.session.add(BookingParticipant(
+            booking_id=booking.id,
+            phone='adhoc-anand-chandrasekaran',
+            name='Anand Chandrasekaran',
+            status='participated',
+            is_adhoc=True,
+        ))
+        db.session.commit()
+        token = jwt.encode({'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    resp = client.get('/api/invoices/monthly?month=2026-08', headers={'Authorization': f'Bearer {token}'})
+
+    assert resp.status_code == 200
+    assert resp.get_json()['booking_total'] == 0.0
+    assert resp.get_json()['booking_items'] == []
+
+
 def test_deleted_court_is_hidden_from_active_list_and_booking_creation(client, app):
     with app.app_context():
         admin = User(phone='+31100001004', email='court-delete@example.com', name='Court Admin', role='admin')
@@ -1687,9 +1742,10 @@ def test_pending_payment_preview_requires_ready_status_and_lists_family_details(
     assert preview['pending_count'] == 1
     assert preview['payment_method'] == 'PERSONAL_TIKKIE'
     assert 'Pending Family' in preview['message']
-    assert '2 booking(s), 1 shared cost(s)' in preview['message']
-    assert 'Family share: €24.50 | Paid: €4.50 | Pending: €20.00' in preview['message']
-    assert 'Payment method: Personal Tikkie' in preview['message']
+    assert '3 item(s) — *€20.00*' in preview['message']
+    assert '*May 2030 Payment Reminder*' in preview['message']
+    assert '💰 *Total Outstanding:* *€20.00*' in preview['message']
+    assert 'Reference:' not in preview['message']
     assert 'https://example.test/pay' in preview['message']
 
 
@@ -2047,6 +2103,17 @@ def test_super_admin_payment_settings_schema_matches_frontend(client, app):
     assert isinstance(data['qr_enabled'], bool)
     assert isinstance(data['test_mode'], bool)
 
+    save_resp = client.put('/api/admin/payment-settings', json={
+        'tikkie_month': '2031-07',
+        'monthly_tikkie_payment_url': 'https://tikkie.me/pay/july-2031',
+        'monthly_tikkie_account_holder_name': 'July Treasurer',
+    }, headers={'Authorization': f'Bearer {token}'})
+    assert save_resp.status_code == 200
+    saved = save_resp.get_json()
+    assert saved['tikkie_month'] == '2031-07'
+    assert saved['monthly_tikkie_links'][0]['tikkie_payment_url'] == 'https://tikkie.me/pay/july-2031'
+    assert saved['monthly_tikkie_links'][0]['tikkie_account_holder_name'] == 'July Treasurer'
+
 
 def test_ready_monthly_invoice_uses_club_wise_payment_details_without_api_token(client, app):
     with app.app_context():
@@ -2238,6 +2305,13 @@ def test_monthly_invoice_can_use_personal_tikkie(client, app):
         )
         db.session.add_all([admin, member, court, settings])
         db.session.commit()
+        db.session.add(MonthlyInvoiceStatus(
+            month='2031-05',
+            status='OPEN',
+            payment_method='PERSONAL_TIKKIE',
+            tikkie_payment_url='https://tikkie.me/pay/may-2031',
+            tikkie_account_holder_name='May Treasurer',
+        ))
         booking = Booking(court_id=court.id, booking_date='2031-05-10', start_time='19:00', end_time='20:00', status='completed', cost=24.0)
         db.session.add(booking)
         db.session.flush()
@@ -2258,5 +2332,5 @@ def test_monthly_invoice_can_use_personal_tikkie(client, app):
     assert invoice_resp.status_code == 200
     invoice = invoice_resp.get_json()
     assert invoice['payment_method'] == 'PERSONAL_TIKKIE'
-    assert invoice['account_holder_name'] == 'Personal Treasurer'
-    assert invoice['payment_url'].startswith('https://tikkie.me/pay/example?amount=24.00&ref=INV-')
+    assert invoice['account_holder_name'] == 'May Treasurer'
+    assert invoice['payment_url'] == 'https://tikkie.me/pay/may-2031'

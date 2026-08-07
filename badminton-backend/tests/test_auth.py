@@ -160,6 +160,22 @@ def test_forgot_password_does_not_reveal_account_or_whatsapp_status(client):
     assert no_whatsapp.get_json() == {'status': 'reset_code_sent'}
 
 
+def test_forgot_password_reports_whatsapp_delivery_failure(client, app, monkeypatch):
+    client.post('/api/auth/register', json={
+        'email': 'delivery.failure@example.com',
+        'password': 'old-secret',
+        'name': 'Delivery Failure',
+        'whatsapp_number': '+31611113333',
+    })
+    app.config['AUTH_MOCK'] = False
+    monkeypatch.setattr('app.auth.send_whatsapp_message', lambda *_: {'status': 'unavailable'})
+
+    response = client.post('/api/auth/forgot-password', json={'identifier': 'delivery.failure@example.com'})
+
+    assert response.status_code == 502
+    assert response.get_json()['error'] == 'whatsapp_delivery_failed'
+
+
 def test_reset_password_rejects_invalid_code_and_short_password(client):
     short_password = client.post('/api/auth/reset-password', json={
         'identifier': 'somebody@example.com',

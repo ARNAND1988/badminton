@@ -354,6 +354,8 @@ class PaymentInvoice(db.Model):
     __tablename__ = 'payment_invoices'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    subject_key = db.Column(db.String(255), nullable=True)
+    billing_name = db.Column(db.String(255), nullable=True)
     month = db.Column(db.String(7), nullable=True)
     invoice_number = db.Column(db.String(32), unique=True, nullable=False)
     payment_status = db.Column(db.String(32), default='UNPAID')
@@ -392,6 +394,8 @@ class PaymentInvoice(db.Model):
             'id': self.id,
             'user_id': self.user_id,
             'user': self.user.to_dict() if self.user else None,
+            'subject_key': self.subject_key,
+            'billing_name': self.billing_name,
             'month': self.month,
             'invoice_number': self.invoice_number,
             'payment_status': self.payment_status,

@@ -1548,6 +1548,52 @@ def test_admin_monthly_invoice_keeps_distinct_people_with_same_first_name(client
     assert adhoc['payment_invoice']['amount_due'] == 20.0
 
 
+def test_ready_payment_invoices_follow_admin_family_consolidation(client, app):
+    with app.app_context():
+        admin = User(phone='+31100001020', email='family-admin@example.com', name='Family Admin', role='admin')
+        owner = User(phone='+31100001021', email='farith@example.com', name='Farith', role='member')
+        duplicate = User(phone='+31100001022', email='sulthana@example.com', name='Sulthana', role='member')
+        court = Court(name='Family consolidation court', hourly_rate=40.0, is_active=True)
+        db.session.add_all([admin, owner, duplicate, court])
+        db.session.flush()
+        owner_id = owner.id
+        db.session.add(FamilyMember(user_id=owner.id, name='Sulthana', is_club_member=True))
+        booking = Booking(court_id=court.id, booking_date='2026-07-03', start_time='19:30', end_time='20:30', cost=40, status='completed')
+        db.session.add(booking)
+        db.session.flush()
+        db.session.add_all([
+            BookingParticipant(booking_id=booking.id, phone=owner.phone, name='Farith', status='participated'),
+            BookingParticipant(booking_id=booking.id, phone=duplicate.phone, name='Sulthana', status='participated'),
+            BookingParticipant(booking_id=booking.id, phone='adhoc-anand-chandrasekaran', name='Anand Chandrasekaran', status='participated', is_adhoc=True),
+        ])
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    ready_resp = client.post('/api/admin/invoices/monthly/status', json={
+        'month': '2026-07',
+        'status': 'READY_FOR_PAYMENT',
+        'payment_method': 'BUSINESS_BANK',
+    }, headers={'Authorization': f'Bearer {token}'})
+
+    assert ready_resp.status_code == 200
+    generated = ready_resp.get_json()['payment_invoices']
+    assert len(generated) == 2
+    family_payment = next(invoice for invoice in generated if invoice['user_id'] == owner_id)
+    adhoc_payment = next(invoice for invoice in generated if invoice['billing_name'] == 'Anand Chandrasekaran')
+    assert family_payment['amount_due'] == 26.68
+    assert adhoc_payment['amount_due'] == 13.34
+
+    invoices_resp = client.get('/api/admin/invoices/monthly?month=2026-07', headers={'Authorization': f'Bearer {token}'})
+    invoices = invoices_resp.get_json()['invoices']
+    family_invoice = next(invoice for invoice in invoices if invoice['family_title'] == 'Farith & Sulthana')
+    assert family_invoice['payment_invoice']['user_id'] == owner_id
+    assert family_invoice['payment_invoice']['payment_status'] == 'UNPAID'
+    assert family_invoice['payment_invoice']['amount_due'] == 26.68
+    anand_invoice = next(invoice for invoice in invoices if invoice['family_title'] == 'Anand Chandrasekaran')
+    assert anand_invoice['payment_invoice']['payment_status'] == 'UNPAID'
+    assert anand_invoice['payment_invoice']['amount_due'] == 13.34
+
+
 def test_current_user_monthly_invoice_deduplicates_name_matched_participant(client, app):
     with app.app_context():
         member = User(phone='+31100001003', email='renjith-current@example.com', name='Renjith R', role='member')

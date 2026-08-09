@@ -1721,12 +1721,12 @@ def current_user_monthly_invoice():
 
 
 @bookings_bp.route('/admin/invoices/monthly', methods=['GET'])
-def admin_monthly_invoices():
+def admin_monthly_invoices(month_override=None):
     user, error = _require_admin()
     if error:
         return error
 
-    month_value = request.args.get('month') or datetime.utcnow().strftime('%Y-%m')
+    month_value = month_override or request.args.get('month') or datetime.utcnow().strftime('%Y-%m')
     start_date, end_date = _month_bounds(month_value)
     if not start_date:
         return jsonify({'error': 'month must use YYYY-MM'}), 400
@@ -3711,28 +3711,35 @@ def _create_adhoc_payment_invoice(subject, month_value, settings, admin_user, pa
 
 def _create_payment_invoices_for_month(month_value, admin_user, payment_method='BUSINESS_BANK'):
     settings = _payment_settings()
-    users = User.query.order_by(User.name.asc(), User.email.asc(), User.phone.asc()).all()
     created = []
-    seen_owner_ids = set()
-    for item in users:
-        owner = _family_owner_for_user(item)
-        if owner.id in seen_owner_ids:
-            continue
-        seen_owner_ids.add(owner.id)
-        summary = _monthly_invoice_summary(owner, month_value)
-        if not summary or float(summary.get('total') or 0.0) <= 0:
-            continue
-        invoice = _create_payment_invoice_for_summary(owner, month_value, summary, settings, False, allow_payment_failure=True, payment_method=payment_method)
-        invoice.updated_by = admin_user.id
-        created.append(invoice)
-    # The admin summary also contains standalone ad hoc players, who do not have
-    # a User row but still need a payable invoice and reconciliation controls.
-    summary_response = admin_monthly_invoices()
+    # Use the same canonical subjects displayed by the admin invoice screen. That
+    # summary consolidates linked family accounts, legacy duplicate accounts that
+    # match a family alias, and standalone ad-hoc players. Generating from every
+    # User independently could attach a payment invoice to a duplicate account,
+    # leaving the consolidated row with no QR or payment controls.
+    summary_response = admin_monthly_invoices(month_value)
     summary_payload = summary_response.get_json() if hasattr(summary_response, 'get_json') else {}
     for subject in summary_payload.get('invoices', []):
-        if isinstance((subject.get('user') or {}).get('id'), int) or float(subject.get('total') or 0.0) <= 0:
+        if float(subject.get('total') or 0.0) <= 0:
             continue
-        created.append(_create_adhoc_payment_invoice(subject, month_value, settings, admin_user, payment_method))
+        subject_user_id = (subject.get('user') or {}).get('id')
+        if isinstance(subject_user_id, int):
+            subject_user = db.session.get(User, subject_user_id)
+            if not subject_user:
+                continue
+            invoice = _create_payment_invoice_for_summary(
+                subject_user,
+                month_value,
+                subject,
+                settings,
+                False,
+                allow_payment_failure=True,
+                payment_method=payment_method,
+            )
+            invoice.updated_by = admin_user.id
+            created.append(invoice)
+        else:
+            created.append(_create_adhoc_payment_invoice(subject, month_value, settings, admin_user, payment_method))
     return created
 
 

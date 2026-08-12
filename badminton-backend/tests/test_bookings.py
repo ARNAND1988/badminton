@@ -1594,6 +1594,59 @@ def test_ready_payment_invoices_follow_admin_family_consolidation(client, app):
     assert anand_invoice['payment_invoice']['amount_due'] == 13.34
 
 
+def test_admin_monthly_invoice_recovers_legacy_adhoc_payment_invoice(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(name='Anand Parasuraman').first()
+        court = Court(name='Legacy invoice court', hourly_rate=12.0, is_active=True)
+        db.session.add(court)
+        db.session.flush()
+        booking = Booking(court_id=court.id, booking_date='2026-09-05', start_time='19:30', end_time='20:30', cost=12, status='completed')
+        db.session.add(booking)
+        db.session.flush()
+        db.session.add(BookingParticipant(
+            booking_id=booking.id,
+            phone='adhoc-legacy-anand',
+            name='Anand Chandrasekaran',
+            status='participated',
+            is_adhoc=True,
+        ))
+        legacy_invoice = PaymentInvoice(
+            user_id=None,
+            subject_key=None,
+            billing_name=' Anand  Chandrasekaran ',
+            month='2026-09',
+            invoice_number='INV-2026-09999',
+            payment_reference='INV-2026-09999',
+            payment_status='UNPAID',
+            amount_due=12,
+        )
+        db.session.add_all([
+            legacy_invoice,
+            MonthlyInvoiceStatus(month='2026-09', status='READY_FOR_PAYMENT'),
+        ])
+        db.session.commit()
+        legacy_invoice_id = legacy_invoice.id
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    response = client.get('/api/admin/invoices/monthly?month=2026-09', headers={'Authorization': f'Bearer {token}'})
+
+    assert response.status_code == 200
+    invoice_row = next(item for item in response.get_json()['invoices'] if item['family_title'] == 'Anand Chandrasekaran')
+    assert invoice_row['payment_invoice']['id'] == legacy_invoice_id
+
+    status_response = client.post(
+        f'/api/admin/payment-invoices/{legacy_invoice_id}/status',
+        json={'payment_status': 'PAID'},
+        headers={'Authorization': f'Bearer {token}'},
+    )
+    assert status_response.status_code == 200
+    assert status_response.get_json()['payment_status'] == 'PAID'
+
+    with app.app_context():
+        recovered = db.session.get(PaymentInvoice, legacy_invoice_id)
+        assert recovered.subject_key == 'adhoc:anand chandrasekaran'
+
+
 def test_current_user_monthly_invoice_deduplicates_name_matched_participant(client, app):
     with app.app_context():
         member = User(phone='+31100001003', email='renjith-current@example.com', name='Renjith R', role='member')

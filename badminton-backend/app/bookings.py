@@ -267,6 +267,47 @@ def _family_owner_for_user(user):
     return group[0] if group else user
 
 
+def _payment_family_user_ids(user):
+    """Return account ids that can safely share a family payment invoice.
+
+    Older family records were created before ``linked_user_id`` existed.  In
+    those records a spouse may have a separate login while only their exact
+    name is stored on the invoice owner's family list.  The admin invoice view
+    already consolidates that data, so member invoice lookup must do the same.
+    Only exact normalized full-name matches are accepted here to avoid joining
+    unrelated members who merely share a first name.
+    """
+    group_ids = {item.id for item in _family_group_users(user)}
+    user_name = _normalize_person_name(user.name)
+    if user_name:
+        matching_owner_ids = {
+            member.user_id
+            for member in FamilyMember.query.all()
+            if _normalize_person_name(member.name) == user_name
+        }
+        # An exact family-name match is useful only when it identifies one
+        # family. Ambiguous legacy data must not expose another family's bill.
+        if len(matching_owner_ids) == 1:
+            owner = db.session.get(User, next(iter(matching_owner_ids)))
+            if owner:
+                group_ids.update(item.id for item in _family_group_users(owner))
+    return group_ids
+
+
+def _payment_invoice_for_user_month(user, month_value):
+    candidate_ids = _payment_family_user_ids(user)
+    return (
+        PaymentInvoice.query
+        .filter(
+            PaymentInvoice.user_id.in_(candidate_ids),
+            PaymentInvoice.month == month_value,
+            PaymentInvoice.is_test_invoice.is_(False),
+        )
+        .order_by(PaymentInvoice.created_at.desc(), PaymentInvoice.id.desc())
+        .first()
+    )
+
+
 def _billable_member_count_for_owner(owner, split_scope='manual'):
     scope = split_scope or 'manual'
     if scope == 'manual':
@@ -1717,6 +1758,14 @@ def current_user_monthly_invoice():
     summary = _monthly_invoice_summary(user, month_value)
     if not summary:
         return jsonify({'error': 'month must use YYYY-MM'}), 400
+    payment_invoice = _payment_invoice_for_user_month(user, month_value)
+    if payment_invoice:
+        paid_amount = min(float(summary['total'] or 0.0), float(payment_invoice.paid_amount or 0.0))
+        if payment_invoice.payment_status == 'PAID':
+            paid_amount = float(summary['total'] or 0.0)
+        summary['payment_status'] = payment_invoice.payment_status
+        summary['paid_amount'] = round(paid_amount, 2)
+        summary['balance_amount'] = round(max(0.0, float(summary['total'] or 0.0) - paid_amount), 2)
     return jsonify(summary)
 
 
@@ -3669,10 +3718,7 @@ def _check_wise_subscription_status(settings):
 def _user_can_view_payment_invoice(user, invoice):
     if _is_admin_user(user):
         return True
-    if invoice.user_id == user.id:
-        return True
-    owner = _family_owner_for_user(user)
-    if invoice.user_id == owner.id:
+    if invoice.user_id in _payment_family_user_ids(user):
         return True
     return False
 
@@ -4045,11 +4091,10 @@ def current_payment_invoice():
     summary = _monthly_invoice_summary(user, month_value)
     if not summary:
         return jsonify({'error': 'month must use YYYY-MM'}), 400
-    owner = _family_owner_for_user(user)
     month_status = _monthly_invoice_status(month_value)
     invoice = None
     if month_status and month_status.status in {'READY_FOR_PAYMENT', 'SETTLED'}:
-        invoice = PaymentInvoice.query.filter_by(user_id=owner.id, month=month_value, is_test_invoice=False).first()
+        invoice = _payment_invoice_for_user_month(user, month_value)
     if not invoice:
         return jsonify({
             'month': month_value,

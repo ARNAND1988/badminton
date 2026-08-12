@@ -1647,6 +1647,42 @@ def test_admin_monthly_invoice_recovers_legacy_adhoc_payment_invoice(client, app
         assert recovered.subject_key == 'adhoc:anand chandrasekaran'
 
 
+def test_admin_can_reverse_paid_monthly_invoice_to_unpaid(client, app):
+    with app.app_context():
+        admin = User.query.filter_by(name='Anand Parasuraman').first()
+        member = User(phone='+31100001031', email='reverse-payment@example.com', name='Reverse Payment', role='member')
+        invoice = PaymentInvoice(
+            user=member,
+            month='2026-10',
+            invoice_number='INV-2026-10001',
+            payment_reference='INV-2026-10001',
+            payment_status='PAID',
+            amount_due=24.0,
+            paid_amount=24.0,
+            paid_at=datetime.utcnow(),
+        )
+        month_status = MonthlyInvoiceStatus(month='2026-10', status='SETTLED', settled_at=datetime.utcnow())
+        db.session.add_all([member, invoice, month_status])
+        db.session.commit()
+        invoice_id = invoice.id
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    response = client.post(
+        f'/api/admin/payment-invoices/{invoice_id}/status',
+        json={'payment_status': 'UNPAID'},
+        headers={'Authorization': f'Bearer {token}'},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()['payment_status'] == 'UNPAID'
+    assert response.get_json()['paid_amount'] == 0.0
+    assert response.get_json()['paid_at'] is None
+    with app.app_context():
+        refreshed_month = MonthlyInvoiceStatus.query.filter_by(month='2026-10').one()
+        assert refreshed_month.status == 'READY_FOR_PAYMENT'
+        assert refreshed_month.settled_at is None
+
+
 def test_current_user_monthly_invoice_deduplicates_name_matched_participant(client, app):
     with app.app_context():
         member = User(phone='+31100001003', email='renjith-current@example.com', name='Renjith R', role='member')

@@ -1,5 +1,7 @@
 import json
 
+from app import create_app, db
+
 
 def test_send_otp_mock(client):
     resp = client.post('/api/auth/send-otp', json={'phone': '+10000000000'})
@@ -109,6 +111,34 @@ def test_anand_parasuraman_is_seeded_as_super_admin(client):
     })
     assert email_resp.status_code == 200
     assert email_resp.get_json().get('user', {}).get('role') == 'super_admin'
+
+
+def test_production_super_admin_password_can_be_configured(monkeypatch):
+    """The deployed stack must have a usable first login even with mock auth off."""
+    monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.setenv('AUTH_MOCK', '0')
+    monkeypatch.setenv('ANAND_SUPER_ADMIN_PASSWORD', 'deployment-secret')
+
+    production_app = create_app()
+    production_app.config.update(TESTING=True)
+    with production_app.test_client() as production_client:
+        response = production_client.post(
+            '/api/auth/login',
+            base_url='http://localhost',
+            headers={'X-Forwarded-Proto': 'https'},
+            json={
+                'username': 'arnand0413@gmail.com',
+                'password': 'deployment-secret',
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.get_json()['user']['role'] == 'super_admin'
+
+    with production_app.app_context():
+        db.session.remove()
+        db.drop_all()
 
 
 def test_reset_password_with_linked_whatsapp(client):

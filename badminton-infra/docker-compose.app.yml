@@ -41,6 +41,9 @@ services:
       # public stack. Mock mode returns a code only in the API response and does
       # not send a WhatsApp message.
       AUTH_MOCK: "0"
+      # A fresh production database otherwise creates the required super-admin
+      # without a password, leaving no account that can configure the app.
+      ANAND_SUPER_ADMIN_PASSWORD: ${ANAND_SUPER_ADMIN_PASSWORD:-admin123}
       WHATSAPP_BOT_URL: http://whatsapp-bot:3000
       WHATSAPP_BOT_TOKEN: ${WHATSAPP_BOT_TOKEN:-dev-whatsapp-bot-token}
     depends_on:
@@ -48,6 +51,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      whatsapp-bot:
+        condition: service_started
     ports:
       - "8000:8000"
 

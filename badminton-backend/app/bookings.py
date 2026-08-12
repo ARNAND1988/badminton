@@ -1958,6 +1958,22 @@ def admin_monthly_invoices(month_override=None):
                 subject['payment_invoice'] = payment_invoice.to_dict(include_qr=False)
         elif not user_id and expose_payment_details:
             payment_invoice = PaymentInvoice.query.filter_by(subject_key=subject['id'], month=month_value, is_test_invoice=False).first()
+            if not payment_invoice:
+                # Invoices created before subject_key was introduced only stored
+                # the ad-hoc player's billing name. Keep those invoices attached
+                # to the monthly row so admins can still mark them paid/unpaid.
+                normalized_name = _normalize_person_name(subject.get('family_title'))
+                payment_invoice = next((
+                    candidate
+                    for candidate in PaymentInvoice.query.filter_by(
+                        user_id=None,
+                        month=month_value,
+                        is_test_invoice=False,
+                    ).all()
+                    if _normalize_person_name(candidate.billing_name) == normalized_name
+                ), None)
+                if payment_invoice and not payment_invoice.subject_key:
+                    payment_invoice.subject_key = subject['id']
             if payment_invoice:
                 subject['payment_invoice'] = payment_invoice.to_dict(include_qr=False)
         subject['total'] = round(subject['booking_total'] + subject['misc_total'], 2)
@@ -3688,7 +3704,19 @@ def _create_payment_invoice_for_summary(user, month_value, summary, settings, is
 def _create_adhoc_payment_invoice(subject, month_value, settings, admin_user, payment_method):
     subject_key = subject['id']
     existing = PaymentInvoice.query.filter_by(subject_key=subject_key, month=month_value, is_test_invoice=False).first()
+    if not existing:
+        normalized_name = _normalize_person_name(subject.get('family_title'))
+        existing = next((
+            candidate
+            for candidate in PaymentInvoice.query.filter_by(
+                user_id=None,
+                month=month_value,
+                is_test_invoice=False,
+            ).all()
+            if _normalize_person_name(candidate.billing_name) == normalized_name
+        ), None)
     invoice = existing or PaymentInvoice(subject_key=subject_key, month=month_value)
+    invoice.subject_key = subject_key
     if not existing:
         invoice.invoice_number = _next_payment_reference()
         invoice.payment_reference = invoice.invoice_number

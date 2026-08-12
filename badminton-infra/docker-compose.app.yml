@@ -36,8 +36,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: dev-secret
       JWT_SECRET: dev-jwt-secret
-      FLASK_ENV: development
-      AUTH_MOCK: "1"
+      FLASK_ENV: production
+      # Password-reset and login OTPs must use the linked WhatsApp bot in this
+      # public stack. Mock mode returns a code only in the API response and does
+      # not send a WhatsApp message.
+      AUTH_MOCK: "0"
       WHATSAPP_BOT_URL: http://whatsapp-bot:3000
       WHATSAPP_BOT_TOKEN: ${WHATSAPP_BOT_TOKEN:-dev-whatsapp-bot-token}
     depends_on:

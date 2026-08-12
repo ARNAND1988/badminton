@@ -1594,6 +1594,66 @@ def test_ready_payment_invoices_follow_admin_family_consolidation(client, app):
     assert anand_invoice['payment_invoice']['amount_due'] == 13.34
 
 
+def test_legacy_family_login_can_open_owner_payment_invoice(client, app):
+    with app.app_context():
+        owner = User(phone='+31100001023', email='farith-owner@example.com', name='Farith', role='member')
+        spouse = User(phone='+31100001024', email='sulthana-login@example.com', name='Sulthana', role='member')
+        db.session.add_all([owner, spouse])
+        db.session.flush()
+        db.session.add(FamilyMember(user_id=owner.id, name='Sulthana'))
+        invoice = PaymentInvoice(
+            user=owner,
+            month='2026-07',
+            invoice_number='INV-2026-07023',
+            payment_reference='INV-2026-07023',
+            payment_status='UNPAID',
+            amount_due=26.68,
+        )
+        db.session.add_all([invoice, MonthlyInvoiceStatus(month='2026-07', status='READY_FOR_PAYMENT')])
+        db.session.commit()
+        invoice_id = invoice.id
+        token = jwt.encode({'user_id': spouse.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    headers = {'Authorization': f'Bearer {token}'}
+    current = client.get('/api/payment-invoices/current?month=2026-07', headers=headers)
+    details = client.get(f'/api/payment-invoices/{invoice_id}', headers=headers)
+
+    assert current.status_code == 200
+    assert current.get_json()['id'] == invoice_id
+    assert details.status_code == 200
+    assert details.get_json()['id'] == invoice_id
+
+
+def test_member_monthly_summary_uses_payment_invoice_status(client, app):
+    with app.app_context():
+        member = User(phone='+31100001025', email='paid-summary@example.com', name='Paid Summary', role='member')
+        court = Court(name='Paid summary court', hourly_rate=18.0, is_active=True)
+        db.session.add_all([member, court])
+        db.session.flush()
+        booking = Booking(court_id=court.id, booking_date='2026-07-08', start_time='19:00', end_time='20:00', cost=18.0, status='completed')
+        db.session.add(booking)
+        db.session.flush()
+        db.session.add(BookingParticipant(booking_id=booking.id, phone=member.phone, name=member.name, status='participated'))
+        db.session.add(PaymentInvoice(
+            user=member,
+            month='2026-07',
+            invoice_number='INV-2026-07025',
+            payment_reference='INV-2026-07025',
+            payment_status='PAID',
+            amount_due=18.0,
+            paid_amount=18.0,
+        ))
+        db.session.commit()
+        token = jwt.encode({'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    response = client.get('/api/invoices/monthly?month=2026-07', headers={'Authorization': f'Bearer {token}'})
+
+    assert response.status_code == 200
+    assert response.get_json()['payment_status'] == 'PAID'
+    assert response.get_json()['paid_amount'] == 18.0
+    assert response.get_json()['balance_amount'] == 0.0
+
+
 def test_admin_monthly_invoice_recovers_legacy_adhoc_payment_invoice(client, app):
     with app.app_context():
         admin = User.query.filter_by(name='Anand Parasuraman').first()

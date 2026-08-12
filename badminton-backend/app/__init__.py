@@ -4,6 +4,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
 from itsdangerous import URLSafeTimedSerializer
+from werkzeug.middleware.proxy_fix import ProxyFix
 import os
 import redis as _redis
 from passlib.hash import pbkdf2_sha256
@@ -14,6 +15,10 @@ limiter = Limiter(key_func=get_remote_address)
 
 def create_app():
     app = Flask(__name__)
+    # The public app is HTTPS at Cloudflare but reaches Flask through nginx over
+    # HTTP. Trust that single proxy hop so security middleware does not redirect
+    # API POSTs (which would discard login and send-request bodies).
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     database_url = os.environ.get("DATABASE_URL") or "sqlite:///db.sqlite"
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url

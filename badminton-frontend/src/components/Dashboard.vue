@@ -889,6 +889,18 @@
                   <div>
                     <h4 class="font-semibold text-slate-900">{{ invoice.family_title || invoice.user.name || invoice.user.email || invoice.user.phone }}</h4>
                     <p class="text-sm text-slate-600">{{ adminMonthlyInvoices.month }} · {{ (invoice.booking_items || []).length }} booking costs · {{ (invoice.misc_items || []).length }} misc costs</p>
+                    <label v-if="invoice.payment_invoice" class="mt-2 block max-w-48" @click.stop>
+                      <span class="form-label">Payment status</span>
+                      <select
+                        :value="invoice.payment_invoice.payment_status"
+                        class="form-input min-w-40"
+                        :disabled="paymentStatusSavingId === invoice.payment_invoice.id"
+                        @change="setPaymentStatus(invoice.payment_invoice, $event.target.value)"
+                      >
+                        <option value="UNPAID">Payment pending</option>
+                        <option value="PAID">Paid</option>
+                      </select>
+                    </label>
                   </div>
                   <div class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
                     <div class="rounded bg-slate-50 p-2"><div class="text-xs text-slate-500">Total cost</div><div class="font-bold">€{{ invoice.total }}</div></div>
@@ -950,8 +962,8 @@
                   </div>
                   <div class="flex flex-wrap gap-2">
                     <button class="btn-secondary" @click="loadPaymentInvoice(invoice.payment_invoice.id)">QR</button>
-                    <button class="btn-secondary" @click="setPaymentStatus(invoice.payment_invoice, 'PAID')">Paid</button>
-                    <button class="btn-muted" @click="setPaymentStatus(invoice.payment_invoice, 'UNPAID')">Unpaid</button>
+                    <button class="btn-secondary" :disabled="paymentStatusSavingId === invoice.payment_invoice.id" @click="setPaymentStatus(invoice.payment_invoice, 'PAID')">Paid</button>
+                    <button class="btn-muted" :disabled="paymentStatusSavingId === invoice.payment_invoice.id" @click="setPaymentStatus(invoice.payment_invoice, 'UNPAID')">Unpaid</button>
                   </div>
                 </div>
               </div>
@@ -1726,6 +1738,7 @@ export default {
       return `Webhook reached the app with status ${status.latest_event.status}.`
     })
     const paymentInvoices = ref([])
+    const paymentStatusSavingId = ref(null)
     const selectedPaymentInvoice = ref(null)
     const paymentFilter = ref('all')
     const apiBase = import.meta.env.VITE_API_BASE || ''
@@ -2394,10 +2407,19 @@ export default {
     }
 
     async function setPaymentStatus(invoice, status) {
-      const updated = await fetchJson(`/api/admin/payment-invoices/${invoice.id}/status`, { method: 'POST', body: JSON.stringify({ payment_status: status }) })
-      selectedPaymentInvoice.value = updated
-      await loadPaymentInvoices()
-      if (adminMonthlyInvoices.value) await loadAdminMonthlyInvoices()
+      paymentStatusSavingId.value = invoice.id
+      errorMsg.value = ''
+      try {
+        const updated = await fetchJson(`/api/admin/payment-invoices/${invoice.id}/status`, { method: 'POST', body: JSON.stringify({ payment_status: status }) })
+        selectedPaymentInvoice.value = updated
+        msg.value = `${updated.invoice_number} marked ${paymentStatusLabel(updated.payment_status).toLowerCase()}.`
+        await loadPaymentInvoices()
+        if (adminMonthlyInvoices.value) await loadAdminMonthlyInvoices()
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        paymentStatusSavingId.value = null
+      }
     }
 
     async function setMonthlyInvoiceStatus(status) {
@@ -3615,6 +3637,7 @@ export default {
       defaultWiseRedirectUrl,
       defaultWiseWebhookUrl,
       paymentInvoices,
+      paymentStatusSavingId,
       selectedPaymentInvoice,
       paymentFilter,
       isBookingOpen,

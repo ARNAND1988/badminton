@@ -4210,6 +4210,12 @@ def update_payment_invoice_status(invoice_id):
         invoice.paid_amount = round(float(amount or 0), 2)
     elif new_status == 'PAID':
         invoice.paid_amount = invoice.amount_due
+    elif new_status == 'UNPAID':
+        # Reversing a manually reconciled payment must also reverse the amount
+        # and date. Otherwise the monthly summary continues to show a zero
+        # balance even though the invoice status says payment is pending.
+        invoice.paid_amount = 0.0
+        invoice.paid_at = None
     if new_status == 'PAID' and not invoice.paid_at:
         invoice.paid_at = datetime.utcnow()
     if data.get('paid_date'):
@@ -4225,6 +4231,12 @@ def update_payment_invoice_status(invoice_id):
             if not month_status.settled_at:
                 month_status.settled_at = datetime.utcnow()
             month_status.updated_by = user.id
+        elif new_status != 'PAID':
+            month_status = _monthly_invoice_status(invoice.month)
+            if month_status and month_status.status == 'SETTLED':
+                month_status.status = 'READY_FOR_PAYMENT'
+                month_status.settled_at = None
+                month_status.updated_by = user.id
     _record_admin_audit(user, 'update', 'payment_invoice', invoice.id, f'Changed payment status for {invoice.invoice_number} to {new_status}', {'old_status': old_status, 'new_status': new_status})
     db.session.commit()
     return jsonify(invoice.to_dict())

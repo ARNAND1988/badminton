@@ -1594,6 +1594,38 @@ def test_ready_payment_invoices_follow_admin_family_consolidation(client, app):
     assert anand_invoice['payment_invoice']['amount_due'] == 13.34
 
 
+def test_admin_monthly_invoice_repairs_missing_payment_invoices_for_ready_month(client, app):
+    with app.app_context():
+        admin = User(phone='+31100001030', email='repair-admin@example.com', name='Repair Admin', role='admin')
+        member = User(phone='+31100001031', email='repair-member@example.com', name='Repair Member', role='member')
+        court = Court(name='Repair invoice court', hourly_rate=18.0, is_active=True)
+        db.session.add_all([admin, member, court])
+        db.session.flush()
+        booking = Booking(court_id=court.id, booking_date='2026-07-12', start_time='19:00', end_time='20:00', cost=18.0, status='completed')
+        db.session.add(booking)
+        db.session.flush()
+        db.session.add_all([
+            BookingParticipant(booking_id=booking.id, phone=member.phone, name=member.name, status='participated'),
+            BookingParticipant(booking_id=booking.id, phone='late-adhoc-player', name='Late Adhoc Player', status='participated', is_adhoc=True),
+            MonthlyInvoiceStatus(month='2026-07', status='READY_FOR_PAYMENT', payment_method='BUSINESS_BANK'),
+        ])
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    response = client.get('/api/admin/invoices/monthly?month=2026-07', headers={'Authorization': f'Bearer {token}'})
+
+    assert response.status_code == 200
+    invoices = response.get_json()['invoices']
+    assert len(invoices) == 2
+    assert all(invoice['payment_invoice'] for invoice in invoices)
+    assert all(invoice['payment_invoice']['invoice_number'].startswith('INV-') for invoice in invoices)
+    assert all(invoice['payment_invoice']['payment_status'] == 'UNPAID' for invoice in invoices)
+    repeated = client.get('/api/admin/invoices/monthly?month=2026-07', headers={'Authorization': f'Bearer {token}'})
+    assert repeated.status_code == 200
+    with app.app_context():
+        assert PaymentInvoice.query.filter_by(month='2026-07', is_test_invoice=False).count() == 2
+
+
 def test_legacy_family_login_can_open_owner_payment_invoice(client, app):
     with app.app_context():
         owner = User(phone='+31100001023', email='farith-owner@example.com', name='Farith', role='member')

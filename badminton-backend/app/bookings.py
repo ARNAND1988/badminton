@@ -1770,7 +1770,7 @@ def current_user_monthly_invoice():
 
 
 @bookings_bp.route('/admin/invoices/monthly', methods=['GET'])
-def admin_monthly_invoices(month_override=None):
+def admin_monthly_invoices(month_override=None, ensure_ready_invoices=True):
     user, error = _require_admin()
     if error:
         return error
@@ -2043,6 +2043,45 @@ def admin_monthly_invoices(month_override=None):
         for subject in subjects
         if subject['booking_items'] or subject['misc_items'] or subject['payment_invoice'] or float(subject['total'] or 0.0) > 0
     ]
+    # READY_FOR_PAYMENT is the contract that every payable row has a payment
+    # invoice.  Older ready months (and rows added after a month was marked
+    # ready) can predate invoice generation, so repair those rows whenever an
+    # admin opens the month instead of leaving payment controls unavailable.
+    # The generation flow opts out because it uses this response as its source
+    # of canonical, family-consolidated subjects.
+    if expose_payment_details and ensure_ready_invoices:
+        settings = _payment_settings()
+        repaired = False
+        for subject in visible:
+            if subject['payment_invoice'] or float(subject.get('total') or 0.0) <= 0:
+                continue
+            subject_user_id = (subject.get('user') or {}).get('id')
+            if isinstance(subject_user_id, int):
+                subject_user = db.session.get(User, subject_user_id)
+                if not subject_user:
+                    continue
+                payment_invoice = _create_payment_invoice_for_summary(
+                    subject_user,
+                    month_value,
+                    subject,
+                    settings,
+                    False,
+                    allow_payment_failure=True,
+                    payment_method=month_status.payment_method or 'BUSINESS_BANK',
+                )
+                payment_invoice.updated_by = user.id
+            else:
+                payment_invoice = _create_adhoc_payment_invoice(
+                    subject,
+                    month_value,
+                    settings,
+                    user,
+                    month_status.payment_method or 'BUSINESS_BANK',
+                )
+            subject['payment_invoice'] = payment_invoice.to_dict(include_qr=False)
+            repaired = True
+        if repaired:
+            db.session.commit()
     for subject in visible:
         subject.pop('participant_keys', None)
         subject.pop('aliases', None)
@@ -3791,7 +3830,7 @@ def _create_payment_invoices_for_month(month_value, admin_user, payment_method='
     # match a family alias, and standalone ad-hoc players. Generating from every
     # User independently could attach a payment invoice to a duplicate account,
     # leaving the consolidated row with no QR or payment controls.
-    summary_response = admin_monthly_invoices(month_value)
+    summary_response = admin_monthly_invoices(month_value, ensure_ready_invoices=False)
     summary_payload = summary_response.get_json() if hasattr(summary_response, 'get_json') else {}
     for subject in summary_payload.get('invoices', []):
         if float(subject.get('total') or 0.0) <= 0:

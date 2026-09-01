@@ -2910,13 +2910,80 @@ def send_availability_polls():
             recipient=recipient,
             message=f"{question}\n" + '\n'.join(AVAILABILITY_POLL_OPTIONS),
             status=status,
-            response=response_text,
+            response=f'{response_text}\nplay_date={date_value}',
         )
         db.session.add(log)
         logs.append(log)
     db.session.commit()
     _record_admin_audit(user, 'send', 'whatsapp_notification', None, f'Sent {len(logs)} availability poll(s)', {'dates': [item[0] for item in parsed_dates], 'recipient': recipient, 'statuses': [log.status for log in logs]})
     return jsonify({'sent': sum(log.status == 'sent' for log in logs), 'polls': [log.to_dict() for log in logs], 'options': AVAILABILITY_POLL_OPTIONS})
+
+
+def _whatsapp_voter_digits(value):
+    return ''.join(character for character in (value or '').split('@', 1)[0] if character.isdigit())
+
+
+@bookings_bp.route('/whatsapp/poll-vote', methods=['POST'])
+def receive_whatsapp_poll_vote():
+    """Apply a native WhatsApp poll response to a member's availability."""
+    import os
+    import re
+    from .models import WhatsAppNotificationLog
+
+    expected_token = os.environ.get('WHATSAPP_BOT_TOKEN') or ''
+    if expected_token and request.headers.get('X-Bot-Token', '') != expected_token:
+        return jsonify({'error': 'bot_token_required'}), 403
+
+    data = request.get_json() or {}
+    poll_message_id = (data.get('poll_message_id') or '').strip()
+    voter = (data.get('voter') or '').strip()
+    selected_option = (data.get('selected_option') or '').strip()
+    if not poll_message_id or not voter:
+        return jsonify({'error': 'poll_message_id and voter required'}), 400
+
+    log = WhatsAppNotificationLog.query.filter(
+        WhatsAppNotificationLog.event_key == 'availability_poll',
+        WhatsAppNotificationLog.response.contains(poll_message_id),
+    ).order_by(WhatsAppNotificationLog.id.desc()).first()
+    if not log:
+        return jsonify({'error': 'availability_poll_not_found'}), 404
+    date_match = re.search(r'play_date=(\d{4}-\d{2}-\d{2})', log.response or '')
+    if not date_match:
+        return jsonify({'error': 'availability_poll_date_not_found'}), 409
+
+    voter_digits = _whatsapp_voter_digits(voter)
+    user = next((candidate for candidate in User.query.filter(User.whatsapp_number.isnot(None)).all()
+                 if _whatsapp_voter_digits(candidate.whatsapp_number) == voter_digits), None)
+    if not user:
+        return jsonify({'error': 'whatsapp_member_not_found', 'voter': voter}), 404
+
+    option_map = {
+        '1 person available': ('available', 1),
+        '2 persons available': ('available', 2),
+        'Tentatively available': ('tentative', 1),
+        'Not available': ('not_available', 0),
+        '': ('not_available', 0),
+    }
+    if selected_option not in option_map:
+        return jsonify({'error': 'unknown_poll_option'}), 400
+    status, attendee_count = option_map[selected_option]
+    play_date = date_match.group(1)
+    vote = PlayAvailabilityVote.query.filter_by(user_id=user.id, play_date=play_date).first()
+    if not vote:
+        vote = PlayAvailabilityVote(user_id=user.id, play_date=play_date)
+        db.session.add(vote)
+    attendees = []
+    if attendee_count:
+        attendees.append({'type': 'self', 'name': _public_user_label(user), 'phone': user.whatsapp_number, 'status': status})
+    if attendee_count == 2:
+        attendees.append({'type': 'guest', 'name': f'{_public_user_label(user)} guest', 'status': status})
+    vote.status = status
+    vote.available = status == 'available'
+    vote.attendee_count = attendee_count if vote.available else 0
+    vote.attendee_details = json.dumps(attendees) if attendees else None
+    vote.notes = 'Updated from WhatsApp availability poll'
+    db.session.commit()
+    return jsonify({'updated': True, 'play_date': play_date, 'vote': vote.to_dict()})
 
 
 @bookings_bp.route('/admin/audit-logs', methods=['GET'])

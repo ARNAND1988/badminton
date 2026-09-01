@@ -11,6 +11,7 @@ let ready = false
 const defaultRecipient = process.env.WHATSAPP_GROUP_ID || ''
 const sessionPath = process.env.WHATSAPP_SESSION_PATH || '/data/session'
 const botToken = process.env.WHATSAPP_BOT_TOKEN || ''
+const backendUrl = (process.env.BACKEND_URL || '').replace(/\/$/, '')
 
 function clearChromiumProfileLocks(rootPath) {
   if (!fs.existsSync(rootPath)) return
@@ -39,6 +40,23 @@ const client = new Client({
 client.on('qr', (qr) => qrcode.generate(qr, { small: true }))
 client.on('ready', () => { ready = true; console.log('WhatsApp bot is ready') })
 client.on('disconnected', (reason) => { ready = false; console.log('WhatsApp bot disconnected:', reason) })
+client.on('vote_update', async (vote) => {
+  if (!backendUrl) return
+  const pollMessageId = vote.parentMessage?.id?._serialized || vote.parentMsgKey?._serialized || ''
+  const selectedOption = vote.selectedOptions?.[0]?.name || ''
+  try {
+    const contact = await client.getContactById(vote.voter)
+    const voter = contact?.number || vote.voter || ''
+    const response = await fetch(`${backendUrl}/api/whatsapp/poll-vote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(botToken ? { 'X-Bot-Token': botToken } : {}) },
+      body: JSON.stringify({ poll_message_id: pollMessageId, voter, selected_option: selectedOption })
+    })
+    if (!response.ok) console.warn('Availability poll response was not applied:', response.status, await response.text())
+  } catch (error) {
+    console.error('Failed to forward WhatsApp poll response:', error)
+  }
+})
 client.initialize()
 
 function requireBotToken(req, res, next) {

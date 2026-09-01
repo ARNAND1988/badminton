@@ -64,6 +64,7 @@ services:
       WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
       WHATSAPP_SESSION_PATH: /data/session
       WHATSAPP_BOT_TOKEN: ${WHATSAPP_BOT_TOKEN:-dev-whatsapp-bot-token}
+      BACKEND_URL: http://badminton-backend:8000
     volumes:
       - whatsapp_bot_data:/data
     ports:

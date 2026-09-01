@@ -1302,7 +1302,9 @@ def test_yesterday_booking_moves_from_upcoming_to_completed(client, app):
     completed_bookings = completed_resp.get_json()['bookings']
     assert any(item['id'] == booking_id and item['status'] == 'completed' for item in completed_bookings)
 
-    current_month = datetime.utcnow().strftime('%Y-%m')
+    # Use the booking's month so this remains valid when the test runs on the
+    # first day of a month and "yesterday" belongs to the previous month.
+    current_month = yesterday[:7]
     monthly_resp = client.get(
         f'/api/bookings?status=completed&month={current_month}&page=1&per_page=100',
         headers={'Authorization': f'Bearer {token}'},

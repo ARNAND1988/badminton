@@ -2,7 +2,7 @@ const express = require('express')
 const fs = require('fs')
 const path = require('path')
 const qrcode = require('qrcode-terminal')
-const { Client, LocalAuth } = require('whatsapp-web.js')
+const { Client, LocalAuth, Poll } = require('whatsapp-web.js')
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
@@ -11,6 +11,7 @@ let ready = false
 const defaultRecipient = process.env.WHATSAPP_GROUP_ID || ''
 const sessionPath = process.env.WHATSAPP_SESSION_PATH || '/data/session'
 const botToken = process.env.WHATSAPP_BOT_TOKEN || ''
+const backendUrl = (process.env.BACKEND_URL || '').replace(/\/$/, '')
 
 function clearChromiumProfileLocks(rootPath) {
   if (!fs.existsSync(rootPath)) return
@@ -39,6 +40,23 @@ const client = new Client({
 client.on('qr', (qr) => qrcode.generate(qr, { small: true }))
 client.on('ready', () => { ready = true; console.log('WhatsApp bot is ready') })
 client.on('disconnected', (reason) => { ready = false; console.log('WhatsApp bot disconnected:', reason) })
+client.on('vote_update', async (vote) => {
+  if (!backendUrl) return
+  const pollMessageId = vote.parentMessage?.id?._serialized || vote.parentMsgKey?._serialized || ''
+  const selectedOption = vote.selectedOptions?.[0]?.name || ''
+  try {
+    const contact = await client.getContactById(vote.voter)
+    const voter = contact?.number || vote.voter || ''
+    const response = await fetch(`${backendUrl}/api/whatsapp/poll-vote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(botToken ? { 'X-Bot-Token': botToken } : {}) },
+      body: JSON.stringify({ poll_message_id: pollMessageId, voter, selected_option: selectedOption })
+    })
+    if (!response.ok) console.warn('Availability poll response was not applied:', response.status, await response.text())
+  } catch (error) {
+    console.error('Failed to forward WhatsApp poll response:', error)
+  }
+})
 client.initialize()
 
 function requireBotToken(req, res, next) {
@@ -49,7 +67,7 @@ function requireBotToken(req, res, next) {
 }
 
 app.get('/health', (_, res) => res.json({ status: 'ok', ready }))
-app.get('/', (_, res) => res.json({ status: 'ok', ready, endpoints: ['/health', '/groups', '/send'] }))
+app.get('/', (_, res) => res.json({ status: 'ok', ready, endpoints: ['/health', '/groups', '/send', '/poll'] }))
 app.get('/groups', requireBotToken, async (_, res) => {
   if (!ready) return res.status(503).json({ error: 'whatsapp_not_ready' })
   const chats = await client.getChats()
@@ -76,6 +94,23 @@ app.post('/send', requireBotToken, async (req, res) => {
   } catch (error) {
     console.error('Failed to send WhatsApp message:', error)
     res.status(502).json({ error: 'send_failed', message: error?.message || 'Unknown send error' })
+  }
+})
+
+app.post('/poll', requireBotToken, async (req, res) => {
+  if (!ready) return res.status(503).json({ error: 'whatsapp_not_ready' })
+  const question = (req.body.question || '').trim()
+  const options = Array.isArray(req.body.options) ? req.body.options.map((option) => String(option).trim()).filter(Boolean) : []
+  const recipient = (req.body.recipient || defaultRecipient || '').trim()
+  if (!question) return res.status(400).json({ error: 'question required' })
+  if (options.length < 2) return res.status(400).json({ error: 'at least two options required' })
+  if (!recipient) return res.status(400).json({ error: 'recipient required' })
+  try {
+    const result = await client.sendMessage(recipient, new Poll(question, options, { allowMultipleAnswers: false }))
+    res.json({ status: 'sent', id: result?.id?._serialized || null })
+  } catch (error) {
+    console.error('Failed to send WhatsApp poll:', error)
+    res.status(502).json({ error: 'poll_send_failed', message: error?.message || 'Unknown send error' })
   }
 })
 

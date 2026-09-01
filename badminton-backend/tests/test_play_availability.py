@@ -160,6 +160,64 @@ def test_availability_overview_notification_is_enabled_by_default(client, app, m
         assert setting.is_enabled is True
 
 
+def test_admin_can_send_whatsapp_availability_polls_for_multiple_days(client, app, monkeypatch):
+    from app import bookings as bookings_module
+
+    sent_polls = []
+    monkeypatch.setattr(
+        bookings_module,
+        '_send_whatsapp_bot_poll',
+        lambda question, options, recipient=None: sent_polls.append({
+            'question': question,
+            'options': options,
+            'recipient': recipient,
+        }) or ('sent', 'ok'),
+    )
+
+    with app.app_context():
+        admin = User(phone='+31100001020', email='poll-admin@example.com', name='Poll Admin', role='admin')
+        member = User(phone='+31100001021', email='poll-member@example.com', name='Poll Member', role='member')
+        db.session.add_all([admin, member])
+        db.session.commit()
+        db.session.add(WhatsAppNotificationSetting(
+            event_key='availability_summary',
+            title='Availability overview',
+            template='{{overview}}',
+            is_enabled=True,
+            send_to_group=True,
+            group_id='poll-group@g.us',
+        ))
+        db.session.commit()
+        admin_headers = _auth_headers(app, admin)
+        member_headers = _auth_headers(app, member)
+
+    forbidden = client.post('/api/admin/availability-polls/send', json={'dates': ['2030-04-01']}, headers=member_headers)
+    assert forbidden.status_code == 403
+
+    response = client.post('/api/admin/availability-polls/send', json={
+        'dates': ['2030-04-01', '2030-04-03'],
+        'question_prefix': 'Badminton availability',
+    }, headers=admin_headers)
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['sent'] == 2
+    assert len(payload['polls']) == 2
+    assert payload['options'] == [
+        '1 person available',
+        '2 persons available',
+        'Tentatively available',
+        'Not available',
+    ]
+    assert [poll['recipient'] for poll in sent_polls] == ['poll-group@g.us', 'poll-group@g.us']
+    assert sent_polls[0]['question'] == 'Badminton availability — Monday, 01 April 2030'
+    assert sent_polls[1]['question'] == 'Badminton availability — Wednesday, 03 April 2030'
+
+    with app.app_context():
+        logs = WhatsAppNotificationLog.query.filter_by(event_key='availability_poll').all()
+        assert len(logs) == 2
+        assert all(log.status == 'sent' for log in logs)
+
+
 def test_play_availability_defaults_to_today_and_clamps_past_start_date(client):
     today = datetime.utcnow().date()
     yesterday = (today - timedelta(days=1)).strftime('%Y-%m-%d')

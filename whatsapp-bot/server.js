@@ -2,7 +2,7 @@ const express = require('express')
 const fs = require('fs')
 const path = require('path')
 const qrcode = require('qrcode-terminal')
-const { Client, LocalAuth } = require('whatsapp-web.js')
+const { Client, LocalAuth, Poll } = require('whatsapp-web.js')
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
@@ -49,7 +49,7 @@ function requireBotToken(req, res, next) {
 }
 
 app.get('/health', (_, res) => res.json({ status: 'ok', ready }))
-app.get('/', (_, res) => res.json({ status: 'ok', ready, endpoints: ['/health', '/groups', '/send'] }))
+app.get('/', (_, res) => res.json({ status: 'ok', ready, endpoints: ['/health', '/groups', '/send', '/poll'] }))
 app.get('/groups', requireBotToken, async (_, res) => {
   if (!ready) return res.status(503).json({ error: 'whatsapp_not_ready' })
   const chats = await client.getChats()
@@ -76,6 +76,23 @@ app.post('/send', requireBotToken, async (req, res) => {
   } catch (error) {
     console.error('Failed to send WhatsApp message:', error)
     res.status(502).json({ error: 'send_failed', message: error?.message || 'Unknown send error' })
+  }
+})
+
+app.post('/poll', requireBotToken, async (req, res) => {
+  if (!ready) return res.status(503).json({ error: 'whatsapp_not_ready' })
+  const question = (req.body.question || '').trim()
+  const options = Array.isArray(req.body.options) ? req.body.options.map((option) => String(option).trim()).filter(Boolean) : []
+  const recipient = (req.body.recipient || defaultRecipient || '').trim()
+  if (!question) return res.status(400).json({ error: 'question required' })
+  if (options.length < 2) return res.status(400).json({ error: 'at least two options required' })
+  if (!recipient) return res.status(400).json({ error: 'recipient required' })
+  try {
+    const result = await client.sendMessage(recipient, new Poll(question, options, { allowMultipleAnswers: false }))
+    res.json({ status: 'sent', id: result?.id?._serialized || null })
+  } catch (error) {
+    console.error('Failed to send WhatsApp poll:', error)
+    res.status(502).json({ error: 'poll_send_failed', message: error?.message || 'Unknown send error' })
   }
 })
 

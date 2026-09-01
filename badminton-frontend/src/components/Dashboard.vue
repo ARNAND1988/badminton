@@ -8,6 +8,49 @@
     </div>
     <p v-if="msg" class="alert-muted">{{ msg }}</p>
 
+    <div v-if="availabilityPoll.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+      <div class="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">WhatsApp poll</p>
+            <h3 class="mt-1 text-lg font-bold text-slate-950">Request availability</h3>
+            <p class="mt-1 text-sm text-slate-600">Choose one or more days. A separate poll will be posted to the configured group for each day.</p>
+          </div>
+          <button type="button" class="btn-muted" @click="closeAvailabilityPoll">Close</button>
+        </div>
+
+        <label class="mt-5 block">
+          <span class="form-label">Poll question</span>
+          <input v-model="availabilityPoll.questionPrefix" class="form-input" placeholder="Who can play?" />
+          <span class="mt-1 block text-xs text-slate-500">The selected date is added automatically.</span>
+        </label>
+
+        <fieldset class="mt-4">
+          <legend class="form-label">Days</legend>
+          <div class="mt-2 grid gap-2 sm:grid-cols-2">
+            <label v-for="day in playDays" :key="`poll-${day.date}`" class="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-3 hover:bg-slate-50">
+              <input v-model="availabilityPoll.dates" type="checkbox" :value="day.date" class="h-4 w-4 rounded border-slate-300 text-indigo-600" />
+              <span><strong class="block text-sm text-slate-900">{{ day.weekday }}</strong><span class="text-xs text-slate-500">{{ day.date }}</span></span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+          <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">Poll options</p>
+          <ul class="mt-2 grid gap-1 text-sm text-emerald-950 sm:grid-cols-2">
+            <li v-for="option in availabilityPollOptions" :key="option">• {{ option }}</li>
+          </ul>
+        </div>
+
+        <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <button type="button" class="btn-muted" @click="closeAvailabilityPoll">Cancel</button>
+          <button type="button" class="btn-dark" :disabled="availabilityPoll.sending || !availabilityPoll.dates.length || !availabilityPoll.questionPrefix.trim()" @click="sendAvailabilityPolls">
+            {{ availabilityPoll.sending ? 'Sending...' : `Send ${availabilityPoll.dates.length || ''} poll${availabilityPoll.dates.length === 1 ? '' : 's'}` }}
+          </button>
+        </div>
+      </div>
+    </div>
+
 
     <div v-if="notificationPreview.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
       <div class="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
@@ -580,9 +623,10 @@
           <h2 class="section-title">Availability</h2>
           <p class="section-copy mt-1">Next 7 days are always visible. Log in to cast or update your family vote.</p>
         </div>
-        <button v-if="isAdmin" type="button" class="btn-dark w-full sm:w-auto" @click="openAvailabilitySummaryPreview">
-          Send availability overview
-        </button>
+        <div v-if="isAdmin" class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <button type="button" class="btn-secondary w-full sm:w-auto" @click="openAvailabilitySummaryPreview">Send availability overview</button>
+          <button type="button" class="btn-dark w-full sm:w-auto" @click="openAvailabilityPoll">Create WhatsApp poll</button>
+        </div>
       </div>
 
       <div v-if="!isLoggedIn" class="alert-info">
@@ -1650,6 +1694,8 @@ export default {
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
     const notificationPreview = ref({ open: false, type: '', title: '', endpoint: '', payload: {}, message: '', recipient: '', testRecipient: '', testRecipients: [], sending: false })
+    const availabilityPoll = ref({ open: false, dates: [], questionPrefix: 'Who can play?', sending: false })
+    const availabilityPollOptions = ['1 person available', '2 persons available', 'Tentatively available', 'Not available']
     const systemChecks = ref(null)
     const systemCheckQuery = ref('')
     const systemCheckWhatsAppRecipient = ref('')
@@ -2724,6 +2770,37 @@ export default {
       await loadPlayAvailability()
     }
 
+    function openAvailabilityPoll() {
+      availabilityPoll.value = {
+        open: true,
+        dates: playDays.value[0]?.date ? [playDays.value[0].date] : [],
+        questionPrefix: 'Who can play?',
+        sending: false
+      }
+    }
+
+    function closeAvailabilityPoll() {
+      availabilityPoll.value.open = false
+    }
+
+    async function sendAvailabilityPolls() {
+      availabilityPoll.value.sending = true
+      try {
+        const data = await fetchJson('/api/admin/availability-polls/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dates: availabilityPoll.value.dates, question_prefix: availabilityPoll.value.questionPrefix.trim() })
+        })
+        msg.value = `${data.sent} of ${data.polls?.length || availabilityPoll.value.dates.length} WhatsApp availability polls sent.`
+        errorMsg.value = ''
+        closeAvailabilityPoll()
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        availabilityPoll.value.sending = false
+      }
+    }
+
     async function loadDashboard() {
       loading.value = true
       errorMsg.value = ''
@@ -3618,6 +3695,8 @@ export default {
       whatsappSettings,
       whatsappLogs,
       notificationPreview,
+      availabilityPoll,
+      availabilityPollOptions,
       systemChecks,
       systemCheckQuery,
       systemCheckWhatsAppRecipient,
@@ -3768,6 +3847,9 @@ export default {
       runWhatsAppConnectionTest,
       runPasswordResetDeliveryTest,
       openAvailabilitySummaryPreview,
+      openAvailabilityPoll,
+      closeAvailabilityPoll,
+      sendAvailabilityPolls,
       testWhatsAppNotification,
       retryWiseWebhookEvent,
       setAvailabilityPersonStatus,

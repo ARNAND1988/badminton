@@ -9,12 +9,12 @@
     <p v-if="msg" class="alert-muted">{{ msg }}</p>
 
     <div v-if="availabilityPoll.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-      <div class="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl">
+      <div class="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">WhatsApp poll</p>
             <h3 class="mt-1 text-lg font-bold text-slate-950">Request availability</h3>
-            <p class="mt-1 text-sm text-slate-600">Choose one or more days. A separate poll will be posted to the configured group for each day.</p>
+            <p class="mt-1 text-sm text-slate-600">Choose the dates and destination. Each response is matched by WhatsApp number and updates Availability automatically.</p>
           </div>
           <button type="button" class="btn-muted" @click="closeAvailabilityPoll">Close</button>
         </div>
@@ -42,10 +42,33 @@
           </ul>
         </div>
 
+        <fieldset class="mt-4">
+          <legend class="form-label">Send to</legend>
+          <div class="mt-2 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
+            <button type="button" class="rounded-lg px-3 py-2 text-sm font-bold transition" :class="!availabilityPoll.test ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'" @click="availabilityPoll.test = false">WhatsApp group</button>
+            <button type="button" class="rounded-lg px-3 py-2 text-sm font-bold transition" :class="availabilityPoll.test ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'" @click="availabilityPoll.test = true">Test account</button>
+          </div>
+        </fieldset>
+
+        <label v-if="availabilityPoll.test" class="mt-3 block rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <span class="form-label text-amber-900">Test WhatsApp number override</span>
+          <input v-model="availabilityPoll.testRecipient" class="form-input mt-1 bg-white" list="availability-poll-test-recipients" placeholder="+31 6 1234 5678" />
+          <datalist id="availability-poll-test-recipients">
+            <option v-for="recipient in pollTestRecipients" :key="recipient" :value="recipient" />
+          </datalist>
+          <span class="mt-1 block text-xs text-amber-800">Only this account receives the poll. The configured group is not contacted.</span>
+        </label>
+
+        <div class="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">1</span><p><strong class="text-slate-800">Send poll</strong> to the group or test account.</p>
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">2</span><p><strong class="text-slate-800">Members vote</strong> with one of the four options above.</p>
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 font-bold text-emerald-700">3</span><p><strong class="text-slate-800">Availability syncs</strong> automatically; refresh this page to see the latest result.</p>
+        </div>
+
         <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
           <button type="button" class="btn-muted" @click="closeAvailabilityPoll">Cancel</button>
-          <button type="button" class="btn-dark" :disabled="availabilityPoll.sending || !availabilityPoll.dates.length || !availabilityPoll.questionPrefix.trim()" @click="sendAvailabilityPolls">
-            {{ availabilityPoll.sending ? 'Sending...' : `Send ${availabilityPoll.dates.length || ''} poll${availabilityPoll.dates.length === 1 ? '' : 's'}` }}
+          <button type="button" class="btn-dark" :disabled="availabilityPoll.sending || !availabilityPoll.dates.length || !availabilityPoll.questionPrefix.trim() || (availabilityPoll.test && !availabilityPoll.testRecipient.trim())" @click="sendAvailabilityPolls">
+            {{ availabilityPoll.sending ? 'Sending...' : availabilityPoll.test ? 'Send test poll' : `Send ${availabilityPoll.dates.length || ''} poll${availabilityPoll.dates.length === 1 ? '' : 's'} to group` }}
           </button>
         </div>
       </div>
@@ -626,6 +649,16 @@
         <div v-if="isAdmin" class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <button type="button" class="btn-secondary w-full sm:w-auto" @click="openAvailabilitySummaryPreview">Send availability overview</button>
           <button type="button" class="btn-dark w-full sm:w-auto" @click="openAvailabilityPoll">Create WhatsApp poll</button>
+        </div>
+      </div>
+
+      <div v-if="isAdmin" class="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50 to-emerald-50 p-4">
+        <div class="flex items-start gap-3">
+          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-xl shadow-sm">💬</div>
+          <div>
+            <h3 class="font-bold text-slate-900">WhatsApp poll sync</h3>
+            <p class="mt-1 text-sm text-slate-600">Poll answers are matched to each member's saved WhatsApp number and written straight into the cards below. Use <strong>Create WhatsApp poll</strong> to notify the group, or switch to <strong>Test account</strong> in the popup for a safe end-to-end check.</p>
+          </div>
         </div>
       </div>
 
@@ -1694,7 +1727,7 @@ export default {
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
     const notificationPreview = ref({ open: false, type: '', title: '', endpoint: '', payload: {}, message: '', recipient: '', testRecipient: '', testRecipients: [], sending: false })
-    const availabilityPoll = ref({ open: false, dates: [], questionPrefix: 'Who can play?', sending: false })
+    const availabilityPoll = ref({ open: false, dates: [], questionPrefix: 'Who can play?', test: false, testRecipient: '', sending: false })
     const availabilityPollOptions = ['1 person available', '2 persons available', 'Tentatively available', 'Not available']
     const systemChecks = ref(null)
     const systemCheckQuery = ref('')
@@ -1843,6 +1876,9 @@ export default {
       ]
     })
     const availabilityPeople = computed(() => familyAttendancePeople.value)
+    const pollTestRecipients = computed(() => [...new Set(whatsappSettings.value
+      .map((setting) => setting.test_recipient_number)
+      .filter(Boolean))])
     function linkableUserOptions(ownerId) {
       return adminUsers.value
         .filter((candidate) => candidate.id !== ownerId)
@@ -2770,11 +2806,16 @@ export default {
       await loadPlayAvailability()
     }
 
-    function openAvailabilityPoll() {
+    async function openAvailabilityPoll() {
+      if (!whatsappSettings.value.length) {
+        await loadWhatsAppNotifications().catch(() => {})
+      }
       availabilityPoll.value = {
         open: true,
         dates: playDays.value[0]?.date ? [playDays.value[0].date] : [],
         questionPrefix: 'Who can play?',
+        test: false,
+        testRecipient: pollTestRecipients.value[0] || '',
         sending: false
       }
     }
@@ -2789,9 +2830,16 @@ export default {
         const data = await fetchJson('/api/admin/availability-polls/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dates: availabilityPoll.value.dates, question_prefix: availabilityPoll.value.questionPrefix.trim() })
+          body: JSON.stringify({
+            dates: availabilityPoll.value.dates,
+            question_prefix: availabilityPoll.value.questionPrefix.trim(),
+            test: availabilityPoll.value.test,
+            recipient: availabilityPoll.value.test ? availabilityPoll.value.testRecipient.trim() : undefined
+          })
         })
-        msg.value = `${data.sent} of ${data.polls?.length || availabilityPoll.value.dates.length} WhatsApp availability polls sent.`
+        msg.value = availabilityPoll.value.test
+          ? `Test poll sent to ${data.recipient}. Vote once, then refresh to verify the availability sync.`
+          : `${data.sent} of ${data.polls?.length || availabilityPoll.value.dates.length} WhatsApp availability polls sent to the group.`
         errorMsg.value = ''
         closeAvailabilityPoll()
       } catch (err) {
@@ -2827,6 +2875,9 @@ export default {
           await loadPlayAvailability()
           if (loggedIn) {
             await loadFamilyMembers()
+          }
+          if (loggedIn && isAdmin.value) {
+            await loadWhatsAppNotifications().catch(() => {})
           }
         } else if (activeView.value === 'costs') {
           if (!loggedIn) {
@@ -3697,6 +3748,7 @@ export default {
       notificationPreview,
       availabilityPoll,
       availabilityPollOptions,
+      pollTestRecipients,
       systemChecks,
       systemCheckQuery,
       systemCheckWhatsAppRecipient,

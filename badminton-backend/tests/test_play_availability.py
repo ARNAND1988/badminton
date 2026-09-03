@@ -218,6 +218,33 @@ def test_admin_can_send_whatsapp_availability_polls_for_multiple_days(client, ap
         assert all(log.status == 'sent' for log in logs)
 
 
+def test_admin_can_override_availability_poll_recipient_for_test(client, app, monkeypatch):
+    sent_polls = []
+
+    def fake_send(question, options, recipient=None):
+        sent_polls.append({'question': question, 'options': options, 'recipient': recipient})
+        return 'sent', '{"status":"sent","id":"test-poll-id"}'
+
+    monkeypatch.setattr('app.bookings._send_whatsapp_bot_poll', fake_send)
+    with app.app_context():
+        admin = User(phone='+31100001041', email='poll-test-admin@example.com', name='Poll Admin', role='admin')
+        db.session.add(admin)
+        db.session.commit()
+        admin_headers = _auth_headers(app, admin)
+
+    response = client.post('/api/admin/availability-polls/send', json={
+        'dates': ['2030-04-01'],
+        'question_prefix': 'Test availability',
+        'test': True,
+        'recipient': '+31 6 1234 5678',
+    }, headers=admin_headers)
+
+    assert response.status_code == 200
+    assert response.get_json()['test'] is True
+    assert response.get_json()['recipient'] == '31612345678@c.us'
+    assert sent_polls[0]['recipient'] == '31612345678@c.us'
+
+
 def test_whatsapp_poll_response_updates_member_availability(client, app, monkeypatch):
     monkeypatch.setenv('WHATSAPP_BOT_TOKEN', 'poll-secret')
     with app.app_context():

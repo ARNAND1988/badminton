@@ -2895,7 +2895,13 @@ def send_availability_polls():
     if not question_prefix:
         return jsonify({'error': 'question prefix required'}), 400
     setting = _whatsapp_setting('availability_summary')
-    recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id('availability_summary') if setting else _fallback_whatsapp_group_id()
+    send_test = bool(data.get('test'))
+    if send_test:
+        recipient = _normalize_whatsapp_test_recipient(data.get('recipient') or (setting.test_recipient_number if setting else None))
+        if not recipient:
+            return jsonify({'error': 'test recipient required'}), 400
+    else:
+        recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id('availability_summary') if setting else _fallback_whatsapp_group_id()
     if not recipient:
         return jsonify({'error': 'WhatsApp group recipient is not configured'}), 400
 
@@ -2915,8 +2921,15 @@ def send_availability_polls():
         db.session.add(log)
         logs.append(log)
     db.session.commit()
-    _record_admin_audit(user, 'send', 'whatsapp_notification', None, f'Sent {len(logs)} availability poll(s)', {'dates': [item[0] for item in parsed_dates], 'recipient': recipient, 'statuses': [log.status for log in logs]})
-    return jsonify({'sent': sum(log.status == 'sent' for log in logs), 'polls': [log.to_dict() for log in logs], 'options': AVAILABILITY_POLL_OPTIONS})
+    audit_label = 'test availability poll(s)' if send_test else 'availability poll(s)'
+    _record_admin_audit(user, 'send', 'whatsapp_notification', None, f'Sent {len(logs)} {audit_label}', {'dates': [item[0] for item in parsed_dates], 'recipient': recipient, 'test': send_test, 'statuses': [log.status for log in logs]})
+    return jsonify({
+        'sent': sum(log.status == 'sent' for log in logs),
+        'polls': [log.to_dict() for log in logs],
+        'options': AVAILABILITY_POLL_OPTIONS,
+        'test': send_test,
+        'recipient': recipient,
+    })
 
 
 def _whatsapp_voter_digits(value):

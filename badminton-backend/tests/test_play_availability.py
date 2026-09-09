@@ -86,6 +86,62 @@ def test_family_members_and_play_availability_vote(client, app):
     assert len(list_resp.get_json()['members']) == 1
 
 
+def test_public_poll_creates_and_updates_availability_without_login(client, app):
+    from app import bookings as bookings_module
+
+    with app.app_context():
+        dates = bookings_module._next_playable_dates(2, start=datetime.utcnow().date())
+        first_date, second_date = [value.strftime('%Y-%m-%d') for value in dates]
+
+    payload = {
+        'name': '  Group   Player  ',
+        'voter_token': 'public-voter-token-123456',
+        'responses': [
+            {'play_date': first_date, 'status': 'available'},
+            {'play_date': second_date, 'status': 'tentative'},
+        ],
+    }
+    response = client.post('/api/play-availability/public', json=payload)
+    assert response.status_code == 200
+    assert response.get_json() == {'status': 'saved', 'saved': 2}
+
+    availability = client.get(
+        f'/api/play-availability?start_date={first_date}&days=2'
+    ).get_json()['days']
+    assert availability[0]['totals']['available_count'] == 1
+    assert availability[0]['totals']['available_attendees'][0]['name'] == 'Group Player'
+    assert availability[1]['totals']['tentative_count'] == 1
+
+    payload['responses'] = [
+        {'play_date': first_date, 'status': 'not_available'},
+        {'play_date': second_date, 'status': 'available'},
+    ]
+    update = client.post('/api/play-availability/public', json=payload)
+    assert update.status_code == 200
+
+    availability = client.get(
+        f'/api/play-availability?start_date={first_date}&days=2'
+    ).get_json()['days']
+    assert availability[0]['totals']['available_count'] == 0
+    assert availability[1]['totals']['available_count'] == 1
+
+    with app.app_context():
+        votes = PlayAvailabilityVote.query.filter_by(
+            public_voter_token='public-voter-token-123456'
+        ).all()
+        assert len(votes) == 2
+
+
+def test_public_poll_rejects_invalid_identity_and_dates(client, app):
+    response = client.post('/api/play-availability/public', json={
+        'name': 'Player',
+        'voter_token': 'too-short',
+        'responses': [{'play_date': '2030-01-01', 'status': 'available'}],
+    })
+    assert response.status_code == 400
+    assert response.get_json()['error'] == 'invalid_voter_token'
+
+
 
 def test_admin_can_send_availability_overview_notification(client, app, monkeypatch):
     from app import bookings as bookings_module

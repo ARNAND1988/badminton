@@ -8,73 +8,6 @@
     </div>
     <p v-if="msg" class="alert-muted">{{ msg }}</p>
 
-    <div v-if="availabilityPoll.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-      <div class="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <p class="text-xs font-bold uppercase tracking-[0.2em] text-emerald-700">WhatsApp poll</p>
-            <h3 class="mt-1 text-lg font-bold text-slate-950">Request availability</h3>
-            <p class="mt-1 text-sm text-slate-600">Choose the dates and destination. Each response is matched by WhatsApp number and updates Availability automatically.</p>
-          </div>
-          <button type="button" class="btn-muted" @click="closeAvailabilityPoll">Close</button>
-        </div>
-
-        <label class="mt-5 block">
-          <span class="form-label">Poll question</span>
-          <input v-model="availabilityPoll.questionPrefix" class="form-input" placeholder="Who can play?" />
-          <span class="mt-1 block text-xs text-slate-500">The selected date is added automatically.</span>
-        </label>
-
-        <fieldset class="mt-4">
-          <legend class="form-label">Days</legend>
-          <div class="mt-2 grid gap-2 sm:grid-cols-2">
-            <label v-for="day in playDays" :key="`poll-${day.date}`" class="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 p-3 hover:bg-slate-50">
-              <input v-model="availabilityPoll.dates" type="checkbox" :value="day.date" class="h-4 w-4 rounded border-slate-300 text-indigo-600" />
-              <span><strong class="block text-sm text-slate-900">{{ day.weekday }}</strong><span class="text-xs text-slate-500">{{ day.date }}</span></span>
-            </label>
-          </div>
-        </fieldset>
-
-        <div class="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
-          <p class="text-xs font-bold uppercase tracking-wide text-emerald-700">Poll options</p>
-          <ul class="mt-2 grid gap-1 text-sm text-emerald-950 sm:grid-cols-2">
-            <li v-for="option in availabilityPollOptions" :key="option">• {{ option }}</li>
-          </ul>
-        </div>
-
-        <fieldset class="mt-4">
-          <legend class="form-label">Send to</legend>
-          <div class="mt-2 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
-            <button type="button" class="rounded-lg px-3 py-2 text-sm font-bold transition" :class="!availabilityPoll.test ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'" @click="availabilityPoll.test = false">WhatsApp group</button>
-            <button type="button" class="rounded-lg px-3 py-2 text-sm font-bold transition" :class="availabilityPoll.test ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500'" @click="availabilityPoll.test = true">Test account</button>
-          </div>
-        </fieldset>
-
-        <label v-if="availabilityPoll.test" class="mt-3 block rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <span class="form-label text-amber-900">Test WhatsApp number override</span>
-          <input v-model="availabilityPoll.testRecipient" class="form-input mt-1 bg-white" list="availability-poll-test-recipients" placeholder="+31 6 1234 5678" />
-          <datalist id="availability-poll-test-recipients">
-            <option v-for="recipient in pollTestRecipients" :key="recipient" :value="recipient" />
-          </datalist>
-          <span class="mt-1 block text-xs text-amber-800">Only this account receives the poll. The configured group is not contacted.</span>
-        </label>
-
-        <div class="mt-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">1</span><p><strong class="text-slate-800">Send poll</strong> to the group or test account.</p>
-          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">2</span><p><strong class="text-slate-800">Members vote</strong> with one of the four options above.</p>
-          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 font-bold text-emerald-700">3</span><p><strong class="text-slate-800">Availability syncs</strong> automatically; refresh this page to see the latest result.</p>
-        </div>
-
-        <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
-          <button type="button" class="btn-muted" @click="closeAvailabilityPoll">Cancel</button>
-          <button type="button" class="btn-dark" :disabled="availabilityPoll.sending || !availabilityPoll.dates.length || !availabilityPoll.questionPrefix.trim() || (availabilityPoll.test && !availabilityPoll.testRecipient.trim())" @click="sendAvailabilityPolls">
-            {{ availabilityPoll.sending ? 'Sending...' : availabilityPoll.test ? 'Send test poll' : `Send ${availabilityPoll.dates.length || ''} poll${availabilityPoll.dates.length === 1 ? '' : 's'} to group` }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-
     <div v-if="notificationPreview.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
       <div class="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
         <div class="flex items-start justify-between gap-3">
@@ -640,33 +573,61 @@
       </div>
     </section>
 
-    <section v-if="activeView === 'availability'" class="space-y-6">
+    <section v-if="activeView === 'availability' || activeView === 'poll'" class="space-y-6">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 class="section-title">Availability</h2>
-          <p class="section-copy mt-1">Next 7 days are always visible. Log in to cast or update your family vote.</p>
+          <p v-if="activeView === 'poll'" class="text-xs font-bold uppercase tracking-[0.24em] text-emerald-700">Group poll</p>
+          <h2 class="section-title">{{ activeView === 'poll' ? 'When can you play?' : 'Availability' }}</h2>
+          <p class="section-copy mt-1">{{ activeView === 'poll' ? 'Add your name, choose one answer for each day, and save once.' : 'Next 7 days are always visible. Log in to cast or update your family vote.' }}</p>
         </div>
-        <div v-if="isAdmin" class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          <button type="button" class="btn-secondary w-full sm:w-auto" @click="openAvailabilitySummaryPreview">Send availability overview</button>
-          <button type="button" class="btn-dark w-full sm:w-auto" @click="openAvailabilityPoll">Create WhatsApp poll</button>
-        </div>
+        <button v-if="activeView === 'availability' && isAdmin" type="button" class="btn-dark w-full sm:w-auto" @click="copyText(publicPollUrl)">
+          Copy group poll link
+        </button>
       </div>
 
-      <div v-if="isAdmin" class="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50 to-emerald-50 p-4">
-        <div class="flex items-start gap-3">
-          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-xl shadow-sm">💬</div>
-          <div>
-            <h3 class="font-bold text-slate-900">WhatsApp poll sync</h3>
-            <p class="mt-1 text-sm text-slate-600">Poll answers are matched to each member's saved WhatsApp number and written straight into the cards below. Use <strong>Create WhatsApp poll</strong> to notify the group, or switch to <strong>Test account</strong> in the popup for a safe end-to-end check.</p>
+      <form v-if="activeView === 'poll'" class="panel-card" @submit.prevent="savePublicAvailabilityPoll">
+        <label class="block">
+          <span class="form-label">Your name</span>
+          <input v-model="publicPoll.name" class="form-input mt-1" maxlength="80" autocomplete="name" placeholder="Enter your name" required />
+        </label>
+
+        <fieldset class="mt-5">
+          <legend class="form-label">Your availability</legend>
+          <div class="mt-2 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div v-for="day in playDays" :key="`public-poll-${day.date}`" class="p-3 sm:flex sm:items-center sm:justify-between sm:gap-4">
+              <div class="mb-2 min-w-0 sm:mb-0">
+                <strong class="block text-sm text-slate-900">{{ day.weekday }}</strong>
+                <span class="text-xs text-slate-500">{{ day.date }}</span>
+              </div>
+              <div class="grid grid-cols-3 gap-1.5 sm:w-[22rem]">
+                <button
+                  v-for="status in availabilityStatuses"
+                  :key="`public-${day.date}-${status.value}`"
+                  type="button"
+                  class="rounded-lg border px-2 py-2 text-xs font-bold transition"
+                  :class="publicPoll.responses[day.date] === status.value ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
+                  @click="publicPoll.responses[day.date] = status.value"
+                >
+                  {{ status.shortLabel || status.label }}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </fieldset>
 
-      <div v-if="!isLoggedIn" class="alert-info">
+        <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p class="text-xs text-slate-500">You can reopen this link on the same device to update your answers.</p>
+          <button class="btn-primary sm:min-w-36" :disabled="publicPoll.saving || !publicPoll.name.trim() || !allPublicPollDaysAnswered">
+            {{ publicPoll.saving ? 'Saving...' : 'Save availability' }}
+          </button>
+        </div>
+      </form>
+
+      <div v-if="activeView === 'availability' && !isLoggedIn" class="alert-info">
         You can view total attendance counts below. Log in to vote for your family.
       </div>
 
-      <div v-if="isLoggedIn" class="panel-card">
+      <div v-if="activeView === 'availability' && isLoggedIn" class="panel-card">
         <div class="mb-4">
           <h3 class="text-lg font-semibold">Family members</h3>
           <p class="section-copy">Add family members once, then use the count when voting who will come to play.</p>
@@ -724,7 +685,7 @@
             </div>
           </div>
 
-          <div v-if="isLoggedIn" class="space-y-3 p-4">
+          <div v-if="activeView === 'availability' && isLoggedIn" class="space-y-3 p-4">
             <div>
               <label class="mb-1 block text-sm font-medium">Availability by member</label>
               <div class="space-y-2 rounded border bg-white p-3">
@@ -1721,14 +1682,19 @@ export default {
     const currentPaymentInvoice = ref(null)
     const defaultWiseRedirectUrl = `${window.location.origin}/my-invoices`
     const defaultWiseWebhookUrl = `${window.location.origin}/api/webhooks/wise/incoming-transfer`
+    const publicPollUrl = `${window.location.origin}/poll`
     const adminMonthlyInvoices = ref(null)
     const monthlyInvoiceMonth = ref(localIsoMonth())
     const monthlyPaymentMethod = ref('BUSINESS_BANK')
     const whatsappSettings = ref([])
     const whatsappLogs = ref([])
     const notificationPreview = ref({ open: false, type: '', title: '', endpoint: '', payload: {}, message: '', recipient: '', testRecipient: '', testRecipients: [], sending: false })
-    const availabilityPoll = ref({ open: false, dates: [], questionPrefix: 'Who can play?', test: false, testRecipient: '', sending: false })
-    const availabilityPollOptions = ['1 person available', '2 persons available', 'Tentatively available', 'Not available']
+    const publicPoll = ref({
+      name: window.localStorage.getItem('badminton_poll_name') || '',
+      voterToken: window.localStorage.getItem('badminton_poll_voter_token') || '',
+      responses: loadSavedPublicPollResponses(),
+      saving: false
+    })
     const systemChecks = ref(null)
     const systemCheckQuery = ref('')
     const systemCheckWhatsAppRecipient = ref('')
@@ -1876,9 +1842,6 @@ export default {
       ]
     })
     const availabilityPeople = computed(() => familyAttendancePeople.value)
-    const pollTestRecipients = computed(() => [...new Set(whatsappSettings.value
-      .map((setting) => setting.test_recipient_number)
-      .filter(Boolean))])
     function linkableUserOptions(ownerId) {
       return adminUsers.value
         .filter((candidate) => candidate.id !== ownerId)
@@ -1921,10 +1884,13 @@ export default {
       { value: 'tentative', label: 'Tentative' }
     ]
     const availabilityStatuses = [
-      { value: 'available', label: 'Available' },
-      { value: 'tentative', label: 'Tentative' },
-      { value: 'not_available', label: 'No' }
+      { value: 'available', label: 'Available', shortLabel: 'Yes' },
+      { value: 'tentative', label: 'Tentative', shortLabel: 'Maybe' },
+      { value: 'not_available', label: 'No', shortLabel: 'No' }
     ]
+    const allPublicPollDaysAnswered = computed(() => playDays.value.length > 0 && playDays.value.every(
+      (day) => availabilityStatuses.some((status) => status.value === publicPoll.value.responses[day.date])
+    ))
 
     function parseBookingDate(dateValue) {
       return new Date(`${dateValue}T00:00:00`)
@@ -2302,6 +2268,53 @@ export default {
       const params = new URLSearchParams({ start_date: localIsoDate(), days: '7' })
       const data = await fetchJson(`/api/play-availability?${params.toString()}`)
       playDays.value = (data.days || []).map(normalizePlayDay)
+    }
+
+    function loadSavedPublicPollResponses() {
+      try {
+        return JSON.parse(window.localStorage.getItem('badminton_poll_responses') || '{}')
+      } catch (_error) {
+        return {}
+      }
+    }
+
+    function publicPollVoterToken() {
+      if (!publicPoll.value.voterToken) {
+        const randomPart = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+        publicPoll.value.voterToken = randomPart.replace(/[^A-Za-z0-9_-]/g, '')
+        window.localStorage.setItem('badminton_poll_voter_token', publicPoll.value.voterToken)
+      }
+      return publicPoll.value.voterToken
+    }
+
+    async function savePublicAvailabilityPoll() {
+      publicPoll.value.saving = true
+      errorMsg.value = ''
+      msg.value = ''
+      try {
+        const responses = playDays.value.map((day) => ({
+          play_date: day.date,
+          status: publicPoll.value.responses[day.date]
+        }))
+        await fetchJson('/api/play-availability/public', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: publicPoll.value.name.trim(),
+            voter_token: publicPollVoterToken(),
+            responses
+          })
+        })
+        window.localStorage.setItem('badminton_poll_name', publicPoll.value.name.trim())
+        window.localStorage.setItem('badminton_poll_responses', JSON.stringify(publicPoll.value.responses))
+        msg.value = 'Your availability is saved. You can update it here at any time.'
+        await loadPlayAvailability()
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        publicPoll.value.saving = false
+      }
     }
 
     async function loadMiscCosts(options = {}) {
@@ -2795,60 +2808,6 @@ export default {
       await loadWhatsAppNotifications()
     }
 
-    async function openAvailabilitySummaryPreview() {
-      await openNotificationPreview({
-        type: 'availability_summary',
-        title: 'Availability overview notification',
-        previewEndpoint: '/api/admin/availability-summary/preview',
-        sendEndpoint: '/api/admin/availability-summary/send',
-        payload: { days: 7 }
-      })
-      await loadPlayAvailability()
-    }
-
-    async function openAvailabilityPoll() {
-      if (!whatsappSettings.value.length) {
-        await loadWhatsAppNotifications().catch(() => {})
-      }
-      availabilityPoll.value = {
-        open: true,
-        dates: playDays.value[0]?.date ? [playDays.value[0].date] : [],
-        questionPrefix: 'Who can play?',
-        test: false,
-        testRecipient: pollTestRecipients.value[0] || '',
-        sending: false
-      }
-    }
-
-    function closeAvailabilityPoll() {
-      availabilityPoll.value.open = false
-    }
-
-    async function sendAvailabilityPolls() {
-      availabilityPoll.value.sending = true
-      try {
-        const data = await fetchJson('/api/admin/availability-polls/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dates: availabilityPoll.value.dates,
-            question_prefix: availabilityPoll.value.questionPrefix.trim(),
-            test: availabilityPoll.value.test,
-            recipient: availabilityPoll.value.test ? availabilityPoll.value.testRecipient.trim() : undefined
-          })
-        })
-        msg.value = availabilityPoll.value.test
-          ? `Test poll sent to ${data.recipient}. Vote once, then refresh to verify the availability sync.`
-          : `${data.sent} of ${data.polls?.length || availabilityPoll.value.dates.length} WhatsApp availability polls sent to the group.`
-        errorMsg.value = ''
-        closeAvailabilityPoll()
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        availabilityPoll.value.sending = false
-      }
-    }
-
     async function loadDashboard() {
       loading.value = true
       errorMsg.value = ''
@@ -2871,13 +2830,10 @@ export default {
           if (loggedIn && isAdmin.value) {
             await loadCourts()
           }
-        } else if (activeView.value === 'availability') {
+        } else if (activeView.value === 'availability' || activeView.value === 'poll') {
           await loadPlayAvailability()
-          if (loggedIn) {
+          if (loggedIn && activeView.value === 'availability') {
             await loadFamilyMembers()
-          }
-          if (loggedIn && isAdmin.value) {
-            await loadWhatsAppNotifications().catch(() => {})
           }
         } else if (activeView.value === 'costs') {
           if (!loggedIn) {
@@ -3733,6 +3689,9 @@ export default {
       familyMembers,
       familyAttendancePeople,
       availabilityPeople,
+      publicPoll,
+      publicPollUrl,
+      allPublicPollDaysAnswered,
       miscCosts,
       isArchivedMiscCost,
       saveClubMemberSelection,
@@ -3746,9 +3705,6 @@ export default {
       whatsappSettings,
       whatsappLogs,
       notificationPreview,
-      availabilityPoll,
-      availabilityPollOptions,
-      pollTestRecipients,
       systemChecks,
       systemCheckQuery,
       systemCheckWhatsAppRecipient,
@@ -3893,15 +3849,12 @@ export default {
       resetBookingForm,
       saveBooking,
       saveAvailabilityVote,
+      savePublicAvailabilityPoll,
       saveBookingRsvp,
       saveFamilyPersonAttendance,
       saveWhatsAppNotification,
       runWhatsAppConnectionTest,
       runPasswordResetDeliveryTest,
-      openAvailabilitySummaryPreview,
-      openAvailabilityPoll,
-      closeAvailabilityPoll,
-      sendAvailabilityPolls,
       testWhatsAppNotification,
       retryWiseWebhookEvent,
       setAvailabilityPersonStatus,

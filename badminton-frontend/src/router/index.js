@@ -34,6 +34,13 @@ const routes = [
     meta: { navLabel: 'Availability' }
   },
   {
+    path: '/poll',
+    name: 'availability-poll',
+    component: Dashboard,
+    props: { initialView: 'poll' },
+    meta: { navLabel: 'Availability Poll' }
+  },
+  {
     path: '/costs',
     name: 'costs',
     component: Dashboard,

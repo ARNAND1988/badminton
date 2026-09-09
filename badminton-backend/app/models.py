@@ -126,6 +126,7 @@ class PlayAvailabilityVote(db.Model):
     __tablename__ = 'play_availability_votes'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    public_voter_token = db.Column(db.String(64), nullable=True, index=True)
     play_date = db.Column(db.String(10), nullable=False)
     available = db.Column(db.Boolean, default=False)
     status = db.Column(db.String(32), default='not_available')
@@ -139,6 +140,7 @@ class PlayAvailabilityVote(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint('user_id', 'play_date', name='uq_play_availability_user_date'),
+        db.UniqueConstraint('public_voter_token', 'play_date', name='uq_play_availability_public_voter_date'),
     )
 
     def to_dict(self):

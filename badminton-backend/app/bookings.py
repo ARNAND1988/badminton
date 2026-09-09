@@ -1206,6 +1206,68 @@ def save_play_availability():
     return jsonify(vote.to_dict())
 
 
+@bookings_bp.route('/play-availability/public', methods=['POST'])
+def save_public_play_availability():
+    """Save a simple, unauthenticated group-poll response into availability."""
+    import re
+
+    data = request.get_json() or {}
+    name = ' '.join(str(data.get('name') or '').strip().split())
+    voter_token = str(data.get('voter_token') or '').strip()
+    responses = data.get('responses')
+
+    if not name or len(name) > 80:
+        return jsonify({'error': 'name must be between 1 and 80 characters'}), 400
+    if not re.fullmatch(r'[A-Za-z0-9_-]{20,64}', voter_token):
+        return jsonify({'error': 'invalid_voter_token'}), 400
+    if not isinstance(responses, list) or not responses or len(responses) > 14:
+        return jsonify({'error': 'between 1 and 14 responses required'}), 400
+
+    today = datetime.utcnow().date()
+    allowed_dates = {
+        value.strftime('%Y-%m-%d')
+        for value in _next_playable_dates(14, start=today)
+    }
+    normalized = {}
+    for response in responses:
+        if not isinstance(response, dict):
+            return jsonify({'error': 'invalid_response'}), 400
+        play_date = str(response.get('play_date') or '')
+        status = str(response.get('status') or '')
+        if play_date not in allowed_dates:
+            return jsonify({'error': f'invalid play date: {play_date}'}), 400
+        if not _valid_availability_status(status):
+            return jsonify({'error': f'invalid status: {status}'}), 400
+        normalized[play_date] = status
+
+    saved_votes = []
+    for play_date, status in normalized.items():
+        vote = PlayAvailabilityVote.query.filter_by(
+            public_voter_token=voter_token,
+            play_date=play_date,
+        ).first()
+        if not vote:
+            vote = PlayAvailabilityVote(
+                public_voter_token=voter_token,
+                play_date=play_date,
+            )
+            db.session.add(vote)
+        attendee_details = [] if status == 'not_available' else [{
+            'type': 'public',
+            'name': name,
+            'status': status,
+        }]
+        vote.status = status
+        vote.available = status == 'available'
+        vote.attendee_count = 1 if status == 'available' else 0
+        vote.attendee_details = json.dumps(attendee_details) if attendee_details else None
+        vote.notes = 'Submitted from the public availability poll'
+        saved_votes.append(vote)
+
+    db.session.commit()
+    return jsonify({'status': 'saved', 'saved': len(saved_votes)})
+
+
 @bookings_bp.route('/bookings', methods=['POST'])
 def create_booking():
     user, error = _require_admin()

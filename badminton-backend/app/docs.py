@@ -28,6 +28,7 @@ ENDPOINT_DOCS = {
     '/api/family-members': ('Members', 'List or add current user family members.'),
     '/api/family-members/{member_id}': ('Members', 'Delete a current user family member.'),
     '/api/play-availability': ('Availability', 'List or update play availability.'),
+    '/api/play-availability/public': ('Availability', 'Submit availability from the public group poll page.'),
     '/api/admin/users': ('Admin', 'List or create users.'),
     '/api/admin/users/{user_id}': ('Admin', 'Update or delete a user.'),
     '/api/admin/family-members': ('Admin', 'Create a family member for a user.'),

@@ -18,8 +18,7 @@ limiter = Limiter(key_func=get_remote_address)
 def create_app():
     app = Flask(__name__)
     # The public app is HTTPS at Cloudflare but reaches Flask through nginx over
-    # HTTP. Trust that single proxy hop so security middleware does not redirect
-    # API POSTs (which would discard login and send-request bodies).
+    # HTTP. Trust that single proxy hop so generated URLs use the public scheme.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     database_url = os.environ.get("DATABASE_URL") or "sqlite:///db.sqlite"
@@ -31,7 +30,12 @@ def create_app():
     limiter.init_app(app)
 
     if not app.config.get('TESTING') and os.environ.get('FLASK_ENV', '').lower() != 'development':
-        Talisman(app)
+        # TLS is terminated by the public reverse proxy. Redirecting to HTTPS in
+        # Flask makes API POSTs depend on a forwarded header and can turn login
+        # requests into body-less redirects when that header is absent or
+        # rewritten by an intermediate proxy. Keep Talisman's security headers,
+        # but leave HTTPS redirects to the edge that owns the certificate.
+        Talisman(app, force_https=False)
     else:
         app.config['TALISMAN_ENABLED'] = False
 

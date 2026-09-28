@@ -114,7 +114,7 @@ def test_anand_parasuraman_is_seeded_as_super_admin(client):
 
 
 def test_production_super_admin_password_can_be_configured(monkeypatch):
-    """The deployed stack must have a usable first login even with mock auth off."""
+    """Production login must work through the proxy's internal HTTP connection."""
     monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
     monkeypatch.setenv('FLASK_ENV', 'production')
     monkeypatch.setenv('AUTH_MOCK', '0')
@@ -126,7 +126,6 @@ def test_production_super_admin_password_can_be_configured(monkeypatch):
         response = production_client.post(
             '/api/auth/login',
             base_url='http://localhost',
-            headers={'X-Forwarded-Proto': 'https'},
             json={
                 'username': 'arnand0413@gmail.com',
                 'password': 'deployment-secret',
@@ -134,7 +133,19 @@ def test_production_super_admin_password_can_be_configured(monkeypatch):
         )
 
     assert response.status_code == 200
-    assert response.get_json()['user']['role'] == 'super_admin'
+    data = response.get_json()
+    assert data['user']['role'] == 'super_admin'
+    assert response.headers['Content-Security-Policy']
+
+    with production_app.test_client() as production_client:
+        me_response = production_client.get(
+            '/api/auth/me',
+            base_url='http://localhost',
+            headers={'Authorization': f"Bearer {data['token']}"},
+        )
+
+    assert me_response.status_code == 200
+    assert me_response.get_json()['user']['email'] == 'arnand0413@gmail.com'
 
     with production_app.app_context():
         db.session.remove()

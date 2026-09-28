@@ -6,7 +6,9 @@ from flask_talisman import Talisman
 from itsdangerous import URLSafeTimedSerializer
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
+import click
 import redis as _redis
+from flask.cli import with_appcontext
 from passlib.hash import pbkdf2_sha256
 
 db = SQLAlchemy()
@@ -107,6 +109,14 @@ def create_app():
             '<h1>Page not found</h1><p>This page is not supported by the badminton service.</p>'
             '<p><a href="/docs">Open API docs</a></p></main></body></html>'
         ), 404
+
+    @app.cli.command('run-booking-reminders')
+    @with_appcontext
+    def run_booking_reminders_command():
+        """Send due one-hour reminders; safe to invoke every minute."""
+        from app.bookings import _send_due_booking_reminders
+        logs = _send_due_booking_reminders()
+        click.echo(f'Sent {len(logs)} booking reminder(s).')
 
     with app.app_context():
         db.create_all()

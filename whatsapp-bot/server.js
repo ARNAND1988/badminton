@@ -1,117 +1,122 @@
+const crypto = require('crypto')
 const express = require('express')
-const fs = require('fs')
-const path = require('path')
-const qrcode = require('qrcode-terminal')
-const { Client, LocalAuth, Poll } = require('whatsapp-web.js')
 
 const app = express()
-app.use(express.json({ limit: '1mb' }))
+app.use(express.json({ limit: '1mb', verify: (req, _res, buffer) => { req.rawBody = buffer } }))
 
-let ready = false
-const defaultRecipient = process.env.WHATSAPP_GROUP_ID || ''
-const sessionPath = process.env.WHATSAPP_SESSION_PATH || '/data/session'
+const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || ''
+const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID || ''
+const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || ''
+const appSecret = process.env.WHATSAPP_APP_SECRET || ''
+const graphVersion = process.env.WHATSAPP_GRAPH_API_VERSION || 'v23.0'
 const botToken = process.env.WHATSAPP_BOT_TOKEN || ''
 const backendUrl = (process.env.BACKEND_URL || '').replace(/\/$/, '')
 
-function clearChromiumProfileLocks(rootPath) {
-  if (!fs.existsSync(rootPath)) return
-  for (const entry of fs.readdirSync(rootPath, { withFileTypes: true })) {
-    const entryPath = path.join(rootPath, entry.name)
-    if (entry.isDirectory()) {
-      clearChromiumProfileLocks(entryPath)
-      continue
-    }
-    if (entry.name.startsWith('Singleton')) {
-      fs.rmSync(entryPath, { force: true })
-    }
-  }
-}
-
-clearChromiumProfileLocks(sessionPath)
-
-const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: sessionPath }),
-  puppeteer: {
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-  }
-})
-
-client.on('qr', (qr) => qrcode.generate(qr, { small: true }))
-client.on('ready', () => { ready = true; console.log('WhatsApp bot is ready') })
-client.on('disconnected', (reason) => { ready = false; console.log('WhatsApp bot disconnected:', reason) })
-client.on('vote_update', async (vote) => {
-  if (!backendUrl) return
-  const pollMessageId = vote.parentMessage?.id?._serialized || vote.parentMsgKey?._serialized || ''
-  const selectedOption = vote.selectedOptions?.[0]?.name || ''
-  try {
-    const contact = await client.getContactById(vote.voter)
-    const voter = contact?.number || vote.voter || ''
-    const response = await fetch(`${backendUrl}/api/whatsapp/poll-vote`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(botToken ? { 'X-Bot-Token': botToken } : {}) },
-      body: JSON.stringify({ poll_message_id: pollMessageId, voter, selected_option: selectedOption })
-    })
-    if (!response.ok) console.warn('Availability poll response was not applied:', response.status, await response.text())
-  } catch (error) {
-    console.error('Failed to forward WhatsApp poll response:', error)
-  }
-})
-client.initialize()
+const configured = () => Boolean(accessToken && phoneNumberId)
+const digits = (value) => String(value || '').replace(/\D/g, '')
 
 function requireBotToken(req, res, next) {
-  if (!botToken) return next()
-  const suppliedToken = req.get('X-Bot-Token') || ''
-  if (suppliedToken !== botToken) return res.status(403).json({ error: 'bot_token_required' })
-  return next()
+  if (!botToken || req.get('X-Bot-Token') === botToken) return next()
+  return res.status(403).json({ error: 'bot_token_required' })
 }
 
-app.get('/health', (_, res) => res.json({ status: 'ok', ready }))
-app.get('/', (_, res) => res.json({ status: 'ok', ready, endpoints: ['/health', '/groups', '/send', '/poll'] }))
-app.get('/groups', requireBotToken, async (_, res) => {
-  if (!ready) return res.status(503).json({ error: 'whatsapp_not_ready' })
-  const chats = await client.getChats()
-  const groups = chats
-    .filter((chat) => chat.isGroup)
-    .map((chat) => ({
-      id: chat.id?._serialized || '',
-      name: chat.name || chat.formattedTitle || chat.id?._serialized || 'Unnamed group',
-      participants_count: Array.isArray(chat.participants) ? chat.participants.length : null
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name))
-  res.json({ groups })
-})
+function validSignature(req) {
+  if (!appSecret) return true
+  const supplied = req.get('X-Hub-Signature-256') || ''
+  const expected = `sha256=${crypto.createHmac('sha256', appSecret).update(req.rawBody || Buffer.from('')).digest('hex')}`
+  return supplied.length === expected.length && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))
+}
+
+async function graphMessage(payload) {
+  if (!configured()) return { ok: false, status: 503, body: { error: 'meta_cloud_api_not_configured' } }
+  const response = await fetch(`https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', ...payload })
+  })
+  const body = await response.json().catch(() => ({ error: { message: 'Invalid Meta response' } }))
+  return { ok: response.ok, status: response.status, body }
+}
+
+app.get('/health', (_req, res) => res.json({ status: 'ok', ready: configured(), provider: 'meta_cloud_api' }))
+app.get('/', (_req, res) => res.json({ status: 'ok', provider: 'meta_cloud_api', endpoints: ['/health', '/send', '/poll', '/document', '/webhook'] }))
+app.get('/groups', requireBotToken, (_req, res) => res.status(400).json({ error: 'groups_not_supported_by_meta_cloud_api' }))
 
 app.post('/send', requireBotToken, async (req, res) => {
-  if (!ready) return res.status(503).json({ error: 'whatsapp_not_ready' })
-  const message = (req.body.message || '').trim()
-  const recipient = (req.body.recipient || defaultRecipient || '').trim()
-  if (!message) return res.status(400).json({ error: 'message required' })
-  if (!recipient) return res.status(400).json({ error: 'recipient required' })
-  try {
-    const result = await client.sendMessage(recipient, message)
-    res.json({ status: 'sent', id: result?.id?._serialized || null })
-  } catch (error) {
-    console.error('Failed to send WhatsApp message:', error)
-    res.status(502).json({ error: 'send_failed', message: error?.message || 'Unknown send error' })
-  }
+  const message = String(req.body.message || '').trim()
+  const recipient = digits(req.body.recipient)
+  if (!message || !recipient) return res.status(400).json({ error: 'message and recipient required' })
+  const result = await graphMessage({ to: recipient, type: 'text', text: { preview_url: true, body: message } })
+  return res.status(result.status).json(result.body)
 })
 
 app.post('/poll', requireBotToken, async (req, res) => {
-  if (!ready) return res.status(503).json({ error: 'whatsapp_not_ready' })
-  const question = (req.body.question || '').trim()
-  const options = Array.isArray(req.body.options) ? req.body.options.map((option) => String(option).trim()).filter(Boolean) : []
-  const recipient = (req.body.recipient || defaultRecipient || '').trim()
-  if (!question) return res.status(400).json({ error: 'question required' })
-  if (options.length < 2) return res.status(400).json({ error: 'at least two options required' })
-  if (!recipient) return res.status(400).json({ error: 'recipient required' })
-  try {
-    const result = await client.sendMessage(recipient, new Poll(question, options, { allowMultipleAnswers: false }))
-    res.json({ status: 'sent', id: result?.id?._serialized || null })
-  } catch (error) {
-    console.error('Failed to send WhatsApp poll:', error)
-    res.status(502).json({ error: 'poll_send_failed', message: error?.message || 'Unknown send error' })
+  const question = String(req.body.question || '').trim()
+  const recipient = digits(req.body.recipient)
+  const options = Array.isArray(req.body.options) ? req.body.options.map(String).map((item) => item.trim()).filter(Boolean) : []
+  if (!question || !recipient || options.length < 2) return res.status(400).json({ error: 'question, recipient and at least two options required' })
+  if (options.length > 10) {
+    const result = await graphMessage({
+      to: recipient,
+      type: 'text',
+      text: { body: `${question}\n\n${options.join('\n')}\n\nReply with one or more names separated by commas.`.slice(0, 4096) }
+    })
+    return res.status(result.status).json(result.body)
+  }
+  const rows = options.map((title, index) => ({ id: `option_${index}`, title: title.slice(0, 24) }))
+  const result = await graphMessage({
+    to: recipient,
+    type: 'interactive',
+    interactive: {
+      type: 'list',
+      body: { text: question.slice(0, 1024) },
+      action: { button: 'Choose players', sections: [{ title: 'Participants', rows }] }
+    }
+  })
+  return res.status(result.status).json(result.body)
+})
+
+app.post('/document', requireBotToken, async (req, res) => {
+  const recipient = digits(req.body.recipient)
+  const link = String(req.body.link || '').trim()
+  if (!recipient || !link) return res.status(400).json({ error: 'recipient and link required' })
+  const result = await graphMessage({
+    to: recipient,
+    type: 'document',
+    document: { link, filename: String(req.body.filename || 'invoice.pdf'), caption: String(req.body.caption || '') }
+  })
+  return res.status(result.status).json(result.body)
+})
+
+app.get('/webhook', (req, res) => {
+  if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === verifyToken) {
+    return res.status(200).send(req.query['hub.challenge'])
+  }
+  return res.sendStatus(403)
+})
+
+app.post('/webhook', async (req, res) => {
+  if (!validSignature(req)) return res.sendStatus(401)
+  res.sendStatus(200)
+  for (const entry of req.body.entry || []) {
+    for (const change of entry.changes || []) {
+      for (const message of change.value?.messages || []) {
+        const selectedOption = message.interactive?.list_reply?.title || message.interactive?.button_reply?.title || message.text?.body || ''
+        const pollMessageId = message.context?.id || ''
+        if (!backendUrl || !selectedOption) continue
+        try {
+          const response = await fetch(`${backendUrl}/api/whatsapp/poll-vote`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(botToken ? { 'X-Bot-Token': botToken } : {}) },
+            body: JSON.stringify({ poll_message_id: pollMessageId, voter: message.from, selected_option: selectedOption })
+          })
+          if (!response.ok) console.warn('WhatsApp response was not applied:', response.status, await response.text())
+        } catch (error) {
+          console.error('Failed to forward WhatsApp response:', error)
+        }
+      }
+    }
   }
 })
 
-app.listen(process.env.PORT || 3000, () => console.log(`WhatsApp bot listening`))
+app.listen(process.env.PORT || 3000, () => console.log('Meta WhatsApp Cloud API adapter listening'))

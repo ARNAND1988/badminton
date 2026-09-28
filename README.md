@@ -229,6 +229,20 @@ sudo systemctl stop badminton-app.service
 journalctl -u badminton-app.service -n 100
 ```
 
+### One-Hour Booking Reminder Timer
+
+Install the reminder service and timer after the application service is running:
+
+```bash
+sudo cp badminton-infra/badminton-reminders.service /etc/systemd/system/
+sudo cp badminton-infra/badminton-reminders.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now badminton-reminders.timer
+systemctl list-timers badminton-reminders.timer
+```
+
+The timer invokes the backend's idempotent `run-booking-reminders` Flask command every minute. Existing WhatsApp delivery logs prevent duplicate reminders.
+
 After editing `badminton-infra/badminton-app.service`, reinstall and reload it:
 
 ```bash
@@ -267,6 +281,21 @@ Production notes:
 - Use strong `SECRET_KEY` and `JWT_SECRET` values.
 - Disable `AUTH_MOCK`.
 - Consider setting `JWT_EXP_SECONDS`.
+
+## Meta WhatsApp Cloud API
+
+The WhatsApp adapter uses the official Meta Cloud API. Configure the values from the Meta app dashboard in `badminton-infra/.env`; the backend and adapter must share the same internal `WHATSAPP_BOT_TOKEN`:
+
+```dotenv
+WHATSAPP_BOT_TOKEN=long-random-internal-token
+WHATSAPP_ACCESS_TOKEN=meta-system-user-token
+WHATSAPP_PHONE_NUMBER_ID=meta-phone-number-id
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=long-random-verification-token
+WHATSAPP_APP_SECRET=meta-app-secret
+WHATSAPP_GRAPH_API_VERSION=v23.0
+```
+
+Configure the Meta webhook URL as `https://nieuwegeinbadminton.nl/whatsapp/webhook` and subscribe it to WhatsApp message events. Frontend Nginx preserves Meta's signature header and forwards this path to the adapter.
 
 ## Tests
 

@@ -627,6 +627,28 @@
         You can view total attendance counts below. Log in to vote for your family.
       </div>
 
+      <section v-if="activeView === 'availability' && isAdmin" class="panel-card space-y-4">
+        <div>
+          <h3 class="text-lg font-semibold text-slate-900">Prepare WhatsApp availability poll</h3>
+          <p class="section-copy mt-1">Choose the dates and edit the English question. Each family receives its own existing member names on every linked number.</p>
+        </div>
+        <label class="block">
+          <span class="form-label">Question</span>
+          <textarea v-model="whatsappPollQuestion" rows="2" class="form-input" placeholder="Who can play badminton?"></textarea>
+        </label>
+        <div class="flex flex-wrap gap-2">
+          <label v-for="day in playDays" :key="`whatsapp-${day.date}`" class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+            <input v-model="whatsappPollDates" type="checkbox" :value="day.date" class="accent-emerald-600" />
+            {{ day.weekday }} {{ day.date }}
+          </label>
+        </div>
+        <div class="flex justify-end">
+          <button class="btn-dark" :disabled="whatsappPollSending || !whatsappPollDates.length" @click="sendWhatsAppFamilyPolls">
+            {{ whatsappPollSending ? 'Sending…' : 'Send to families' }}
+          </button>
+        </div>
+      </section>
+
       <div v-if="activeView === 'availability' && isLoggedIn" class="panel-card">
         <div class="mb-4">
           <h3 class="text-lg font-semibold">Family members</h3>
@@ -1061,6 +1083,7 @@
                 <p class="border-b border-slate-100 px-4 py-3 text-slate-600">Scan this QR or open the Wise payment link.</p>
                 <dl class="grid grid-cols-[9rem_minmax(0,1fr)] divide-y divide-slate-100">
                   <template v-if="selectedPaymentInvoice.payment_url"><dt class="px-4 py-3 font-semibold text-slate-600">Wise link</dt><dd class="px-4 py-3 text-slate-700"><a :href="selectedPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open Wise payment link</a></dd></template>
+                  <dt class="px-4 py-3 font-semibold text-slate-600">Invoice PDF</dt><dd class="px-4 py-3 text-slate-700"><button class="btn-secondary" @click="downloadPaymentInvoicePdf(selectedPaymentInvoice)">Download PDF</button></dd>
                   <dt class="px-4 py-3 font-semibold text-slate-600">Amount due</dt><dd class="px-4 py-3 font-semibold text-slate-900">€{{ selectedPaymentInvoice.amount_due }}</dd>
                   <dt class="px-4 py-3 font-semibold text-slate-600">Due date</dt><dd class="px-4 py-3 text-slate-700">{{ selectedPaymentInvoice.due_date }}</dd>
                   <dt class="px-4 py-3 font-semibold text-slate-600">IBAN</dt><dd class="flex flex-wrap items-center gap-2 px-4 py-3 text-slate-700"><span>{{ selectedPaymentInvoice.iban }}</span><button class="btn-muted" @click="copyText(selectedPaymentInvoice.iban)">Copy</button></dd>
@@ -1105,7 +1128,7 @@
     <section v-if="activeView === 'members'" class="space-y-6">
       <div>
         <h2 class="section-title">Members</h2>
-        <p class="section-copy mt-1">Manage registered club members, family members, and admin access.</p>
+        <p class="section-copy mt-1">Find a family, update its contact details, and expand it only when you need more options.</p>
       </div>
 
       <div v-if="!isAdmin" class="alert-warning">
@@ -1113,7 +1136,20 @@
       </div>
 
       <div v-else class="space-y-4">
-        <section class="panel-card space-y-3 p-4 sm:p-5">
+        <section class="panel-card grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-end sm:p-5">
+          <div>
+            <label class="form-label">Find a member or family</label>
+            <input v-model="memberSearch" type="search" class="form-input" placeholder="Search name, email, phone, or family member" />
+            <p class="mt-1 text-xs text-slate-500">Showing {{ filteredAdminUsers.length }} of {{ adminUsers.length }} accounts.</p>
+          </div>
+          <button class="btn-dark" :disabled="whatsappBackfillRunning" @click="backfillWhatsAppFamilyDetails">
+            {{ whatsappBackfillRunning ? 'Preparing…' : 'Prepare WhatsApp families' }}
+          </button>
+        </section>
+
+        <details class="panel-card p-4 sm:p-5">
+          <summary class="cursor-pointer list-none font-semibold text-slate-900">Club player selection <span class="ml-2 text-sm font-normal text-slate-500">{{ selectedClubMemberKeys.length }} selected</span></summary>
+          <div class="mt-4 space-y-3">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 class="text-base font-semibold text-slate-900">Club member selection</h3>
@@ -1134,9 +1170,10 @@
             </div>
             <button class="btn-dark w-full lg:w-auto" @click="saveClubMemberSelection">Save club members</button>
           </div>
-        </section>
+          </div>
+        </details>
 
-        <article v-for="member in adminUsers" :key="member.id" class="panel-card space-y-3 p-4 sm:p-5">
+        <article v-for="member in filteredAdminUsers" :key="member.id" class="panel-card space-y-3 p-4 sm:p-5">
           <div class="grid gap-3 lg:grid-cols-[1.1fr_1fr_1fr_auto] lg:items-end">
             <div>
               <label class="form-label">Name</label>
@@ -1156,7 +1193,16 @@
             </div>
           </div>
 
-          <div class="grid gap-3 md:grid-cols-3">
+          <div class="flex flex-wrap items-center gap-2 text-xs font-semibold">
+            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">{{ member.family_members?.length || 0 }} family members</span>
+            <span :class="member.whatsapp_link ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" class="rounded-full px-2.5 py-1">
+              {{ member.whatsapp_link ? (member.whatsapp_link.is_primary ? 'Primary WhatsApp' : 'WhatsApp linked') : 'WhatsApp not prepared' }}
+            </span>
+          </div>
+
+          <details class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <summary class="cursor-pointer font-semibold text-slate-800">Family and account details</summary>
+            <div class="mt-4 grid gap-3 md:grid-cols-3">
             <div>
               <label class="form-label">Reset password</label>
               <input
@@ -1189,6 +1235,24 @@
             <div class="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
               Login id: {{ member.email || member.phone }}
             </div>
+          </div>
+
+          <div class="mt-3 grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 md:grid-cols-3">
+            <label class="flex items-center gap-2 text-sm font-medium text-emerald-900">
+              <input :checked="member.whatsapp_link?.is_primary" type="checkbox" @change="member.whatsapp_link = { ...(member.whatsapp_link || {}), is_primary: $event.target.checked }" />
+              Primary family number
+            </label>
+            <label class="flex items-center gap-2 text-sm font-medium text-emerald-900">
+              <input :checked="member.whatsapp_link?.notifications_enabled !== false" type="checkbox" @change="member.whatsapp_link = { ...(member.whatsapp_link || {}), notifications_enabled: $event.target.checked }" />
+              Receive notifications
+            </label>
+            <label class="text-sm font-medium text-emerald-900">
+              Family delivery
+              <select v-model="member.whatsapp_delivery_mode" class="form-input mt-1">
+                <option value="PRIMARY_ONLY">Primary only</option>
+                <option value="ALL_LINKED">All linked numbers</option>
+              </select>
+            </label>
           </div>
 
           <div class="border-t border-slate-100 pt-3">
@@ -1224,6 +1288,7 @@
             </div>
             <p v-else class="text-sm text-slate-600">No family members added for this user.</p>
           </div>
+          </details>
         </article>
         <p v-if="!adminUsers.length && !loading" class="text-sm text-slate-600">No users found.</p>
       </div>
@@ -1527,9 +1592,9 @@
       <div class="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-sky-50 p-4 shadow-sm sm:p-6">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p class="text-xs font-bold uppercase tracking-[0.24em] text-emerald-700">WhatsApp bot</p>
-            <h2 class="mt-1 text-2xl font-black text-slate-950">Group notification admin</h2>
-            <p class="mt-2 max-w-2xl text-sm text-slate-600">Choose which app events can notify the group, edit message templates, and send a safe test message to your WhatsApp number before enabling a template.</p>
+            <p class="text-xs font-bold uppercase tracking-[0.24em] text-emerald-700">Meta Cloud API</p>
+            <h2 class="mt-1 text-2xl font-black text-slate-950">WhatsApp notification admin</h2>
+            <p class="mt-2 max-w-2xl text-sm text-slate-600">Prepare English message content, control each event, and send a safe direct test before notifying families.</p>
           </div>
           <button class="btn-dark w-full sm:w-auto" @click="loadWhatsAppNotifications">Refresh</button>
         </div>
@@ -1551,12 +1616,12 @@
             </div>
             <div class="mt-4 grid gap-3 sm:grid-cols-2">
               <label class="block">
-                <span class="form-label">Group / chat id override</span>
-                <input v-model="setting.group_id" class="form-input" placeholder="1203...@g.us (optional)" />
+                <span class="form-label">Fallback recipient number</span>
+                <input v-model="setting.group_id" class="form-input" placeholder="+31612345678 (optional)" />
               </label>
               <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
                 <input v-model="setting.send_to_group" type="checkbox" class="h-5 w-5 accent-emerald-600" />
-                Send to group by default
+                Enable automatic delivery
               </label>
               <label class="block sm:col-span-2">
                 <span class="form-label">Test WhatsApp number</span>
@@ -1753,6 +1818,11 @@ export default {
     const newAdminFamilyName = ref({})
     const newAdminFamilyRelationship = ref({})
     const newAdminFamilyLinkedUser = ref({})
+    const memberSearch = ref('')
+    const whatsappBackfillRunning = ref(false)
+    const whatsappPollDates = ref([])
+    const whatsappPollQuestion = ref('Who can play badminton?')
+    const whatsappPollSending = ref(false)
     const newMiscTitle = ref('')
     const newMiscDescription = ref('')
     const newMiscAmount = ref('')
@@ -1827,6 +1897,14 @@ export default {
     const completedBookings = computed(() => completedBookingHistory.value)
     const archivedBookings = computed(() => archivedBookingHistory.value)
     const clubMemberOptions = computed(() => buildClubMemberOptions())
+    const filteredAdminUsers = computed(() => {
+      const query = memberSearch.value.trim().toLowerCase()
+      if (!query) return adminUsers.value
+      return adminUsers.value.filter((member) => [
+        member.name, member.email, member.phone, member.whatsapp_number,
+        ...(member.family_members || []).map((item) => item.name)
+      ].some((value) => String(value || '').toLowerCase().includes(query)))
+    })
     const maxFamilyAttendees = computed(() => familyMembers.value.length + 1)
     const familyAttendancePeople = computed(() => {
       getAuthSessionVersion()
@@ -2490,6 +2568,20 @@ export default {
 
     async function loadPaymentInvoice(id) {
       selectedPaymentInvoice.value = await fetchJson(`/api/payment-invoices/${id}`)
+    }
+
+    async function downloadPaymentInvoicePdf(invoice) {
+      const response = await fetch(`${apiBase}/api/payment-invoices/${invoice.id}/pdf`, {
+        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
+        cache: 'no-store'
+      })
+      if (!response.ok) throw new Error('Unable to generate invoice PDF.')
+      const url = URL.createObjectURL(await response.blob())
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${invoice.invoice_number || 'invoice'}.pdf`
+      anchor.click()
+      URL.revokeObjectURL(url)
     }
 
     async function loadLatestTestInvoice() {
@@ -3533,6 +3625,9 @@ export default {
           email: member.email,
           phone: member.phone,
           whatsapp_number: member.whatsapp_number,
+          whatsapp_is_primary: member.whatsapp_link?.is_primary || false,
+          whatsapp_notifications_enabled: member.whatsapp_link?.notifications_enabled !== false,
+          whatsapp_delivery_mode: member.whatsapp_delivery_mode || 'ALL_LINKED',
           role: member.role,
           is_club_member: member.is_club_member
         }
@@ -3549,6 +3644,40 @@ export default {
       } catch (err) {
         msg.value = err.message
         await loadAdminUsers()
+      }
+    }
+
+    async function backfillWhatsAppFamilyDetails() {
+      if (!window.confirm('Link all existing member WhatsApp numbers to their current families? This is safe to run more than once.')) return
+      whatsappBackfillRunning.value = true
+      try {
+        const result = await fetchJson('/api/admin/whatsapp-family-links/backfill', { method: 'POST' })
+        msg.value = `WhatsApp details ready: ${result.created} added, ${result.updated} refreshed, ${result.skipped} without a number${result.errors.length ? `, ${result.errors.length} need attention` : ''}.`
+        await loadAdminUsers()
+      } catch (err) {
+        msg.value = err.message
+      } finally {
+        whatsappBackfillRunning.value = false
+      }
+    }
+
+    async function sendWhatsAppFamilyPolls() {
+      whatsappPollSending.value = true
+      try {
+        const result = await fetchJson('/api/admin/availability-polls/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dates: whatsappPollDates.value,
+            question_prefix: whatsappPollQuestion.value,
+            send_to_families: true
+          })
+        })
+        msg.value = `Sent ${result.sent} poll message(s) to ${result.families} families.`
+      } catch (err) {
+        msg.value = err.message
+      } finally {
+        whatsappPollSending.value = false
       }
     }
 
@@ -3661,6 +3790,12 @@ export default {
       activeView,
       activeCourts,
       adminUsers,
+      filteredAdminUsers,
+      memberSearch,
+      whatsappBackfillRunning,
+      whatsappPollDates,
+      whatsappPollQuestion,
+      whatsappPollSending,
       adminAuditLogs,
       adminAuditPagination,
       auditLogDate,
@@ -3695,6 +3830,8 @@ export default {
       miscCosts,
       isArchivedMiscCost,
       saveClubMemberSelection,
+      backfillWhatsAppFamilyDetails,
+      sendWhatsAppFamilyPolls,
       monthlyInvoice,
       currentPaymentInvoice,
       memberOptions,
@@ -3731,6 +3868,7 @@ export default {
       paymentStatusSavingId,
       selectedPaymentInvoice,
       paymentFilter,
+      apiBase,
       isBookingOpen,
       toggleBooking,
       isCompletedBookingOpen,
@@ -3820,6 +3958,7 @@ export default {
       loadWiseWebhookStatus,
       loadPaymentInvoices,
       loadPaymentInvoice,
+      downloadPaymentInvoicePdf,
       loadLatestTestInvoice,
       setPaymentStatus,
       setMonthlyInvoiceStatus,

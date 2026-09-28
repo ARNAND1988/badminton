@@ -328,8 +328,14 @@ def create_app():
             User.phone.in_(['+10000000000', '+10000000001']),
             User.name.in_(['admin', 'user', 'Demo Admin', 'Demo User']),
         )
+        # Older deployments seeded demo accounts that may now own bookings,
+        # family members, votes, or invoices.  Deleting those users makes
+        # SQLAlchemy null their required foreign keys during startup, which can
+        # prevent the entire API (including login) from starting.  Keep the
+        # historical owner rows but revoke their demo credentials instead.
         for dummy_user in User.query.filter(db.or_(*dummy_user_filters)).all():
-            db.session.delete(dummy_user)
+            dummy_user.password_hash = None
+            dummy_user.role = 'member'
 
         development_defaults_enabled = (
             app.config.get('TESTING')

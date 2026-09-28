@@ -625,3 +625,50 @@ class WhatsAppNotificationLog(db.Model):
             'response': self.response,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class WhatsAppAccountLink(db.Model):
+    """Delivery metadata linking a WhatsApp address to an existing member.
+
+    The linked ``User`` and its existing family graph remain authoritative;
+    this table contains channel-only preferences and never owns availability.
+    """
+    __tablename__ = 'whatsapp_account_links'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
+    whatsapp_number = db.Column(db.String(64), nullable=False, unique=True)
+    is_primary = db.Column(db.Boolean, default=False, nullable=False)
+    notifications_enabled = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship('User', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'whatsapp_number': self.whatsapp_number,
+            'is_primary': self.is_primary,
+            'notifications_enabled': self.notifications_enabled,
+        }
+
+
+class WhatsAppNotificationPreference(db.Model):
+    __tablename__ = 'whatsapp_notification_preferences'
+    id = db.Column(db.Integer, primary_key=True)
+    family_owner_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
+    delivery_mode = db.Column(db.String(16), default='ALL_LINKED', nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class WhatsAppAvailabilityAudit(db.Model):
+    """History only; PlayAvailabilityVote is always the current state."""
+    __tablename__ = 'whatsapp_availability_audits'
+    id = db.Column(db.Integer, primary_key=True)
+    family_owner_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    actor_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    play_date = db.Column(db.String(10), nullable=False)
+    previous_attendee_count = db.Column(db.Integer, default=0, nullable=False)
+    attendee_count = db.Column(db.Integer, default=0, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

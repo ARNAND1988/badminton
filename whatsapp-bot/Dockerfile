@@ -1,16 +1,8 @@
 FROM node:20-bookworm-slim
 
-ENV NODE_ENV=production \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV NODE_ENV=production
 
 WORKDIR /app
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        chromium \
-        ca-certificates \
-        fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
 RUN npm install --omit=dev

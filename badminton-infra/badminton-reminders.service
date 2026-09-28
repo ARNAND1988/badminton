@@ -1,0 +1,9 @@
+[Unit]
+Description=Send due Nieuwegein Badminton reminders
+Requires=docker.service
+After=docker.service badminton-app.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/git-repo/badminton/badminton-infra
+ExecStart=/usr/bin/docker compose -f docker-compose.app.yml -f docker-compose.cloudflare.yml exec -T badminton-backend flask --app app:create_app run-booking-reminders

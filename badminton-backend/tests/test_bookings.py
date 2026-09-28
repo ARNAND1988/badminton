@@ -2,7 +2,7 @@ import jwt
 from datetime import datetime, timedelta, timezone
 
 from app import db
-from app.models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, MonthlyInvoiceStatus, PaymentInvoice, PaymentSettings, PlayAvailabilityVote, User, WhatsAppNotificationLog, WhatsAppNotificationSetting, WiseWebhookEvent
+from app.models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, MonthlyInvoiceStatus, PaymentInvoice, PaymentSettings, PlayAvailabilityVote, User, WhatsAppAccountLink, WhatsAppAvailabilityAudit, WhatsAppNotificationLog, WhatsAppNotificationPreference, WhatsAppNotificationSetting, WiseWebhookEvent
 
 
 def test_booking_availability_and_invoice(client, app):
@@ -2197,6 +2197,161 @@ def test_admin_can_save_test_whatsapp_number_and_send_direct_test(client, app, m
     assert payload['log']['recipient'] == '31612345678@c.us'
     assert sent[-1]['recipient'] == '31612345678@c.us'
     assert 'Sample court' in sent[-1]['message']
+
+
+def test_whatsapp_family_poll_uses_one_owner_vote_and_existing_people(client, app):
+    with app.app_context():
+        owner = User(phone='+31610000001', whatsapp_number='+31610000001', name='Anand', role='member')
+        spouse = User(phone='+31610000002', whatsapp_number='+31610000002', name='Priya', role='member')
+        db.session.add_all([owner, spouse])
+        db.session.flush()
+        db.session.add_all([
+            FamilyMember(user_id=owner.id, name='Priya', linked_user_id=spouse.id),
+            FamilyMember(user_id=owner.id, name='Aadhav'),
+            WhatsAppAccountLink(user_id=owner.id, whatsapp_number='+31610000001', is_primary=True),
+            WhatsAppAccountLink(user_id=spouse.id, whatsapp_number='+31610000002'),
+        ])
+        db.session.flush()
+        log = WhatsAppNotificationLog(
+            event_key='availability_poll', recipient='+31610000001', message='poll', status='sent',
+            response=f'native-message-id\nplay_date=2030-10-03\nfamily_owner_user_id={owner.id}',
+        )
+        db.session.add(log)
+        db.session.commit()
+        owner_id, spouse_id = owner.id, spouse.id
+
+    response = client.post('/api/whatsapp/poll-vote', json={
+        'poll_message_id': 'native-message-id',
+        'voter': '31610000002@c.us',
+        'selected_option': 'Anand, Aadhav',
+    })
+    assert response.status_code == 200
+    assert response.get_json()['family_size'] == 3
+    assert response.get_json()['actor_user_id'] == spouse_id
+
+    with app.app_context():
+        votes = PlayAvailabilityVote.query.filter_by(play_date='2030-10-03').all()
+        assert len(votes) == 1
+        assert votes[0].user_id == owner_id
+        assert votes[0].attendee_count == 2
+        assert [person['name'] for person in votes[0].to_dict()['attendee_details']] == ['Anand', 'Aadhav']
+        audit = WhatsAppAvailabilityAudit.query.one()
+        assert audit.family_owner_user_id == owner_id
+        assert audit.actor_user_id == spouse_id
+        assert audit.previous_attendee_count == 0
+        assert audit.attendee_count == 2
+
+
+def test_whatsapp_family_poll_rejects_count_above_existing_family_size(client, app):
+    with app.app_context():
+        member = User(phone='+31610000003', whatsapp_number='+31610000003', name='Solo', role='member')
+        db.session.add(member)
+        db.session.flush()
+        db.session.add(WhatsAppNotificationLog(
+            event_key='availability_poll', recipient='+31610000003', message='poll', status='sent',
+            response=f'poll-for-solo\nplay_date=2030-10-10\nfamily_owner_user_id={member.id}',
+        ))
+        db.session.commit()
+
+    response = client.post('/api/whatsapp/poll-vote', json={
+        'poll_message_id': 'poll-for-solo', 'voter': '+31610000003', 'selected_option': '2 players',
+    })
+    assert response.status_code == 400
+    assert response.get_json() == {'error': 'attendee_count_exceeds_family_size', 'maximum': 1}
+
+
+def test_admin_backfills_and_manages_whatsapp_family_details(client, app):
+    with app.app_context():
+        admin = User(phone='+31620000000', name='Admin', role='admin')
+        owner = User(phone='+31620000001', whatsapp_number='+31620000001', name='Owner', role='member')
+        spouse = User(phone='+31620000002', whatsapp_number='+31620000002', name='Spouse', role='member')
+        db.session.add_all([admin, owner, spouse])
+        db.session.flush()
+        db.session.add(FamilyMember(user_id=owner.id, name='Spouse', linked_user_id=spouse.id))
+        db.session.commit()
+        token = jwt.encode(
+            {'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)},
+            app.config['JWT_SECRET'], algorithm='HS256',
+        )
+        headers = {'Authorization': f'Bearer {token}'}
+        owner_id, spouse_id = owner.id, spouse.id
+
+    first = client.post('/api/admin/whatsapp-family-links/backfill', headers=headers)
+    assert first.status_code == 200
+    assert first.get_json()['created'] == 2
+    second = client.post('/api/admin/whatsapp-family-links/backfill', headers=headers)
+    assert second.status_code == 200
+    assert second.get_json()['created'] == 0
+    assert second.get_json()['updated'] == 2
+
+    update = client.put(f'/api/admin/users/{spouse_id}', headers=headers, json={
+        'whatsapp_number': '+31620000002',
+        'whatsapp_is_primary': True,
+        'whatsapp_notifications_enabled': False,
+        'whatsapp_delivery_mode': 'ALL_LINKED',
+    })
+    assert update.status_code == 200
+    assert update.get_json()['whatsapp_link']['is_primary'] is True
+    assert update.get_json()['whatsapp_link']['notifications_enabled'] is False
+    assert update.get_json()['whatsapp_delivery_mode'] == 'ALL_LINKED'
+
+    with app.app_context():
+        links = {link.user_id: link for link in WhatsAppAccountLink.query.all()}
+        assert links[owner_id].is_primary is False
+        assert links[spouse_id].is_primary is True
+        preference = WhatsAppNotificationPreference.query.one()
+        assert preference.family_owner_user_id == owner_id
+        assert preference.delivery_mode == 'ALL_LINKED'
+
+
+def test_admin_family_poll_sends_names_to_all_linked_numbers(client, app, monkeypatch):
+    sent = []
+    monkeypatch.setattr('app.bookings._send_whatsapp_bot_poll', lambda question, options, recipient=None: sent.append((question, options, recipient)) or ('sent', '{"messages":[{"id":"meta-1"}]}'))
+    with app.app_context():
+        admin = User(phone='+31630000000', name='Admin', role='admin')
+        owner = User(phone='+31630000001', whatsapp_number='+31630000001', name='Anand')
+        spouse = User(phone='+31630000002', whatsapp_number='+31630000002', name='Priya')
+        db.session.add_all([admin, owner, spouse])
+        db.session.flush()
+        db.session.add_all([
+            FamilyMember(user_id=owner.id, name='Priya', linked_user_id=spouse.id),
+            FamilyMember(user_id=owner.id, name='Aadhav'),
+            WhatsAppAccountLink(user_id=owner.id, whatsapp_number='+31630000001', is_primary=True),
+            WhatsAppAccountLink(user_id=spouse.id, whatsapp_number='+31630000002'),
+            WhatsAppNotificationPreference(family_owner_user_id=owner.id, delivery_mode='ALL_LINKED'),
+        ])
+        db.session.commit()
+        token = jwt.encode({'user_id': admin.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+
+    response = client.post('/api/admin/availability-polls/send', headers={'Authorization': f'Bearer {token}'}, json={
+        'dates': ['2030-10-03'], 'question_prefix': 'Who can play?', 'send_to_families': True,
+    })
+    assert response.status_code == 200
+    assert response.get_json()['sent'] == 2
+    assert {item[2] for item in sent} == {'+31630000001', '+31630000002'}
+    assert sent[0][1] == ['Nobody', 'Anand', 'Priya', 'Aadhav', 'Everyone']
+
+
+def test_member_can_generate_existing_payment_invoice_pdf(client, app):
+    with app.app_context():
+        member = User(phone='+31640000001', name='PDF Family')
+        db.session.add(member)
+        db.session.flush()
+        invoice = PaymentInvoice(
+            user_id=member.id, billing_name='PDF Family', month='2030-10', invoice_number='INV-PDF-1',
+            payment_reference='REF-PDF-1', amount_due=12.50, due_date='2030-11-14',
+            booking_items_json='[{"title":"3 October badminton","amount":12.5}]',
+        )
+        db.session.add(invoice)
+        db.session.commit()
+        token = jwt.encode({'user_id': member.id, 'exp': datetime.utcnow() + timedelta(hours=2)}, app.config['JWT_SECRET'], algorithm='HS256')
+        invoice_id = invoice.id
+
+    response = client.get(f'/api/payment-invoices/{invoice_id}/pdf', headers={'Authorization': f'Bearer {token}'})
+    assert response.status_code == 200
+    assert response.mimetype == 'application/pdf'
+    assert response.data.startswith(b'%PDF-1.4')
+    assert b'INV-PDF-1' in response.data
 
 
 def test_admin_can_run_whatsapp_connection_test_from_system_checks(client, app, monkeypatch):

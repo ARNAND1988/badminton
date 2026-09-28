@@ -7,7 +7,7 @@ import jwt
 from passlib.hash import pbkdf2_sha256
 
 from . import db
-from .models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, MonthlyInvoiceStatus, PlayAvailabilityVote, User, rounded_up_cost_split
+from .models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, MonthlyInvoiceStatus, PlayAvailabilityVote, User, WhatsAppAccountLink, WhatsAppAvailabilityAudit, WhatsAppNotificationPreference, rounded_up_cost_split
 
 bookings_bp = Blueprint('bookings', __name__)
 
@@ -265,6 +265,49 @@ def _family_group_users(user):
 def _family_owner_for_user(user):
     group = _family_group_users(user)
     return group[0] if group else user
+
+
+def _family_availability_people(user):
+    """Return real people in an existing family graph, without channel identities."""
+    owner = _family_owner_for_user(user)
+    people = []
+    seen_user_ids = set()
+    seen_member_ids = set()
+    for group_user in _family_group_users(owner):
+        if group_user.id not in seen_user_ids:
+            people.append({
+                'type': 'self' if group_user.id == owner.id else 'family',
+                'status': 'available',
+                'name': _public_user_label(group_user),
+                'phone': group_user.phone,
+                'linked_user_id': group_user.id,
+            })
+            seen_user_ids.add(group_user.id)
+        for member in group_user.family_members:
+            if member.linked_user_id in seen_user_ids or member.id in seen_member_ids:
+                continue
+            people.append({
+                'type': 'family',
+                'status': 'available',
+                'family_member_id': member.id,
+                'name': member.name,
+                'linked_user_id': member.linked_user_id,
+                'phone': member.linked_user.phone if member.linked_user else None,
+            })
+            seen_member_ids.add(member.id)
+            if member.linked_user_id:
+                seen_user_ids.add(member.linked_user_id)
+    return owner, people
+
+
+def _user_for_whatsapp_number(value):
+    digits = _whatsapp_voter_digits(value)
+    link = next((item for item in WhatsAppAccountLink.query.all()
+                 if _whatsapp_voter_digits(item.whatsapp_number) == digits), None)
+    if link:
+        return link.user
+    return next((candidate for candidate in User.query.filter(User.whatsapp_number.isnot(None)).all()
+                 if _whatsapp_voter_digits(candidate.whatsapp_number) == digits), None)
 
 
 def _payment_family_user_ids(user):
@@ -686,6 +729,12 @@ def _admin_user_payload(user):
         member.to_dict()
         for member in sorted(user.family_members, key=lambda item: item.created_at or datetime.min)
     ]
+    link = WhatsAppAccountLink.query.filter_by(user_id=user.id).first()
+    owner = _family_owner_for_user(user)
+    preference = WhatsAppNotificationPreference.query.filter_by(family_owner_user_id=owner.id).first()
+    payload['whatsapp_link'] = link.to_dict() if link else None
+    payload['whatsapp_family_owner_id'] = owner.id
+    payload['whatsapp_delivery_mode'] = preference.delivery_mode if preference else 'ALL_LINKED'
     return payload
 
 
@@ -2169,6 +2218,77 @@ def admin_users():
     return jsonify({'users': [_admin_user_payload(item) for item in users]})
 
 
+def _sync_whatsapp_account_link(user, *, is_primary=None, notifications_enabled=None):
+    number = (user.whatsapp_number or '').strip()
+    link = WhatsAppAccountLink.query.filter_by(user_id=user.id).first()
+    if not number:
+        if link:
+            db.session.delete(link)
+        return None
+    number_owner = WhatsAppAccountLink.query.filter(
+        WhatsAppAccountLink.whatsapp_number == number,
+        WhatsAppAccountLink.user_id != user.id,
+    ).first()
+    if number_owner:
+        raise ValueError('whatsapp_number_already_linked')
+    if not link:
+        link = WhatsAppAccountLink(user_id=user.id, whatsapp_number=number)
+        db.session.add(link)
+    link.whatsapp_number = number
+    if notifications_enabled is not None:
+        link.notifications_enabled = bool(notifications_enabled)
+    owner = _family_owner_for_user(user)
+    family_user_ids = [item.id for item in _family_group_users(owner)]
+    family_links = WhatsAppAccountLink.query.filter(WhatsAppAccountLink.user_id.in_(family_user_ids)).all()
+    should_be_primary = bool(is_primary) if is_primary is not None else not any(item.is_primary for item in family_links)
+    if should_be_primary:
+        for family_link in family_links:
+            family_link.is_primary = family_link.user_id == user.id
+        link.is_primary = True
+    return link
+
+
+def _sync_whatsapp_family_preference(user, delivery_mode=None):
+    owner = _family_owner_for_user(user)
+    preference = WhatsAppNotificationPreference.query.filter_by(family_owner_user_id=owner.id).first()
+    if not preference:
+        preference = WhatsAppNotificationPreference(family_owner_user_id=owner.id)
+        db.session.add(preference)
+    if delivery_mode is not None:
+        if delivery_mode not in {'PRIMARY_ONLY', 'ALL_LINKED'}:
+            raise ValueError('invalid_whatsapp_delivery_mode')
+        preference.delivery_mode = delivery_mode
+    return preference
+
+
+@bookings_bp.route('/admin/whatsapp-family-links/backfill', methods=['POST'])
+def backfill_whatsapp_family_links():
+    admin, error = _require_admin()
+    if error:
+        return error
+    created = 0
+    updated = 0
+    skipped = 0
+    errors = []
+    for target in User.query.order_by(User.id.asc()).all():
+        if not (target.whatsapp_number or '').strip():
+            skipped += 1
+            continue
+        existed = WhatsAppAccountLink.query.filter_by(user_id=target.id).first() is not None
+        try:
+            _sync_whatsapp_account_link(target)
+            _sync_whatsapp_family_preference(target)
+            updated += int(existed)
+            created += int(not existed)
+        except ValueError as exc:
+            errors.append({'user_id': target.id, 'error': str(exc)})
+    _record_admin_audit(admin, 'backfill', 'whatsapp_account_link', None, 'Backfilled WhatsApp family details', {
+        'created': created, 'updated': updated, 'skipped': skipped, 'errors': errors,
+    })
+    db.session.commit()
+    return jsonify({'created': created, 'updated': updated, 'skipped': skipped, 'errors': errors})
+
+
 @bookings_bp.route('/admin/users', methods=['POST'])
 def create_admin_user():
     admin, error = _require_admin()
@@ -2201,6 +2321,16 @@ def create_admin_user():
         )
         db.session.add(user)
         db.session.flush()
+        try:
+            _sync_whatsapp_account_link(
+                user,
+                is_primary=data.get('whatsapp_is_primary'),
+                notifications_enabled=data.get('whatsapp_notifications_enabled'),
+            )
+            _sync_whatsapp_family_preference(user, data.get('whatsapp_delivery_mode'))
+        except ValueError as exc:
+            db.session.rollback()
+            return jsonify({'error': str(exc)}), 409 if str(exc) == 'whatsapp_number_already_linked' else 400
         _record_admin_audit(admin, 'create', 'user', user.id, f'Created user {_public_user_label(user)}', {'user': _admin_user_payload(user)})
         db.session.commit()
     return jsonify(_admin_user_payload(user))
@@ -2257,6 +2387,20 @@ def update_admin_user(user_id):
         target_user.password_hash = pbkdf2_sha256.hash(password)
         password_changed = True
 
+    try:
+        _sync_whatsapp_account_link(
+            target_user,
+            is_primary=data.get('whatsapp_is_primary') if 'whatsapp_is_primary' in data else None,
+            notifications_enabled=data.get('whatsapp_notifications_enabled') if 'whatsapp_notifications_enabled' in data else None,
+        )
+        _sync_whatsapp_family_preference(
+            target_user,
+            data.get('whatsapp_delivery_mode') if 'whatsapp_delivery_mode' in data else None,
+        )
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 409 if str(exc) == 'whatsapp_number_already_linked' else 400
+
     after = _snapshot_fields(target_user, ['email', 'phone', 'name', 'whatsapp_number', 'role', 'is_club_member'])
     changes = _changed_fields(before, after)
     if password_changed:
@@ -2286,6 +2430,8 @@ def delete_admin_user(user_id):
         {PlayAvailabilityVote.user_id: None},
         synchronize_session=False
     )
+    WhatsAppAccountLink.query.filter_by(user_id=target_user.id).delete()
+    WhatsAppNotificationPreference.query.filter_by(family_owner_user_id=target_user.id).delete()
     db.session.delete(target_user)
     db.session.commit()
 
@@ -2932,6 +3078,15 @@ AVAILABILITY_POLL_OPTIONS = [
 ]
 
 
+def _availability_poll_options(family_people):
+    names = []
+    for person in family_people:
+        name = (person.get('name') or '').strip()
+        if name and name.casefold() not in {item.casefold() for item in names}:
+            names.append(name)
+    return ['Nobody', *names, 'Everyone']
+
+
 @bookings_bp.route('/admin/availability-polls/send', methods=['POST'])
 def send_availability_polls():
     from .models import WhatsAppNotificationLog
@@ -2957,13 +3112,72 @@ def send_availability_polls():
     if not question_prefix:
         return jsonify({'error': 'question prefix required'}), 400
     setting = _whatsapp_setting('availability_summary')
+    if bool(data.get('send_to_families')) and not bool(data.get('test')):
+        from .models import WhatsAppNotificationLog
+        owners = {}
+        for link in WhatsAppAccountLink.query.filter_by(notifications_enabled=True).all():
+            owner = _family_owner_for_user(link.user)
+            owners[owner.id] = owner
+        logs = []
+        for owner in owners.values():
+            _, people = _family_availability_people(owner)
+            options = _availability_poll_options(people)
+            links = [link for link in WhatsAppAccountLink.query.all()
+                     if _family_owner_for_user(link.user).id == owner.id and link.notifications_enabled]
+            preference = WhatsAppNotificationPreference.query.filter_by(family_owner_user_id=owner.id).first()
+            if (preference.delivery_mode if preference else 'ALL_LINKED') == 'ALL_LINKED':
+                family_recipients = [link.whatsapp_number for link in links]
+            else:
+                primary = next((link for link in links if link.is_primary), None)
+                family_recipients = [(primary or (links[0] if links else None)).whatsapp_number] if (primary or links) else []
+            for date_value, parsed in parsed_dates:
+                question = f'{question_prefix} — {parsed.strftime("%A, %d %B %Y")}\nReply with one or more names separated by commas.'
+                for family_recipient in family_recipients:
+                    status, response_text = _send_whatsapp_bot_poll(question, options, family_recipient)
+                    log = WhatsAppNotificationLog(
+                        setting_id=setting.id if setting else None,
+                        event_key='availability_poll', recipient=family_recipient,
+                        message=f"{question}\n" + '\n'.join(options), status=status,
+                        response=f'{response_text}\nplay_date={date_value}\nfamily_owner_user_id={owner.id}',
+                    )
+                    db.session.add(log)
+                    logs.append(log)
+        db.session.commit()
+        _record_admin_audit(user, 'send', 'whatsapp_notification', None, f'Sent {len(logs)} family availability poll(s)', {
+            'dates': [item[0] for item in parsed_dates], 'families': len(owners),
+        })
+        return jsonify({'sent': sum(log.status == 'sent' for log in logs), 'families': len(owners), 'polls': [log.to_dict() for log in logs]})
+    target_user = None
+    if data.get('family_user_id') is not None:
+        target_user = db.session.get(User, data.get('family_user_id'))
+        if not target_user:
+            return jsonify({'error': 'family_user_not_found'}), 404
+        target_user, family_people = _family_availability_people(target_user)
+        poll_options = _availability_poll_options(family_people)
+    else:
+        poll_options = AVAILABILITY_POLL_OPTIONS
     send_test = bool(data.get('test'))
     if send_test:
         recipient = _normalize_whatsapp_test_recipient(data.get('recipient') or (setting.test_recipient_number if setting else None))
         if not recipient:
             return jsonify({'error': 'test recipient required'}), 400
+    elif target_user:
+        family_links = [link for link in WhatsAppAccountLink.query.all()
+                        if _family_owner_for_user(link.user).id == target_user.id and link.notifications_enabled]
+        preference = WhatsAppNotificationPreference.query.filter_by(family_owner_user_id=target_user.id).first()
+        if (preference.delivery_mode if preference else 'ALL_LINKED') == 'ALL_LINKED':
+            recipients = [link.whatsapp_number for link in family_links]
+        else:
+            primary = next((link for link in family_links if link.is_primary), None)
+            recipients = [(primary or (family_links[0] if family_links else None)).whatsapp_number] if (primary or family_links) else []
+        if not recipients and target_user.whatsapp_number:
+            recipients = [target_user.whatsapp_number]
+        recipient = recipients[0] if recipients else None
     else:
         recipient = (setting.group_id or '').strip() or _fallback_whatsapp_group_id('availability_summary') if setting else _fallback_whatsapp_group_id()
+        recipients = [recipient] if recipient else []
+    if send_test:
+        recipients = [recipient]
     if not recipient:
         return jsonify({'error': 'WhatsApp group recipient is not configured'}), 400
 
@@ -2971,24 +3185,25 @@ def send_availability_polls():
     for date_value, parsed in parsed_dates:
         date_label = parsed.strftime('%A, %d %B %Y')
         question = f'{question_prefix} — {date_label}'
-        status, response_text = _send_whatsapp_bot_poll(question, AVAILABILITY_POLL_OPTIONS, recipient)
-        log = WhatsAppNotificationLog(
-            setting_id=setting.id if setting else None,
-            event_key='availability_poll',
-            recipient=recipient,
-            message=f"{question}\n" + '\n'.join(AVAILABILITY_POLL_OPTIONS),
-            status=status,
-            response=f'{response_text}\nplay_date={date_value}',
-        )
-        db.session.add(log)
-        logs.append(log)
+        for target_recipient in recipients:
+            status, response_text = _send_whatsapp_bot_poll(question, poll_options, target_recipient)
+            log = WhatsAppNotificationLog(
+                setting_id=setting.id if setting else None,
+                event_key='availability_poll',
+                recipient=target_recipient,
+                message=f"{question}\n" + '\n'.join(poll_options),
+                status=status,
+                response=f'{response_text}\nplay_date={date_value}' + (f'\nfamily_owner_user_id={target_user.id}' if target_user else ''),
+            )
+            db.session.add(log)
+            logs.append(log)
     db.session.commit()
     audit_label = 'test availability poll(s)' if send_test else 'availability poll(s)'
     _record_admin_audit(user, 'send', 'whatsapp_notification', None, f'Sent {len(logs)} {audit_label}', {'dates': [item[0] for item in parsed_dates], 'recipient': recipient, 'test': send_test, 'statuses': [log.status for log in logs]})
     return jsonify({
         'sent': sum(log.status == 'sent' for log in logs),
         'polls': [log.to_dict() for log in logs],
-        'options': AVAILABILITY_POLL_OPTIONS,
+        'options': poll_options,
         'test': send_test,
         'recipient': recipient,
     })
@@ -3026,39 +3241,89 @@ def receive_whatsapp_poll_vote():
     if not date_match:
         return jsonify({'error': 'availability_poll_date_not_found'}), 409
 
-    voter_digits = _whatsapp_voter_digits(voter)
-    user = next((candidate for candidate in User.query.filter(User.whatsapp_number.isnot(None)).all()
-                 if _whatsapp_voter_digits(candidate.whatsapp_number) == voter_digits), None)
+    user = _user_for_whatsapp_number(voter)
     if not user:
         return jsonify({'error': 'whatsapp_member_not_found', 'voter': voter}), 404
 
-    option_map = {
+    owner, family_people = _family_availability_people(user)
+    intended_owner_match = re.search(r'family_owner_user_id=(\d+)', log.response or '')
+    if intended_owner_match and int(intended_owner_match.group(1)) != owner.id:
+        return jsonify({'error': 'poll_not_for_family'}), 403
+
+    legacy_options = {
         '1 person available': ('available', 1),
         '2 persons available': ('available', 2),
         'Tentatively available': ('tentative', 1),
         'Not available': ('not_available', 0),
         '': ('not_available', 0),
     }
-    if selected_option not in option_map:
-        return jsonify({'error': 'unknown_poll_option'}), 400
-    status, attendee_count = option_map[selected_option]
+    count_match = re.match(r'^(\d+)\s+(?:player|players|person|persons|people)$', selected_option, re.IGNORECASE)
+    selected_people = None
+    if selected_option in legacy_options:
+        status, attendee_count = legacy_options[selected_option]
+    elif count_match:
+        attendee_count = int(count_match.group(1))
+        status = 'available' if attendee_count else 'not_available'
+    elif selected_option.casefold() == 'nobody':
+        status, attendee_count, selected_people = 'not_available', 0, []
+    elif selected_option.casefold() == 'everyone':
+        status, attendee_count, selected_people = 'available', len(family_people), family_people
+    else:
+        requested_names = {
+            item.strip().casefold()
+            for item in re.split(r'\s*(?:,|&|\band\b|\+)\s*', selected_option, flags=re.IGNORECASE)
+            if item.strip()
+        }
+        selected_people = [person for person in family_people if (person.get('name') or '').strip().casefold() in requested_names]
+        if not selected_people or len(selected_people) != len(requested_names):
+            return jsonify({'error': 'unknown_participant_name'}), 400
+        status, attendee_count = 'available', len(selected_people)
+    # Newly issued family polls carry an owner marker and are bounded by the
+    # real roster. Keep accepting historical group polls, whose former two-
+    # person option represented the member plus an unnamed guest.
+    if intended_owner_match and attendee_count > len(family_people):
+        return jsonify({'error': 'attendee_count_exceeds_family_size', 'maximum': len(family_people)}), 400
+
     play_date = date_match.group(1)
-    vote = PlayAvailabilityVote.query.filter_by(user_id=user.id, play_date=play_date).first()
+    vote = PlayAvailabilityVote.query.filter_by(user_id=owner.id, play_date=play_date).first()
     if not vote:
-        vote = PlayAvailabilityVote(user_id=user.id, play_date=play_date)
+        vote = PlayAvailabilityVote(user_id=owner.id, play_date=play_date)
         db.session.add(vote)
-    attendees = []
-    if attendee_count:
-        attendees.append({'type': 'self', 'name': _public_user_label(user), 'phone': user.whatsapp_number, 'status': status})
-    if attendee_count == 2:
-        attendees.append({'type': 'guest', 'name': f'{_public_user_label(user)} guest', 'status': status})
+    previous_attendee_count = int(vote.attendee_count or 0)
+    attendees = [{**person, 'status': status} for person in (selected_people if selected_people is not None else family_people[:attendee_count])]
+    while len(attendees) < attendee_count:
+        guest_number = len(attendees)
+        attendees.append({
+            'type': 'guest', 'status': status,
+            'name': f'{_public_user_label(user)} guest' + (f' {guest_number}' if guest_number > 1 else ''),
+        })
     vote.status = status
     vote.available = status == 'available'
     vote.attendee_count = attendee_count if vote.available else 0
     vote.attendee_details = json.dumps(attendees) if attendees else None
     vote.notes = 'Updated from WhatsApp availability poll'
+    family_user_ids = [member.id for member in _family_group_users(owner) if member.id != owner.id]
+    if family_user_ids:
+        PlayAvailabilityVote.query.filter(
+            PlayAvailabilityVote.user_id.in_(family_user_ids),
+            PlayAvailabilityVote.play_date == play_date,
+        ).delete(synchronize_session=False)
+    db.session.add(WhatsAppAvailabilityAudit(
+        family_owner_user_id=owner.id,
+        actor_user_id=user.id,
+        play_date=play_date,
+        previous_attendee_count=previous_attendee_count,
+        attendee_count=vote.attendee_count,
+    ))
     db.session.commit()
-    return jsonify({'updated': True, 'play_date': play_date, 'vote': vote.to_dict()})
+    return jsonify({
+        'updated': True,
+        'play_date': play_date,
+        'family_owner_user_id': owner.id,
+        'actor_user_id': user.id,
+        'family_size': len(family_people),
+        'vote': vote.to_dict(),
+    })
 
 
 @bookings_bp.route('/admin/audit-logs', methods=['GET'])
@@ -4474,6 +4739,65 @@ def get_payment_invoice(invoice_id):
     payload = invoice.to_dict()
     payload['audit_logs'] = [log.to_dict() for log in sorted(invoice.audit_logs, key=lambda x: x.created_at or datetime.min)]
     return jsonify(payload)
+
+
+@bookings_bp.route('/payment-invoices/<int:invoice_id>/pdf', methods=['GET'])
+def download_payment_invoice_pdf(invoice_id):
+    from io import BytesIO
+    from flask import send_file
+
+    user, error = _require_login()
+    if error:
+        return error
+    invoice = PaymentInvoice.query.get_or_404(invoice_id)
+    if not _user_can_view_payment_invoice(user, invoice):
+        return jsonify({'error': 'forbidden'}), 403
+
+    payload = invoice.to_dict(include_qr=False)
+    lines = [
+        'Nieuwegein Badminton', f'Invoice {invoice.invoice_number}', f'Month: {invoice.month or "-"}',
+        f'Family: {invoice.billing_name or (invoice.user.name if invoice.user else "Member")}',
+        f'Payment reference: {invoice.payment_reference}', f'Due date: {invoice.due_date or "-"}', '',
+    ]
+    for item in [*(payload.get('booking_items') or []), *(payload.get('misc_items') or [])]:
+        label = str(item.get('title') or item.get('description') or item.get('date') or 'Badminton').replace('\n', ' ')[:78]
+        amount = float(item.get('amount') or item.get('cost') or item.get('total') or 0)
+        lines.append(f'{label}    EUR {amount:.2f}')
+    lines.extend(['', f'Total: EUR {float(invoice.amount_due or 0):.2f}'])
+    if invoice.payment_url:
+        lines.append(f'Payment link: {invoice.payment_url}'[:110])
+    if invoice.iban:
+        lines.append(f'IBAN: {invoice.iban}  Account: {invoice.bank_account_holder or "Nieuwegein Badminton"}')
+
+    def pdf_escape(value):
+        return str(value).encode('latin-1', 'replace').decode('latin-1').replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+    content_lines = ['BT', '/F1 11 Tf', '48 790 Td', '14 TL']
+    for index, line in enumerate(lines):
+        if index:
+            content_lines.append('T*')
+        content_lines.append(f'({pdf_escape(line)}) Tj')
+    content_lines.append('ET')
+    stream = '\n'.join(content_lines).encode('latin-1')
+    objects = [
+        b'<< /Type /Catalog /Pages 2 0 R >>',
+        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+        b'<< /Length ' + str(len(stream)).encode() + b' >>\nstream\n' + stream + b'\nendstream',
+        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ]
+    document = bytearray(b'%PDF-1.4\n')
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(document))
+        document.extend(f'{number} 0 obj\n'.encode() + obj + b'\nendobj\n')
+    xref = len(document)
+    document.extend(f'xref\n0 {len(objects) + 1}\n0000000000 65535 f \n'.encode())
+    for offset in offsets[1:]:
+        document.extend(f'{offset:010d} 00000 n \n'.encode())
+    document.extend(f'trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF'.encode())
+    output = BytesIO(bytes(document))
+    return send_file(output, mimetype='application/pdf', as_attachment=True, download_name=f'{invoice.invoice_number}.pdf')
 
 
 @bookings_bp.route('/admin/payment-invoices', methods=['GET'])

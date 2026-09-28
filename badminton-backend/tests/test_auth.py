@@ -1,6 +1,7 @@
 import json
 
 from app import create_app, db
+from app.models import FamilyMember, User
 
 
 def test_send_otp_mock(client):
@@ -91,6 +92,47 @@ def test_register_without_whatsapp(client):
 def test_dummy_member_login_credentials_are_not_seeded(client):
     resp = client.post('/api/auth/login', json={'username': 'user', 'password': 'user123'})
     assert resp.status_code == 401
+
+
+def test_startup_revokes_legacy_demo_login_without_deleting_related_data(monkeypatch, tmp_path):
+    database_path = tmp_path / 'legacy.sqlite'
+    monkeypatch.setenv('DATABASE_URL', f'sqlite:///{database_path}')
+    monkeypatch.setenv('FLASK_ENV', 'development')
+
+    first_app = create_app()
+    with first_app.app_context():
+        legacy_user = User(
+            phone='+10000000000',
+            email='admin@example.com',
+            name='Demo Admin',
+            role='admin',
+            password_hash='legacy-demo-password-hash',
+        )
+        db.session.add(legacy_user)
+        db.session.flush()
+        db.session.add(FamilyMember(user_id=legacy_user.id, name='Demo Child'))
+        db.session.commit()
+        legacy_user_id = legacy_user.id
+        db.session.remove()
+
+    # A restart used to fail while trying to delete the legacy user because
+    # family_members.user_id is non-nullable.
+    restarted_app = create_app()
+    restarted_app.config.update(TESTING=True)
+    with restarted_app.test_client() as restarted_client:
+        login_response = restarted_client.post('/api/auth/login', json={
+            'username': 'admin',
+            'password': 'admin123',
+        })
+
+    assert login_response.status_code == 401
+    with restarted_app.app_context():
+        legacy_user = db.session.get(User, legacy_user_id)
+        assert legacy_user is not None
+        assert legacy_user.password_hash is None
+        assert legacy_user.role == 'member'
+        assert FamilyMember.query.filter_by(user_id=legacy_user_id, name='Demo Child').one()
+        db.session.remove()
 
 
 def test_anand_parasuraman_is_seeded_as_super_admin(client):

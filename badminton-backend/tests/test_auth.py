@@ -1,5 +1,7 @@
 import json
 
+from passlib.hash import pbkdf2_sha256
+
 from app import create_app, db
 from app.models import FamilyMember, User
 
@@ -192,6 +194,39 @@ def test_production_super_admin_password_can_be_configured(monkeypatch):
     with production_app.app_context():
         db.session.remove()
         db.drop_all()
+
+
+def test_startup_repairs_unsupported_seeded_admin_hash_instead_of_login_500(monkeypatch, tmp_path):
+    """Regression: a legacy placeholder hash previously caused 'Error logging in.'."""
+    database_path = tmp_path / 'legacy-admin.sqlite'
+    monkeypatch.setenv('DATABASE_URL', f'sqlite:///{database_path}')
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.setenv('AUTH_MOCK', '0')
+    monkeypatch.delenv('ANAND_SUPER_ADMIN_PASSWORD', raising=False)
+
+    first_app = create_app()
+    with first_app.app_context():
+        admin = User.query.filter_by(email='arnand0413@gmail.com').one()
+        admin.password_hash = 'legacy-placeholder-that-passlib-cannot-parse'
+        db.session.commit()
+        db.session.remove()
+
+    monkeypatch.setenv('ANAND_SUPER_ADMIN_PASSWORD', 'deployment-secret')
+    restarted_app = create_app()
+    restarted_app.config.update(TESTING=True)
+    with restarted_app.test_client() as restarted_client:
+        response = restarted_client.post('/api/auth/login', json={
+            'username': 'arnand0413@gmail.com',
+            'password': 'deployment-secret',
+        })
+
+    assert response.status_code == 200
+    assert response.is_json
+    assert response.get_json()['user']['role'] == 'super_admin'
+    with restarted_app.app_context():
+        repaired = User.query.filter_by(email='arnand0413@gmail.com').one()
+        assert pbkdf2_sha256.verify('deployment-secret', repaired.password_hash)
+        db.session.remove()
 
 
 def test_reset_password_with_linked_whatsapp(client):

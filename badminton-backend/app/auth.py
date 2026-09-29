@@ -43,6 +43,17 @@ def _validate_email(email):
     return bool(re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email or ''))
 
 
+def _password_matches(password, password_hash):
+    """Treat corrupt/legacy password data as invalid credentials, not a 500."""
+    if not password_hash:
+        return False
+    try:
+        return pbkdf2_sha256.verify(password, password_hash)
+    except (TypeError, ValueError):
+        current_app.logger.warning('Ignoring an unsupported password hash during login')
+        return False
+
+
 def _issue_token(user):
     jwt_secret = current_app.config.get('JWT_SECRET')
     exp_seconds = int(current_app.config.get('JWT_EXP_SECONDS', 3600))
@@ -204,7 +215,7 @@ def login():
     password = data.get('password') or ''
 
     user = _find_login_user(username)
-    if user and user.password_hash and pbkdf2_sha256.verify(password, user.password_hash):
+    if user and _password_matches(password, user.password_hash):
         return _issue_token(user)
 
     return jsonify({'error': 'invalid_credentials'}), 401

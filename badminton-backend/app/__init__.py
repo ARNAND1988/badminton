@@ -150,7 +150,14 @@ def create_app():
             user.is_club_member = is_club_member
             if not user.whatsapp_number and phone and not phone.startswith('email:'):
                 user.whatsapp_number = phone
-            if password and (not user.password_hash or os.environ.get('RESET_SEEDED_PASSWORDS', '').lower() in ('1', 'true', 'yes')):
+            reset_password = os.environ.get('RESET_SEEDED_PASSWORDS', '').lower() in ('1', 'true', 'yes')
+            # Some early deployments stored placeholder/plain-text values in
+            # this column. Leaving one on the seeded administrator made
+            # passlib raise during /login, which the browser surfaced only as
+            # "Error logging in." Repair only an unsupported seeded hash; do
+            # not overwrite a valid user-selected password by default.
+            unsupported_hash = bool(user.password_hash and not pbkdf2_sha256.identify(user.password_hash))
+            if password and (not user.password_hash or unsupported_hash or reset_password):
                 user.password_hash = pbkdf2_sha256.hash(password)
             return user
         inspector = inspect(db.engine)

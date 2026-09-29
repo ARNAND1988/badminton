@@ -27,7 +27,10 @@ def _find_login_user(identifier):
     if not identifier:
         return None
     normalized = identifier.lower()
-    user = User.query.filter_by(email=normalized).first()
+    # Legacy/imported accounts were not always stored with a normalized email.
+    # Login and password reset must use the same case-insensitive lookup so a
+    # user cannot request a reset code and then fail to resolve the account.
+    user = User.query.filter(func.lower(User.email) == normalized).first()
     if user:
         return user
     user = User.query.filter(func.lower(User.name) == normalized).first()

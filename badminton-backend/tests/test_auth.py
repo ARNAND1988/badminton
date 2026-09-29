@@ -264,6 +264,51 @@ def test_reset_password_with_linked_whatsapp(client):
     assert new_login.status_code == 200
 
 
+def test_production_password_reset_delivery_and_login(monkeypatch):
+    """Exercise the production reset path, including the configured admin phone."""
+    monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.setenv('AUTH_MOCK', '0')
+    monkeypatch.setenv('ANAND_SUPER_ADMIN_PASSWORD', 'old-deployment-secret')
+    monkeypatch.setenv('ANAND_SUPER_ADMIN_PHONE', '+31612345678')
+
+    production_app = create_app()
+    production_app.config.update(TESTING=True)
+    delivered = {}
+
+    def capture_reset_code(recipient, message):
+        delivered['recipient'] = recipient
+        delivered['otp'] = message.split(' code is ', 1)[1].split('.', 1)[0]
+        return {'status': 'sent'}
+
+    monkeypatch.setattr('app.auth.send_whatsapp_message', capture_reset_code)
+    with production_app.test_client() as production_client:
+        request_response = production_client.post('/api/auth/forgot-password', json={
+            'identifier': 'ARNAND0413@GMAIL.COM',
+        })
+        assert request_response.status_code == 200
+        assert request_response.get_json() == {'status': 'reset_code_sent'}
+        assert delivered['recipient'] == '+31612345678'
+
+        reset_response = production_client.post('/api/auth/reset-password', json={
+            'identifier': 'ARNAND0413@GMAIL.COM',
+            'otp': delivered['otp'],
+            'password': 'new-deployment-secret',
+        })
+        assert reset_response.status_code == 200
+
+        login_response = production_client.post('/api/auth/login', json={
+            'username': 'ARNAND0413@GMAIL.COM',
+            'password': 'new-deployment-secret',
+        })
+        assert login_response.status_code == 200
+        assert login_response.get_json()['user']['role'] == 'super_admin'
+
+    with production_app.app_context():
+        db.session.remove()
+        db.drop_all()
+
+
 def test_forgot_password_does_not_reveal_account_or_whatsapp_status(client):
     no_account = client.post('/api/auth/forgot-password', json={'identifier': 'missing@example.com'})
     assert no_account.status_code == 200

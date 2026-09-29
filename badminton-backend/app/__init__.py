@@ -148,7 +148,11 @@ def create_app():
             user.name = name
             user.role = role
             user.is_club_member = is_club_member
-            if not user.whatsapp_number and phone and not phone.startswith('email:'):
+            # This is the deployment-owned seeded administrator. Honour an
+            # explicitly configured phone on every startup, including for an
+            # existing row with a stale number; otherwise reset codes continue
+            # going to the old recipient even after the operator fixes .env.
+            if phone and not phone.startswith('email:'):
                 user.whatsapp_number = phone
             reset_password = os.environ.get('RESET_SEEDED_PASSWORDS', '').lower() in ('1', 'true', 'yes')
             # Some early deployments stored placeholder/plain-text values in

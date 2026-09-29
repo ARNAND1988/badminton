@@ -44,6 +44,11 @@ services:
       # A fresh production database otherwise creates the required super-admin
       # without a password, leaving no account that can configure the app.
       ANAND_SUPER_ADMIN_PASSWORD: ${ANAND_SUPER_ADMIN_PASSWORD:-admin123}
+      # Set to true for one deployment only when recovering an existing admin
+      # whose valid but unknown password predates ANAND_SUPER_ADMIN_PASSWORD.
+      RESET_SEEDED_PASSWORDS: ${RESET_SEEDED_PASSWORDS:-false}
+      # Required for the super-admin "Forgot password" WhatsApp journey.
+      ANAND_SUPER_ADMIN_PHONE: ${ANAND_SUPER_ADMIN_PHONE:-email:arnand0413@gmail.com}
       WHATSAPP_BOT_URL: http://whatsapp-bot:3000
       WHATSAPP_BOT_TOKEN: ${WHATSAPP_BOT_TOKEN:-dev-whatsapp-bot-token}
     depends_on:

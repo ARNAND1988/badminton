@@ -31,6 +31,28 @@ def test_critical_member_login_participation_persistence_and_logout_boundary(cli
     assert client.get('/api/invoices/monthly', headers=_auth(token)).status_code == 200
     assert client.get('/api/auth/me').status_code == 401
 
+def test_critical_password_reset_then_login_journey(client):
+    registration = client.post('/api/auth/register', json={
+        'email': 'reset.journey@example.test', 'password': 'old-password',
+        'name': 'Reset Journey', 'whatsapp_number': '+3197000000002',
+    })
+    assert registration.status_code == 201
+    requested = client.post('/api/auth/forgot-password', json={
+        'identifier': 'RESET.JOURNEY@EXAMPLE.TEST',
+    })
+    assert requested.status_code == 200
+    reset = client.post('/api/auth/reset-password', json={
+        'identifier': 'RESET.JOURNEY@EXAMPLE.TEST',
+        'otp': requested.get_json()['mock_otp'],
+        'password': 'new-password',
+    })
+    assert reset.status_code == 200
+    assert client.post('/api/auth/login', json={
+        'username': 'reset.journey@example.test', 'password': 'old-password',
+    }).status_code == 401
+    token = _login(client, 'RESET.JOURNEY@EXAMPLE.TEST', 'new-password')
+    assert client.get('/api/auth/me', headers=_auth(token)).status_code == 200
+
 def test_critical_admin_dashboard_resources_and_authorization(client):
     admin_token = _login(client, 'arnand0413@gmail.com')
     for path in ('/api/admin/users', '/api/admin/courts', '/api/admin/invoices/monthly'):

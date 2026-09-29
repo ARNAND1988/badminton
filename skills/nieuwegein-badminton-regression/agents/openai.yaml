@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nieuwegein Badminton Regression"
+  short_description: "Run the application regression quality gate."
+  default_prompt: "Use $nieuwegein-badminton-regression in full mode before completing this feature."

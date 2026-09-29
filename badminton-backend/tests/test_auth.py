@@ -1,6 +1,9 @@
 import json
+import threading
 
 from passlib.hash import pbkdf2_sha256
+from flask import Flask, jsonify, request
+from werkzeug.serving import make_server
 
 from app import create_app, db
 from app.models import FamilyMember, User
@@ -265,48 +268,87 @@ def test_reset_password_with_linked_whatsapp(client):
 
 
 def test_production_password_reset_delivery_and_login(monkeypatch):
-    """Exercise the production reset path, including the configured admin phone."""
+    """Exercise reset delivery over HTTP, password update, and the next login."""
     monkeypatch.setenv('DATABASE_URL', 'sqlite:///:memory:')
     monkeypatch.setenv('FLASK_ENV', 'production')
     monkeypatch.setenv('AUTH_MOCK', '0')
     monkeypatch.setenv('ANAND_SUPER_ADMIN_PASSWORD', 'old-deployment-secret')
     monkeypatch.setenv('ANAND_SUPER_ADMIN_PHONE', '+31612345678')
 
+    # Run a real local HTTP endpoint with the same contract as whatsapp-bot.
+    # This deliberately does not monkeypatch send_whatsapp_message: the test
+    # must cover URL construction, authentication, serialization and recipient
+    # normalization in addition to the auth routes themselves.
+    delivered = {}
+    provider = Flask('password-reset-provider')
+
+    @provider.post('/send')
+    def send_message():
+        delivered['token'] = request.headers.get('X-Bot-Token')
+        delivered.update(request.get_json())
+        return jsonify({'messages': [{'id': 'test-message-id'}]})
+
+    server = make_server('127.0.0.1', 0, provider)
+    provider_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    provider_thread.start()
+    monkeypatch.setenv('WHATSAPP_BOT_URL', f'http://127.0.0.1:{server.server_port}')
+    monkeypatch.setenv('WHATSAPP_BOT_TOKEN', 'integration-bot-secret')
+
     production_app = create_app()
     production_app.config.update(TESTING=True)
-    delivered = {}
+    try:
+        with production_app.test_client() as production_client:
+            request_response = production_client.post('/api/auth/forgot-password', json={
+                'identifier': 'ARNAND0413@GMAIL.COM',
+            })
+            assert request_response.status_code == 200
+            assert request_response.get_json() == {'status': 'reset_code_sent'}
+            assert delivered['recipient'] == '31612345678@c.us'
+            assert delivered['token'] == 'integration-bot-secret'
+            otp = delivered['message'].split(' code is ', 1)[1].split('.', 1)[0]
 
-    def capture_reset_code(recipient, message):
-        delivered['recipient'] = recipient
-        delivered['otp'] = message.split(' code is ', 1)[1].split('.', 1)[0]
-        return {'status': 'sent'}
+            reset_response = production_client.post('/api/auth/reset-password', json={
+                'identifier': 'ARNAND0413@GMAIL.COM',
+                'otp': otp,
+                'password': 'new-deployment-secret',
+            })
+            assert reset_response.status_code == 200
 
-    monkeypatch.setattr('app.auth.send_whatsapp_message', capture_reset_code)
-    with production_app.test_client() as production_client:
-        request_response = production_client.post('/api/auth/forgot-password', json={
-            'identifier': 'ARNAND0413@GMAIL.COM',
-        })
-        assert request_response.status_code == 200
-        assert request_response.get_json() == {'status': 'reset_code_sent'}
-        assert delivered['recipient'] == '+31612345678'
+            login_response = production_client.post('/api/auth/login', json={
+                'username': 'ARNAND0413@GMAIL.COM',
+                'password': 'new-deployment-secret',
+            })
+            assert login_response.status_code == 200
+            assert login_response.get_json()['user']['role'] == 'super_admin'
+    finally:
+        server.shutdown()
+        provider_thread.join(timeout=5)
+        with production_app.app_context():
+            db.session.remove()
+            db.drop_all()
 
-        reset_response = production_client.post('/api/auth/reset-password', json={
-            'identifier': 'ARNAND0413@GMAIL.COM',
-            'otp': delivered['otp'],
-            'password': 'new-deployment-secret',
-        })
-        assert reset_response.status_code == 200
 
-        login_response = production_client.post('/api/auth/login', json={
-            'username': 'ARNAND0413@GMAIL.COM',
-            'password': 'new-deployment-secret',
-        })
-        assert login_response.status_code == 200
-        assert login_response.get_json()['user']['role'] == 'super_admin'
+def test_configured_admin_phone_repairs_existing_reset_recipient(monkeypatch, tmp_path):
+    database_path = tmp_path / 'admin-phone.sqlite'
+    monkeypatch.setenv('DATABASE_URL', f'sqlite:///{database_path}')
+    monkeypatch.setenv('FLASK_ENV', 'production')
+    monkeypatch.setenv('AUTH_MOCK', '0')
+    monkeypatch.setenv('ANAND_SUPER_ADMIN_PASSWORD', 'deployment-secret')
+    monkeypatch.setenv('ANAND_SUPER_ADMIN_PHONE', '+31600000000')
 
-    with production_app.app_context():
+    first_app = create_app()
+    with first_app.app_context():
+        admin = User.query.filter_by(email='arnand0413@gmail.com').one()
+        admin.whatsapp_number = '+31699999999'
+        db.session.commit()
         db.session.remove()
-        db.drop_all()
+
+    monkeypatch.setenv('ANAND_SUPER_ADMIN_PHONE', '+31612345678')
+    restarted_app = create_app()
+    with restarted_app.app_context():
+        admin = User.query.filter_by(email='arnand0413@gmail.com').one()
+        assert admin.whatsapp_number == '+31612345678'
+        db.session.remove()
 
 
 def test_forgot_password_does_not_reveal_account_or_whatsapp_status(client):

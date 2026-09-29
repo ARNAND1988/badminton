@@ -68,6 +68,7 @@ def main():
     if mode == 'fast' and areas <= {'Authentication', 'Admin', 'Frontend', 'Mobile', 'Build'}:
         target += ['tests/test_auth.py', 'tests/test_regression_journeys.py']
     checks = [
+        Check('Merge conflict verification', ('Build',), ['python', 'scripts/conflict_marker_smoke.py']),
         Check('Python compile/type smoke', ('Build',), ['python', '-m', 'compileall', '-q', 'app', 'tests'], ROOT/'badminton-backend'),
         Check('Backend/API regression', tuple(areas), target, ROOT/'badminton-backend'),
         Check('Frontend responsive smoke', ('Frontend', 'Mobile'), ['python', 'scripts/responsive_smoke.py']),

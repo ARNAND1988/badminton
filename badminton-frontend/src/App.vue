@@ -2,7 +2,7 @@
   <div class="badminton-shell min-h-screen text-slate-800">
     <Navbar />
 
-    <main class="relative z-10 mx-auto max-w-6xl px-3 pb-24 pt-4 sm:px-6 sm:py-6 lg:px-8">
+    <main class="arena-main relative mx-auto max-w-6xl px-3 pb-24 pt-4 sm:px-6 sm:py-6 lg:px-8">
       <div :class="contentClass">
         <router-view />
       </div>
@@ -28,8 +28,8 @@ export default {
       if (route.path === '/login') {
         return 'mx-auto max-w-6xl'
       }
-      const width = isDashboardRoute ? 'max-w-6xl' : 'max-w-2xl'
-      return `mx-auto ${width} app-panel`
+      if (isDashboardRoute) return 'mx-auto max-w-6xl'
+      return 'mx-auto max-w-2xl app-panel'
     })
 
     return { contentClass }

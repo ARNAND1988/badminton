@@ -1,0 +1,551 @@
+{
+  "baseline": {
+    "failed": true,
+    "succeeded": true,
+    "persisted": true,
+    "denied": true,
+    "logout": true,
+    "guarded": true,
+    "errors": []
+  },
+  "after": {
+    "failed": true,
+    "succeeded": true,
+    "persisted": true,
+    "denied": true,
+    "logout": true,
+    "guarded": true,
+    "errors": []
+  },
+  "identicalAuthApiRequests": true,
+  "authApiRequestCount": 14,
+  "layouts": {
+    "layouts": [
+      {
+        "width": 375,
+        "route": "availability",
+        "scroll": 375,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          },
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/arena-hero.webp"
+          }
+        ]
+      },
+      {
+        "width": 375,
+        "route": "login",
+        "scroll": 375,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          },
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/arena-hero.webp"
+          }
+        ]
+      },
+      {
+        "width": 375,
+        "route": "bookings",
+        "scroll": 375,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          }
+        ]
+      },
+      {
+        "width": 375,
+        "route": "poll",
+        "scroll": 375,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          }
+        ]
+      },
+      {
+        "width": 390,
+        "route": "availability",
+        "scroll": 390,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          },
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/arena-hero.webp"
+          }
+        ]
+      },
+      {
+        "width": 390,
+        "route": "login",
+        "scroll": 390,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          },
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/arena-hero.webp"
+          }
+        ]
+      },
+      {
+        "width": 390,
+        "route": "bookings",
+        "scroll": 390,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          }
+        ]
+      },
+      {
+        "width": 390,
+        "route": "poll",
+        "scroll": 390,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          }
+        ]
+      },
+      {
+        "width": 768,
+        "route": "availability",
+        "scroll": 753,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          },
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/arena-hero.webp"
+          }
+        ]
+      },
+      {
+        "width": 768,
+        "route": "login",
+        "scroll": 768,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          },
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/arena-hero.webp"
+          }
+        ]
+      },
+      {
+        "width": 768,
+        "route": "bookings",
+        "scroll": 768,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          }
+        ]
+      },
+      {
+        "width": 768,
+        "route": "poll",
+        "scroll": 753,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          }
+        ]
+      },
+      {
+        "width": 1440,
+        "route": "availability",
+        "scroll": 1425,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          },
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/arena-hero.webp"
+          }
+        ]
+      },
+      {
+        "width": 1440,
+        "route": "login",
+        "scroll": 1440,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          },
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/arena-hero.webp"
+          }
+        ]
+      },
+      {
+        "width": 1440,
+        "route": "bookings",
+        "scroll": 1440,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          }
+        ]
+      },
+      {
+        "width": 1440,
+        "route": "poll",
+        "scroll": 1425,
+        "images": [
+          {
+            "loaded": true,
+            "src": "http://127.0.0.1:5174/src/assets/nieuwegein-badminton-logo.svg"
+          }
+        ]
+      },
+      {
+        "width": 375,
+        "route": "member-availability",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "member-bookings",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "member-costs",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "member-availability",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "member-bookings",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "member-costs",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "member-availability",
+        "scroll": 753,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "member-bookings",
+        "scroll": 753,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "member-costs",
+        "scroll": 768,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "member-availability",
+        "scroll": 1425,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "member-bookings",
+        "scroll": 1425,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "member-costs",
+        "scroll": 1440,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "admin/bookings",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "admin/courts",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "admin/members",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "admin/costs",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "admin/payment-settings",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "admin/notifications",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 375,
+        "route": "admin/audit-logs",
+        "scroll": 375,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "admin/bookings",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "admin/courts",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "admin/members",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "admin/costs",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "admin/payment-settings",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "admin/notifications",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 390,
+        "route": "admin/audit-logs",
+        "scroll": 390,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "admin/bookings",
+        "scroll": 753,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "admin/courts",
+        "scroll": 753,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "admin/members",
+        "scroll": 753,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "admin/costs",
+        "scroll": 768,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "admin/payment-settings",
+        "scroll": 753,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "admin/notifications",
+        "scroll": 753,
+        "offscreenControls": []
+      },
+      {
+        "width": 768,
+        "route": "admin/audit-logs",
+        "scroll": 753,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "admin/bookings",
+        "scroll": 1440,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "admin/courts",
+        "scroll": 1425,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "admin/members",
+        "scroll": 1440,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "admin/costs",
+        "scroll": 1440,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "admin/payment-settings",
+        "scroll": 1425,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "admin/notifications",
+        "scroll": 1425,
+        "offscreenControls": []
+      },
+      {
+        "width": 1440,
+        "route": "admin/audit-logs",
+        "scroll": 1440,
+        "offscreenControls": []
+      }
+    ],
+    "errors": [],
+    "consoleErrors": [],
+    "unexpectedResponses": []
+  },
+  "uiJourney": {
+    "checks": [
+      {
+        "name": "court creation",
+        "pass": true
+      },
+      {
+        "name": "booking creation",
+        "pass": true
+      },
+      {
+        "name": "booking update",
+        "pass": true
+      },
+      {
+        "name": "family creation",
+        "pass": true
+      },
+      {
+        "name": "family vote saved",
+        "pass": true
+      },
+      {
+        "name": "family vote persists",
+        "pass": true
+      },
+      {
+        "name": "family attendance saved",
+        "pass": true
+      },
+      {
+        "name": "booking cancellation",
+        "pass": true
+      },
+      {
+        "name": "notification preview dialog",
+        "pass": true
+      },
+      {
+        "name": "dialog close reachable on short viewport",
+        "pass": true
+      },
+      {
+        "name": "notification preview closes",
+        "pass": true
+      },
+      {
+        "name": "dialog controls overlay navigation",
+        "pass": true
+      },
+      {
+        "name": "notification preview closes after stacking fix",
+        "pass": true
+      },
+      {
+        "name": "login action reachable in keyboard-sized viewport",
+        "pass": true
+      },
+      {
+        "name": "input focus visible",
+        "pass": true
+      },
+      {
+        "name": "reduced motion",
+        "pass": true
+      }
+    ],
+    "errors": []
+  },
+  "gateReports": {
+    "baseline": "NIEUWEGEIN BADMINTON REGRESSION\n\nChange detected:\nbadminton-backend/app/__init__.py, badminton-backend/tests/test_database_config.py\n\nMode:\nFULL\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 107\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n",
+    "fast": "NIEUWEGEIN BADMINTON REGRESSION\n\nChange detected:\nbadminton-frontend/src/App.vue, badminton-frontend/src/components/Dashboard.vue, badminton-frontend/src/components/Navbar.vue, badminton-frontend/src/components/Register.vue, badminton-frontend/src/index.css\n\nMode:\nFAST\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 19\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n",
+    "full": "NIEUWEGEIN BADMINTON REGRESSION\n\nChange detected:\nbadminton-frontend/src/App.vue, badminton-frontend/src/components/Dashboard.vue, badminton-frontend/src/components/Navbar.vue, badminton-frontend/src/components/Register.vue, badminton-frontend/src/index.css\n\nMode:\nFULL\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 107\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n"
+  }
+}

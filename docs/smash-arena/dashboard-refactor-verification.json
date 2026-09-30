@@ -1,0 +1,506 @@
+{
+  "controllerBodyByteIdentical": true,
+  "dashboardLinesBefore": 4036,
+  "dashboardLinesAfter": 1201,
+  "nativeInteractionFingerprintsUnchanged": true,
+  "focusedTestsPassed": 11,
+  "authRequestsMatchAfterInitialSessionRefresh": true,
+  "initialSessionRefreshExplanation": "The after-run browser started with the prior capture admin session and refreshed /api/auth/me once before clearing it; the following 14 requests match exactly.",
+  "layoutsCompared": 56,
+  "exactMatches": [
+    {
+      "width": 375,
+      "route": "availability"
+    },
+    {
+      "width": 375,
+      "route": "login"
+    },
+    {
+      "width": 375,
+      "route": "bookings"
+    },
+    {
+      "width": 375,
+      "route": "poll"
+    },
+    {
+      "width": 390,
+      "route": "availability"
+    },
+    {
+      "width": 390,
+      "route": "login"
+    },
+    {
+      "width": 390,
+      "route": "bookings"
+    },
+    {
+      "width": 390,
+      "route": "poll"
+    },
+    {
+      "width": 768,
+      "route": "availability"
+    },
+    {
+      "width": 768,
+      "route": "login"
+    },
+    {
+      "width": 768,
+      "route": "bookings"
+    },
+    {
+      "width": 768,
+      "route": "poll"
+    },
+    {
+      "width": 1440,
+      "route": "availability"
+    },
+    {
+      "width": 1440,
+      "route": "login"
+    },
+    {
+      "width": 1440,
+      "route": "bookings"
+    },
+    {
+      "width": 1440,
+      "route": "poll"
+    },
+    {
+      "width": 375,
+      "route": "member-availability"
+    },
+    {
+      "width": 375,
+      "route": "member-bookings"
+    },
+    {
+      "width": 375,
+      "route": "member-costs"
+    },
+    {
+      "width": 390,
+      "route": "member-availability"
+    },
+    {
+      "width": 390,
+      "route": "member-bookings"
+    },
+    {
+      "width": 390,
+      "route": "member-costs"
+    },
+    {
+      "width": 768,
+      "route": "member-availability"
+    },
+    {
+      "width": 768,
+      "route": "member-bookings"
+    },
+    {
+      "width": 768,
+      "route": "member-costs"
+    },
+    {
+      "width": 1440,
+      "route": "member-availability"
+    },
+    {
+      "width": 1440,
+      "route": "member-bookings"
+    },
+    {
+      "width": 1440,
+      "route": "member-costs"
+    },
+    {
+      "width": 375,
+      "route": "admin/bookings"
+    },
+    {
+      "width": 375,
+      "route": "admin/courts"
+    },
+    {
+      "width": 375,
+      "route": "admin/members"
+    },
+    {
+      "width": 375,
+      "route": "admin/costs"
+    },
+    {
+      "width": 375,
+      "route": "admin/payment-settings"
+    },
+    {
+      "width": 375,
+      "route": "admin/notifications"
+    },
+    {
+      "width": 375,
+      "route": "admin/audit-logs"
+    },
+    {
+      "width": 390,
+      "route": "admin/members"
+    },
+    {
+      "width": 390,
+      "route": "admin/notifications"
+    },
+    {
+      "width": 390,
+      "route": "admin/audit-logs"
+    },
+    {
+      "width": 768,
+      "route": "admin/members"
+    },
+    {
+      "width": 768,
+      "route": "admin/notifications"
+    },
+    {
+      "width": 768,
+      "route": "admin/audit-logs"
+    },
+    {
+      "width": 1440,
+      "route": "admin/members"
+    },
+    {
+      "width": 1440,
+      "route": "admin/notifications"
+    },
+    {
+      "width": 1440,
+      "route": "admin/audit-logs"
+    }
+  ],
+  "calendarRolloverDifferences": [
+    {
+      "width": 390,
+      "route": "admin/bookings",
+      "fields": [
+        {
+          "before": {
+            "label": "Date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 390,
+      "route": "admin/courts",
+      "fields": [
+        {
+          "before": {
+            "label": "Freeze period start date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Freeze period start date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        },
+        {
+          "before": {
+            "label": "Freeze period end date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Freeze period end date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 390,
+      "route": "admin/costs",
+      "fields": [
+        {
+          "before": {
+            "label": "",
+            "value": "2026-09",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "",
+            "value": "2026-10",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 390,
+      "route": "admin/payment-settings",
+      "fields": [],
+      "monthOptionsRollover": true
+    },
+    {
+      "width": 768,
+      "route": "admin/bookings",
+      "fields": [
+        {
+          "before": {
+            "label": "Date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 768,
+      "route": "admin/courts",
+      "fields": [
+        {
+          "before": {
+            "label": "Freeze period start date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Freeze period start date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        },
+        {
+          "before": {
+            "label": "Freeze period end date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Freeze period end date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 768,
+      "route": "admin/costs",
+      "fields": [
+        {
+          "before": {
+            "label": "",
+            "value": "2026-09",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "",
+            "value": "2026-10",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 768,
+      "route": "admin/payment-settings",
+      "fields": [],
+      "monthOptionsRollover": true
+    },
+    {
+      "width": 1440,
+      "route": "admin/bookings",
+      "fields": [
+        {
+          "before": {
+            "label": "Date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 1440,
+      "route": "admin/courts",
+      "fields": [
+        {
+          "before": {
+            "label": "Freeze period start date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Freeze period start date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        },
+        {
+          "before": {
+            "label": "Freeze period end date",
+            "value": "2026-09-30",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "Freeze period end date",
+            "value": "2026-10-01",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 1440,
+      "route": "admin/costs",
+      "fields": [
+        {
+          "before": {
+            "label": "",
+            "value": "2026-09",
+            "checked": false,
+            "disabled": false
+          },
+          "after": {
+            "label": "",
+            "value": "2026-10",
+            "checked": false,
+            "disabled": false
+          }
+        }
+      ],
+      "monthOptionsRollover": false
+    },
+    {
+      "width": 1440,
+      "route": "admin/payment-settings",
+      "fields": [],
+      "monthOptionsRollover": true
+    }
+  ],
+  "calendarRolloverExplanation": "The comparison crossed midnight in Europe/Amsterdam. These differences are date/month defaults and the payment-month option range, driven by the unchanged controller.",
+  "browserErrors": [],
+  "consoleErrors": [],
+  "unexpectedResponses": [],
+  "uiChecks": [
+    {
+      "name": "court creation",
+      "pass": true
+    },
+    {
+      "name": "booking creation",
+      "pass": true
+    },
+    {
+      "name": "booking update",
+      "pass": true
+    },
+    {
+      "name": "family creation",
+      "pass": true
+    },
+    {
+      "name": "family vote saved",
+      "pass": true
+    },
+    {
+      "name": "family vote persists",
+      "pass": true
+    },
+    {
+      "name": "family attendance saved",
+      "pass": true
+    },
+    {
+      "name": "login action reachable in keyboard-sized viewport",
+      "pass": true
+    },
+    {
+      "name": "input focus visible",
+      "pass": true
+    },
+    {
+      "name": "reduced motion",
+      "pass": true
+    },
+    {
+      "name": "extracted notification dialog opens",
+      "pass": true
+    },
+    {
+      "name": "notification preview edits retain the parent object",
+      "pass": true
+    },
+    {
+      "name": "extracted dialog still overlays navigation",
+      "pass": true
+    },
+    {
+      "name": "extracted notification dialog closes",
+      "pass": true
+    }
+  ],
+  "gateReports": {
+    "fast": "NIEUWEGEIN BADMINTON REGRESSION\n\nChange detected:\nbadminton-frontend/src/App.vue, badminton-frontend/src/components/Dashboard.vue, badminton-frontend/src/components/Navbar.vue, badminton-frontend/src/components/Register.vue, badminton-frontend/src/index.css\n\nMode:\nFAST\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 19\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n",
+    "full": "NIEUWEGEIN BADMINTON REGRESSION\n\nChange detected:\nbadminton-frontend/src/App.vue, badminton-frontend/src/components/Dashboard.vue, badminton-frontend/src/components/Navbar.vue, badminton-frontend/src/components/Register.vue, badminton-frontend/src/index.css\n\nMode:\nFULL\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 107\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n"
+  },
+  "notificationDelivery": "Not invoked; preview/edit/close only in isolated test environment."
+}

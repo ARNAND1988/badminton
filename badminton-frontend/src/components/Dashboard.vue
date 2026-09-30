@@ -1,242 +1,47 @@
 <template>
-  <div class="space-y-6">
-    <div v-if="loading" class="alert-info">
+  <div class="arena-dashboard space-y-6">
+    <PublicWelcome v-if="activeView === 'availability' && !isLoggedIn" />
+    <div v-if="loading" class="alert-info" role="status">
       Loading data...
     </div>
-    <div v-if="errorMsg" class="alert-warning">
+    <div v-if="errorMsg" class="alert-warning" role="alert">
       {{ errorMsg }}
     </div>
-    <p v-if="msg" class="alert-muted">{{ msg }}</p>
+    <p v-if="msg" class="alert-muted" role="status">{{ msg }}</p>
 
-    <div v-if="notificationPreview.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-      <div class="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
-        <div class="flex items-start justify-between gap-3">
-          <div>
-            <h3 class="text-lg font-bold text-slate-950">{{ notificationPreview.title }}</h3>
-            <p class="mt-1 text-sm text-slate-600">Review and edit the WhatsApp message before sending.</p>
-            <p v-if="notificationPreview.recipient" class="mt-1 text-xs text-slate-500">Group recipient: {{ notificationPreview.recipient }}</p>
-          </div>
-          <button class="btn-muted" @click="closeNotificationPreview">Close</button>
-        </div>
+    <NotificationPreviewDialog
+      :close-notification-preview="closeNotificationPreview"
+      :notification-preview="notificationPreview"
+      :send-notification-preview="sendNotificationPreview"
+    />
 
-        <label class="mt-4 block">
-          <span class="form-label">Message content</span>
-          <textarea v-model="notificationPreview.message" rows="10" class="form-input font-mono text-sm"></textarea>
-        </label>
-
-        <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <label class="block">
-            <span class="form-label">Send test to saved WhatsApp number</span>
-            <select v-model="notificationPreview.testRecipient" class="form-input">
-              <option value="">Choose saved test number</option>
-              <option v-for="recipient in notificationPreview.testRecipients" :key="recipient.normalized || recipient.value" :value="recipient.value">
-                {{ recipient.label }}
-              </option>
-            </select>
-          </label>
-          <p class="mt-1 text-xs text-slate-500">Saved numbers come from the WhatsApp Management page test recipient fields.</p>
-          <button class="btn-secondary mt-3" :disabled="notificationPreview.sending || !notificationPreview.testRecipient" @click="sendNotificationPreview(true)">
-            {{ notificationPreview.sending ? 'Sending...' : 'Send test notification' }}
-          </button>
-        </div>
-
-        <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-          <button class="btn-muted" @click="closeNotificationPreview">Cancel</button>
-          <button class="btn-dark" :disabled="notificationPreview.sending || !notificationPreview.message.trim()" @click="sendNotificationPreview(false)">
-            {{ notificationPreview.sending ? 'Sending...' : 'Send to group' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <section v-if="activeView === 'bookings'" class="space-y-6">
-      <div class="rounded-lg bg-white p-6 shadow-sm">
-        <div class="flex w-full items-center justify-between p-3">
-          <div>
-            <h2 class="text-xl font-semibold text-slate-900">Upcoming Bookings</h2>
-            <p class="mt-1 text-sm text-slate-600">{{ upcomingBookings.length }} scheduled court sessions</p>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
-          <article
-            v-for="booking in upcomingBookings"
-            :key="booking.id"
-            class="cursor-pointer rounded-md border-2 border-slate-50 bg-white/20 p-6 shadow-sm transition-colors duration-300 hover:border-black"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h3 class="mb-2 text-xl font-semibold text-slate-900">
-                  {{ booking.court?.name || 'Court booking' }}
-                </h3>
-                <p class="text-sm font-medium text-indigo-600">
-                  {{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }}
-                </p>
-                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ bookingStatusSummary(booking) }}</p>
-              </div>
-              <div class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white">
-                €{{ booking.cost || 0 }}
-              </div>
-            </div>
-
-            <div class="mt-4 grid gap-2 text-sm text-slate-700">
-              <p class="flex items-center gap-2">
-                <span aria-hidden="true">⏰</span>
-                <span>{{ booking.start_time }} - {{ booking.end_time }}</span>
-              </p>
-              <p v-if="booking.court?.location" class="flex items-center gap-2">
-                <span aria-hidden="true">📍</span>
-                <span>{{ booking.court.location }}</span>
-                <a
-                  v-if="booking.court?.map_link"
-                  :href="booking.court.map_link"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="ml-auto inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100"
-                  @click.stop
-                >
-                  🗺️ Open map
-                </a>
-              </p>
-            </div>
-            <p class="mt-2 min-h-[2.5rem] text-sm leading-5 text-slate-600">
-              📝 {{ booking.notes || booking.court?.description || 'No notes added for this booking.' }}
-            </p>
-
-            <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div class="grid gap-3 sm:grid-cols-2">
-                <div class="rounded border border-indigo-100 bg-white p-3">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Interested before booking</div>
-                  <div class="mt-2 flex items-end gap-2">
-                    <span class="text-2xl font-bold text-indigo-900">{{ bookingInterest(booking).attendee_count }}</span>
-                    <span class="pb-1 text-xs text-indigo-700">people interested</span>
-                  </div>
-                  <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-medium">
-                    <span class="rounded bg-indigo-50 px-2 py-1 text-indigo-700">{{ bookingInterest(booking).available_count || 0 }} available</span>
-                    <span class="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-amber-700"><TentativeIcon class="h-3.5 w-3.5" />{{ bookingInterest(booking).tentative_count || 0 }} tentative</span>
-                  </div>
-                  <div v-if="planningNames(booking, 'available').length || planningNames(booking, 'tentative').length" class="mt-2 space-y-1 text-xs leading-5 text-slate-600">
-                    <div v-if="planningNames(booking, 'available').length">Available: {{ planningNames(booking, 'available').join(', ') }}</div>
-                    <div v-if="planningNames(booking, 'tentative').length">Tentative: {{ planningNames(booking, 'tentative').join(', ') }}</div>
-                  </div>
-                </div>
-
-                <div class="rounded border border-emerald-100 bg-white p-3">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Confirmed for this booking</div>
-                  <div class="mt-2 flex items-end gap-2">
-                    <span class="text-2xl font-bold text-emerald-800">{{ participantStatusCounts(booking).attending }}</span>
-                    <span class="pb-1 text-xs text-emerald-700">confirmed yes</span>
-                  </div>
-                  <div class="mt-2 flex flex-wrap gap-1.5 text-xs font-medium">
-                    <span class="rounded bg-emerald-50 px-2 py-1 text-emerald-700">{{ participantStatusCounts(booking).attending }} yes</span>
-                    <span class="inline-flex items-center gap-1 rounded bg-amber-50 px-2 py-1 text-amber-700"><TentativeIcon class="h-3.5 w-3.5" />{{ participantStatusCounts(booking).tentative }} maybe</span>
-                  </div>
-                  <div v-if="participantNamesByStatus(booking, 'attending').length || participantNamesByStatus(booking, 'tentative').length" class="mt-2 space-y-1 text-xs leading-5 text-slate-600">
-                    <div v-if="participantNamesByStatus(booking, 'attending').length">Confirmed: {{ participantNamesByStatus(booking, 'attending').join(', ') }}</div>
-                    <div v-if="participantNamesByStatus(booking, 'tentative').length">Maybe: {{ participantNamesByStatus(booking, 'tentative').join(', ') }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="isLoggedIn" class="mt-4 space-y-3 border-t border-slate-100 pt-4">
-              <h4 class="text-sm font-semibold text-slate-900">Your family attendance</h4>
-              <div v-for="person in familyAttendancePeople" :key="person.key" class="rounded border bg-white p-3">
-                <div class="mb-2 flex items-center justify-between gap-3">
-                  <span class="text-sm font-medium text-slate-800">{{ person.name }}</span>
-                  <span class="text-xs text-slate-500">{{ person.type === 'self' ? 'You' : 'Family' }}</span>
-                </div>
-                <div class="grid grid-cols-3 gap-2">
-                  <button
-                    v-for="status in attendanceStatuses"
-                    :key="status.value"
-                    type="button"
-                    class="rounded border px-2 py-2 text-xs font-medium transition"
-                    :class="familyPersonBookingStatus(booking, person) === status.value ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
-                    @click.stop="saveFamilyPersonAttendance(booking, person, status.value)"
-                  >
-                    {{ status.label }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-          </article>
-        </div>
-        <p v-if="!upcomingBookings.length && !loading" class="p-3 text-sm text-slate-600">No upcoming bookings found.</p>
-      </div>
-
-      <div v-if="isLoggedIn" class="mt-8 space-y-4">
-        <div>
-          <h3 class="text-lg font-semibold text-slate-900">My completed bookings</h3>
-          <p class="section-copy">Completed bookings you or your family attended. Cost details are available only after login.</p>
-        </div>
-
-        <div class="grid gap-4 lg:grid-cols-2">
-          <article v-for="booking in completedBookings" :key="booking.id" class="sub-card overflow-hidden p-0">
-            <button
-              type="button"
-              class="grid w-full grid-cols-[1fr_auto_auto] items-center gap-2 p-3 text-left transition hover:bg-slate-50 sm:gap-4 sm:p-4"
-              :aria-expanded="isCompletedBookingOpen(booking.id)"
-              @click="toggleCompletedBooking(booking.id)"
-            >
-              <div class="min-w-0">
-                <h4 class="truncate font-semibold text-slate-900">{{ booking.court?.name || 'Court booking' }}</h4>
-                <p class="truncate text-xs text-slate-600 sm:text-sm">
-                  {{ bookingDayLabel(booking.booking_date) }} · {{ bookingDateLabel(booking.booking_date) }} · {{ booking.start_time }} - {{ booking.end_time }}
-                </p>
-                <p class="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ bookingStatusSummary(booking) }}</p>
-              </div>
-              <span class="rounded bg-slate-900 px-2 py-1 text-sm font-semibold text-white sm:px-3">€{{ booking.cost || 0 }}</span>
-              <span class="text-slate-400" aria-hidden="true">{{ isCompletedBookingOpen(booking.id) ? '−' : '+' }}</span>
-            </button>
-
-            <div v-if="isCompletedBookingOpen(booking.id)" class="space-y-4 border-t border-slate-100 p-4">
-            <div class="grid gap-2 sm:grid-cols-3">
-              <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
-                <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Participated</div>
-                <div class="mt-1 text-xl font-bold text-emerald-900">{{ booking.cost_split.attended_count }}</div>
-              </div>
-              <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
-                <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Each</div>
-                <div class="mt-1 text-xl font-bold text-indigo-900">€{{ booking.cost_split.cost_per_person }}</div>
-              </div>
-              <div class="rounded border border-slate-200 bg-slate-50 p-3">
-                <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</div>
-                <div class="mt-1 text-sm font-semibold text-slate-900">{{ bookingStatusSummary(booking) }}</div>
-              </div>
-            </div>
-
-            <div class="space-y-2">
-              <div
-                v-for="participant in booking.participants.filter((item) => ['attending', 'participated'].includes(item.status))"
-                :key="participant.id"
-                class="flex items-center justify-between rounded border bg-white px-3 py-2 text-sm"
-              >
-                <span class="font-medium text-slate-800">{{ participantName(participant) }}</span>
-                <span class="text-slate-500">{{ participantCompletedStatusLabel(participant) }}</span>
-              </div>
-              <p v-if="!booking.cost_split.attended_count" class="text-sm text-slate-600">No participated players recorded.</p>
-            </div>
-
-            </div>
-          </article>
-        </div>
-
-        <div v-if="completedBookingPagination.pages > 1" class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <span class="text-slate-600">Page {{ completedBookingPagination.page }} of {{ completedBookingPagination.pages }} · {{ completedBookingPagination.total }} completed bookings</span>
-          <div class="flex gap-2">
-            <button class="btn-secondary" :disabled="completedBookingPagination.page <= 1" @click="changeCompletedBookingPage(completedBookingPagination.page - 1)">Previous</button>
-            <button class="btn-secondary" :disabled="completedBookingPagination.page >= completedBookingPagination.pages" @click="changeCompletedBookingPage(completedBookingPagination.page + 1)">Next</button>
-          </div>
-        </div>
-        <p v-if="!completedBookings.length && !loading" class="text-sm text-slate-600">No completed bookings to settle yet.</p>
-      </div>
-    </section>
+    <MemberBookingsView v-if="activeView === 'bookings'"
+      :attendance-statuses="attendanceStatuses"
+      :booking-date-label="bookingDateLabel"
+      :booking-day-label="bookingDayLabel"
+      :booking-interest="bookingInterest"
+      :booking-status-summary="bookingStatusSummary"
+      :change-completed-booking-page="changeCompletedBookingPage"
+      :completed-booking-pagination="completedBookingPagination"
+      :completed-bookings="completedBookings"
+      :family-attendance-people="familyAttendancePeople"
+      :family-person-booking-status="familyPersonBookingStatus"
+      :is-completed-booking-open="isCompletedBookingOpen"
+      :is-logged-in="isLoggedIn"
+      :loading="loading"
+      :participant-completed-status-label="participantCompletedStatusLabel"
+      :participant-name="participantName"
+      :participant-names-by-status="participantNamesByStatus"
+      :participant-status-counts="participantStatusCounts"
+      :planning-names="planningNames"
+      :save-family-person-attendance="saveFamilyPersonAttendance"
+      :toggle-completed-booking="toggleCompletedBooking"
+      :upcoming-bookings="upcomingBookings"
+    />
 
     <section v-if="activeView === 'admin-bookings'" class="space-y-6">
       <div>
-        <h2 class="section-title">Manage Bookings</h2>
+        <div class="arena-view-heading"><ArenaIcon name="calendar" /><h2 class="section-title">Manage Bookings</h2></div>
         <p class="section-copy mt-1">Create court bookings, update attendance, shared misc costs, and per-booking invoices.</p>
         <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
           <button class="btn-secondary w-full justify-center" :class="adminBookingTab === 'bookings' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminBookingTab = 'bookings'">Court bookings</button>
@@ -255,33 +60,33 @@
           </div>
           <div class="grid gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
             <div>
-              <label class="form-label">🏸 Court</label>
-              <select v-model="selectedCourtId" class="form-input">
+              <label class="form-label flex items-center gap-1"><ArenaIcon name="participation" class="h-4 w-4" />Court</label>
+              <select aria-label="Court" v-model="selectedCourtId" class="form-input">
                 <option value="">Select a court</option>
                 <option v-for="court in activeCourts" :key="court.id" :value="court.id">{{ court.name }} · {{ court.location || 'No location' }}</option>
               </select>
             </div>
             <div>
-              <label class="form-label">📅 Date</label>
-              <input v-model="bookingDate" type="date" class="form-input" />
+              <label class="form-label flex items-center gap-1"><ArenaIcon name="calendar" class="h-4 w-4" />Date</label>
+              <input aria-label="Date" v-model="bookingDate" type="date" class="form-input" />
             </div>
             <div>
-              <label class="form-label">⏰ Start time</label>
-              <input v-model="startTime" type="time" class="form-input" />
+              <label class="form-label flex items-center gap-1"><ArenaIcon name="clock" class="h-4 w-4" />Start time</label>
+              <input aria-label="Start time" v-model="startTime" type="time" class="form-input" />
             </div>
             <div>
-              <label class="form-label">⏱️ End time</label>
-              <input v-model="endTime" type="time" class="form-input" />
+              <label class="form-label flex items-center gap-1"><ArenaIcon name="clock" class="h-4 w-4" />End time</label>
+              <input aria-label="End time" v-model="endTime" type="time" class="form-input" />
             </div>
             <div>
-              <label class="form-label">💶 Cost</label>
-              <input v-if="editingBookingId" v-model="bookingCost" type="number" min="0" step="0.01" class="form-input" />
-              <input v-else :value="calculatedBookingCost" type="number" min="0" step="0.01" class="form-input" readonly />
+              <label class="form-label flex items-center gap-1"><ArenaIcon name="invoice" class="h-4 w-4" />Cost</label>
+              <input aria-label="Cost" v-if="editingBookingId" v-model="bookingCost" type="number" min="0" step="0.01" class="form-input" />
+              <input aria-label="Cost" v-else :value="calculatedBookingCost" type="number" min="0" step="0.01" class="form-input" readonly />
               <p class="mt-1 text-xs text-slate-500">{{ editingBookingId ? 'Override the saved booking cost.' : 'Calculated from court rates and duration.' }}</p>
             </div>
             <div v-if="editingBookingId">
-              <label class="form-label">📌 Status</label>
-              <select v-model="bookingStatus" class="form-input">
+              <label class="form-label flex items-center gap-1"><ArenaIcon name="vote" class="h-4 w-4" />Status</label>
+              <select aria-label="Status" v-model="bookingStatus" class="form-input">
                 <option value="confirmed">Created</option>
                 <option value="completed">Completed</option>
                 <option value="settled">Settled</option>
@@ -289,26 +94,26 @@
               </select>
             </div>
             <div v-if="!editingBookingId">
-              <label class="form-label">🔁 Recurring</label>
-              <select v-model="recurringMode" class="form-input">
+              <label class="form-label flex items-center gap-1"><ArenaIcon name="calendar" class="h-4 w-4" />Recurring</label>
+              <select aria-label="Recurring" v-model="recurringMode" class="form-input">
                 <option :value="false">One-off</option>
                 <option :value="true">Every week on the same day</option>
               </select>
             </div>
             <div class="sm:col-span-2 lg:col-span-4">
-              <label class="form-label">📝 Notes</label>
-              <input v-model="bookingNotes" placeholder="Optional booking notes" class="form-input" />
+              <label class="form-label flex items-center gap-1"><ArenaIcon name="note" class="h-4 w-4" />Notes</label>
+              <input aria-label="Notes" v-model="bookingNotes" placeholder="Optional booking notes" class="form-input" />
             </div>
           </div>
           <div v-if="recurringMode && !editingBookingId" class="mt-3 grid gap-2 sm:grid-cols-2 sm:gap-3">
             <div>
               <label class="form-label">Repeat every</label>
-              <input v-model.number="recurringIntervalWeeks" type="number" min="1" class="form-input" />
+              <input aria-label="Repeat every" v-model.number="recurringIntervalWeeks" type="number" min="1" class="form-input" />
               <p class="mt-1 text-xs text-slate-500">weeks</p>
             </div>
             <div>
               <label class="form-label">Stop after</label>
-              <input v-model="recurringEndDate" type="date" class="form-input" />
+              <input aria-label="Stop after" v-model="recurringEndDate" type="date" class="form-input" />
             </div>
           </div>
 
@@ -343,12 +148,12 @@
 
             <h4 class="text-sm font-semibold text-slate-900">Attendance</h4>
             <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
-              <select class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
+              <select aria-label="Player account" class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
                 <option value="">Keep / ad hoc player</option>
                 <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
               </select>
-              <input v-model="participant.name" class="form-input" placeholder="Player name" />
-              <select v-model="participant.status" class="form-input">
+              <input aria-label="Player name" v-model="participant.name" class="form-input" placeholder="Player name" />
+              <select aria-label="Player attendance status" v-model="participant.status" class="form-input">
                 <option value="attending">Attending</option>
                 <option value="participated">Participated</option>
                 <option value="not_attending">Not attending</option>
@@ -358,13 +163,13 @@
               <button class="btn-muted" @click.stop="deleteParticipant(booking, participant)">Remove</button>
             </div>
             <div class="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
-              <select v-model="newParticipantMember[booking.id]" class="form-input">
+              <select aria-label="Player account" v-model="newParticipantMember[booking.id]" class="form-input">
                 <option value="">New player (not a member)</option>
                 <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
               </select>
-              <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="New player name" :disabled="!!newParticipantMember[booking.id]" />
-              <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" :disabled="!!newParticipantMember[booking.id]" />
-              <select v-model="newParticipantStatus[booking.id]" class="form-input">
+              <input aria-label="New player name" v-model="newParticipantName[booking.id]" class="form-input" placeholder="New player name" :disabled="!!newParticipantMember[booking.id]" />
+              <input aria-label="Phone or label" v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" :disabled="!!newParticipantMember[booking.id]" />
+              <select aria-label="New player attendance status" v-model="newParticipantStatus[booking.id]" class="form-input">
                 <option value="attending">Attending</option>
                 <option value="participated">Participated</option>
                 <option value="not_attending">Not attending</option>
@@ -401,12 +206,12 @@
               <div class="flex justify-end"><button class="btn-secondary" @click.stop="startEditBooking(booking)">Edit booking details</button></div>
               <h5 class="text-sm font-semibold text-slate-900">Attendance</h5>
               <div v-for="participant in booking.participants" :key="participant.id" class="grid gap-2 rounded border bg-white p-2 sm:grid-cols-[1.2fr_1fr_1fr_auto_auto]">
-                <select class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
+                <select aria-label="Player account" class="form-input" @change="applyParticipantMember(participant, $event.target.value)">
                   <option value="">Keep / ad hoc player</option>
                   <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
                 </select>
-                <input v-model="participant.name" class="form-input" placeholder="Player name" />
-                <select v-model="participant.status" class="form-input">
+                <input aria-label="Player name" v-model="participant.name" class="form-input" placeholder="Player name" />
+                <select aria-label="Player attendance status" v-model="participant.status" class="form-input">
                   <option value="attending">Attending</option>
                   <option value="participated">Participated</option>
                   <option value="not_attending">Not attending</option>
@@ -416,13 +221,13 @@
                 <button class="btn-muted" @click.stop="deleteParticipant(booking, participant)">Remove</button>
               </div>
               <div class="grid gap-2 sm:grid-cols-[1.2fr_1fr_1fr_1fr_auto]">
-                <select v-model="newParticipantMember[booking.id]" class="form-input">
+                <select aria-label="Player account" v-model="newParticipantMember[booking.id]" class="form-input">
                   <option value="">New player (not a member)</option>
                   <option v-for="member in memberOptions" :key="member.key" :value="member.key">{{ member.label }}</option>
                 </select>
-                <input v-model="newParticipantName[booking.id]" class="form-input" placeholder="New player name" :disabled="!!newParticipantMember[booking.id]" />
-                <input v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" :disabled="!!newParticipantMember[booking.id]" />
-                <select v-model="newParticipantStatus[booking.id]" class="form-input">
+                <input aria-label="New player name" v-model="newParticipantName[booking.id]" class="form-input" placeholder="New player name" :disabled="!!newParticipantMember[booking.id]" />
+                <input aria-label="Phone or label" v-model="newParticipantPhone[booking.id]" class="form-input" placeholder="Phone or label" :disabled="!!newParticipantMember[booking.id]" />
+                <select aria-label="New player attendance status" v-model="newParticipantStatus[booking.id]" class="form-input">
                   <option value="attending">Attending</option>
                   <option value="participated">Participated</option>
                   <option value="not_attending">Not attending</option>
@@ -440,16 +245,16 @@
         <details class="panel-card" open>
           <summary class="cursor-pointer text-lg font-semibold text-slate-900">Add shared misc cost</summary>
           <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <input v-model="newMiscTitle" class="form-input" placeholder="Title" />
-            <input v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
-            <input v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
-            <input v-model="newMiscPurchaseDate" type="date" class="form-input" />
-            <select v-model="newMiscSplitScope" class="form-input">
+            <input aria-label="Title" v-model="newMiscTitle" class="form-input" placeholder="Title" />
+            <input aria-label="Paid by" v-model="newMiscPaidBy" class="form-input" placeholder="Paid by" />
+            <input aria-label="Amount" v-model="newMiscAmount" type="number" min="0" step="0.01" class="form-input" placeholder="Amount" />
+            <input aria-label="Purchase date" v-model="newMiscPurchaseDate" type="date" class="form-input" />
+            <select aria-label="Player account" v-model="newMiscSplitScope" class="form-input">
               <option value="all_members">All members</option>
               <option value="club_members">Club members only</option>
             </select>
-            <input v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" :disabled="true" />
-            <input v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
+            <input aria-label="Split count" v-model.number="newMiscSplitCount" type="number" min="1" class="form-input" placeholder="Split count" :disabled="true" />
+            <input aria-label="Description" v-model="newMiscDescription" class="form-input md:col-span-2" placeholder="Description" />
           </div>
           <button class="btn-dark mt-3 w-full sm:w-auto" @click="createMiscCost">Add cost</button>
         </details>
@@ -470,20 +275,20 @@
             <div v-if="isMiscCostOpen(cost.id)" class="space-y-3 border-t border-slate-100 p-4">
               <div class="rounded border bg-slate-50 p-2 text-sm text-slate-700">{{ splitScopeLabel(cost.split_scope) }} · split by {{ cost.split_count }} members · €{{ cost.cost_per_person }} each</div>
               <div class="grid gap-3 sm:grid-cols-2">
-                <input v-model="cost.title" class="form-input" placeholder="Title" />
-                <input v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
-                <input v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
-                <input v-model="cost.purchase_date" type="date" class="form-input" />
-                <select v-model="cost.split_scope" class="form-input">
+                <input aria-label="Title" v-model="cost.title" class="form-input" placeholder="Title" />
+                <input aria-label="Paid by" v-model="cost.paid_by" class="form-input" placeholder="Paid by" />
+                <input aria-label="Shared cost amount" v-model.number="cost.amount" type="number" min="0" step="0.01" class="form-input" />
+                <input aria-label="Purchase date" v-model="cost.purchase_date" type="date" class="form-input" />
+                <select aria-label="Player account" v-model="cost.split_scope" class="form-input">
                   <option value="all_members">All members</option>
                   <option value="club_members">Club members only</option>
                 </select>
-                <input v-model.number="cost.split_count" type="number" min="1" class="form-input" :disabled="cost.status !== 'settled'" />
-                <select v-model="cost.status" class="form-input" @change="updateMiscCost(cost)">
+                <input aria-label="Split count" v-model.number="cost.split_count" type="number" min="1" class="form-input" :disabled="cost.status !== 'settled'" />
+                <select aria-label="Shared cost status" v-model="cost.status" class="form-input" @change="updateMiscCost(cost)">
                   <option value="open">Open</option>
                   <option value="settled">Settled</option>
                 </select>
-                <textarea v-model="cost.description" class="form-input sm:col-span-2" placeholder="Description"></textarea>
+                <textarea aria-label="Description" v-model="cost.description" class="form-input sm:col-span-2" placeholder="Description"></textarea>
               </div>
               <div class="grid gap-2 sm:grid-cols-2">
                 <button class="btn-secondary" @click="updateMiscCost(cost)">Save changes</button>
@@ -497,7 +302,7 @@
 
     <section v-if="activeView === 'admin-courts'" class="space-y-6">
       <div>
-        <h2 class="section-title">Manage Courts</h2>
+        <div class="arena-view-heading"><ArenaIcon name="participation" /><h2 class="section-title">Manage Courts</h2></div>
         <p class="section-copy mt-1">Maintain courts, locations, map links, hourly rates, and vacation freeze periods.</p>
       </div>
 
@@ -505,12 +310,12 @@
         <div class="panel-card">
           <h3 class="mb-3 text-lg font-semibold">Add court</h3>
           <div class="space-y-3">
-            <input v-model="newCourtName" placeholder="Court name" class="form-input" />
-            <input v-model="newCourtLocation" placeholder="Location" class="form-input" />
-            <input v-model="newCourtMapLink" placeholder="Google Maps link" class="form-input" />
-            <input v-model="newCourtDescription" placeholder="Description" class="form-input" />
-            <input v-model="newCourtRate" type="number" min="0" step="0.01" placeholder="Hourly rate" class="form-input" />
-            <input v-model="newCourtHalfHourRate" type="number" min="0" step="0.01" placeholder="30-minute rate" class="form-input" />
+            <input aria-label="Court name" v-model="newCourtName" placeholder="Court name" class="form-input" />
+            <input aria-label="Location" v-model="newCourtLocation" placeholder="Location" class="form-input" />
+            <input aria-label="Google Maps link" v-model="newCourtMapLink" placeholder="Google Maps link" class="form-input" />
+            <input aria-label="Description" v-model="newCourtDescription" placeholder="Description" class="form-input" />
+            <input aria-label="Hourly rate" v-model="newCourtRate" type="number" min="0" step="0.01" placeholder="Hourly rate" class="form-input" />
+            <input aria-label="30-minute rate" v-model="newCourtHalfHourRate" type="number" min="0" step="0.01" placeholder="30-minute rate" class="form-input" />
             <button class="btn-dark w-full" @click="createCourt">Add court</button>
           </div>
         </div>
@@ -520,12 +325,12 @@
           <div class="space-y-3">
             <article v-for="court in courts" :key="court.id" class="sub-card space-y-3">
               <div class="grid gap-2">
-                <input v-model="court.name" class="form-input" />
-                <input v-model="court.location" class="form-input" placeholder="Location" />
-                <input v-model="court.map_link" class="form-input" placeholder="Google Maps link" />
-                <input v-model="court.description" class="form-input" placeholder="Description" />
-                <input v-model.number="court.hourly_rate" type="number" min="0" step="0.01" class="form-input" placeholder="Hourly rate" />
-                <input v-model.number="court.half_hour_rate" type="number" min="0" step="0.01" class="form-input" placeholder="30-minute rate" />
+                <input aria-label="Court name" v-model="court.name" class="form-input" />
+                <input aria-label="Location" v-model="court.location" class="form-input" placeholder="Location" />
+                <input aria-label="Google Maps link" v-model="court.map_link" class="form-input" placeholder="Google Maps link" />
+                <input aria-label="Description" v-model="court.description" class="form-input" placeholder="Description" />
+                <input aria-label="Hourly rate" v-model.number="court.hourly_rate" type="number" min="0" step="0.01" class="form-input" placeholder="Hourly rate" />
+                <input aria-label="30-minute rate" v-model.number="court.half_hour_rate" type="number" min="0" step="0.01" class="form-input" placeholder="30-minute rate" />
               </div>
               <div class="grid grid-cols-2 gap-2">
                 <button class="btn-secondary" @click="updateCourt(court)">Save</button>
@@ -544,20 +349,20 @@
         </div>
 
         <form class="grid gap-3 lg:grid-cols-[1.2fr_1fr_1fr_1.4fr_auto]" @submit.prevent="createFreezePeriod">
-          <input v-model="newFreezeTitle" class="form-input" placeholder="Vacation / hall closed" />
-          <input v-model="newFreezeStartDate" type="date" class="form-input" />
-          <input v-model="newFreezeEndDate" type="date" class="form-input" />
-          <input v-model="newFreezeReason" class="form-input" placeholder="Optional reason" />
+          <input aria-label="Freeze period title" v-model="newFreezeTitle" class="form-input" placeholder="Vacation / hall closed" />
+          <input aria-label="Freeze period start date" v-model="newFreezeStartDate" type="date" class="form-input" />
+          <input aria-label="Freeze period end date" v-model="newFreezeEndDate" type="date" class="form-input" />
+          <input aria-label="Optional reason" v-model="newFreezeReason" class="form-input" placeholder="Optional reason" />
           <button class="btn-dark">Add</button>
         </form>
 
         <div class="mt-4 space-y-3">
           <article v-for="period in freezePeriods" :key="period.id" class="sub-card space-y-3">
             <div class="grid gap-2 lg:grid-cols-[1.2fr_1fr_1fr_1.4fr_auto]">
-              <input v-model="period.title" class="form-input" />
-              <input v-model="period.start_date" type="date" class="form-input" />
-              <input v-model="period.end_date" type="date" class="form-input" />
-              <input v-model="period.reason" class="form-input" placeholder="Reason" />
+              <input aria-label="Freeze period title" v-model="period.title" class="form-input" />
+              <input aria-label="Freeze period start date" v-model="period.start_date" type="date" class="form-input" />
+              <input aria-label="Freeze period end date" v-model="period.end_date" type="date" class="form-input" />
+              <input aria-label="Reason" v-model="period.reason" class="form-input" placeholder="Reason" />
               <label class="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
                 <input v-model="period.is_active" type="checkbox" class="h-5 w-5 accent-emerald-600" />
                 Active
@@ -573,176 +378,35 @@
       </div>
     </section>
 
-    <section v-if="activeView === 'availability' || activeView === 'poll'" class="space-y-6">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p v-if="activeView === 'poll'" class="text-xs font-bold uppercase tracking-[0.24em] text-emerald-700">Group poll</p>
-          <h2 class="section-title">{{ activeView === 'poll' ? 'When can you play?' : 'Availability' }}</h2>
-          <p class="section-copy mt-1">{{ activeView === 'poll' ? 'Add your name, choose one answer for each day, and save once.' : 'Next 7 days are always visible. Log in to cast or update your family vote.' }}</p>
-        </div>
-        <button v-if="activeView === 'availability' && isAdmin" type="button" class="btn-dark w-full sm:w-auto" @click="copyText(publicPollUrl)">
-          Copy group poll link
-        </button>
-      </div>
-
-      <form v-if="activeView === 'poll'" class="panel-card" @submit.prevent="savePublicAvailabilityPoll">
-        <label class="block">
-          <span class="form-label">Your name</span>
-          <input v-model="publicPoll.name" class="form-input mt-1" maxlength="80" autocomplete="name" placeholder="Enter your name" required />
-        </label>
-
-        <fieldset class="mt-5">
-          <legend class="form-label">Your availability</legend>
-          <div class="mt-2 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            <div v-for="day in playDays" :key="`public-poll-${day.date}`" class="p-3 sm:flex sm:items-center sm:justify-between sm:gap-4">
-              <div class="mb-2 min-w-0 sm:mb-0">
-                <strong class="block text-sm text-slate-900">{{ day.weekday }}</strong>
-                <span class="text-xs text-slate-500">{{ day.date }}</span>
-              </div>
-              <div class="grid grid-cols-3 gap-1.5 sm:w-[22rem]">
-                <button
-                  v-for="status in availabilityStatuses"
-                  :key="`public-${day.date}-${status.value}`"
-                  type="button"
-                  class="rounded-lg border px-2 py-2 text-xs font-bold transition"
-                  :class="publicPoll.responses[day.date] === status.value ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
-                  @click="publicPoll.responses[day.date] = status.value"
-                >
-                  {{ status.shortLabel || status.label }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </fieldset>
-
-        <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p class="text-xs text-slate-500">You can reopen this link on the same device to update your answers.</p>
-          <button class="btn-primary sm:min-w-36" :disabled="publicPoll.saving || !publicPoll.name.trim() || !allPublicPollDaysAnswered">
-            {{ publicPoll.saving ? 'Saving...' : 'Save availability' }}
-          </button>
-        </div>
-      </form>
-
-      <div v-if="activeView === 'availability' && !isLoggedIn" class="alert-info">
-        You can view total attendance counts below. Log in to vote for your family.
-      </div>
-
-      <section v-if="activeView === 'availability' && isAdmin" class="panel-card space-y-4">
-        <div>
-          <h3 class="text-lg font-semibold text-slate-900">Prepare WhatsApp availability poll</h3>
-          <p class="section-copy mt-1">Choose the dates and edit the English question. Each family receives its own existing member names on every linked number.</p>
-        </div>
-        <label class="block">
-          <span class="form-label">Question</span>
-          <textarea v-model="whatsappPollQuestion" rows="2" class="form-input" placeholder="Who can play badminton?"></textarea>
-        </label>
-        <div class="flex flex-wrap gap-2">
-          <label v-for="day in playDays" :key="`whatsapp-${day.date}`" class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-            <input v-model="whatsappPollDates" type="checkbox" :value="day.date" class="accent-emerald-600" />
-            {{ day.weekday }} {{ day.date }}
-          </label>
-        </div>
-        <div class="flex justify-end">
-          <button class="btn-dark" :disabled="whatsappPollSending || !whatsappPollDates.length" @click="sendWhatsAppFamilyPolls">
-            {{ whatsappPollSending ? 'Sending…' : 'Send to families' }}
-          </button>
-        </div>
-      </section>
-
-      <div v-if="activeView === 'availability' && isLoggedIn" class="panel-card">
-        <div class="mb-4">
-          <h3 class="text-lg font-semibold">Family members</h3>
-          <p class="section-copy">Add family members once, then use the count when voting who will come to play.</p>
-        </div>
-
-        <form class="grid gap-3 lg:grid-cols-[1fr_auto]" @submit.prevent="createFamilyMember">
-          <input v-model="newFamilyName" placeholder="Family member name" class="form-input" />
-          <button class="btn-dark">Add member</button>
-        </form>
-
-        <div class="mt-4 flex flex-wrap gap-2">
-          <span v-for="member in familyMembers" :key="member.id" class="inline-flex items-center gap-2 rounded border border-green-200 bg-green-50 px-3 py-1 text-sm text-green-800">
-            {{ member.name }}
-            <button type="button" class="font-semibold text-green-900 hover:text-rose-700" @click="deleteFamilyMember(member)">Remove</button>
-          </span>
-          <span v-if="!familyMembers.length" class="text-sm text-slate-600">No family members added yet.</span>
-        </div>
-      </div>
-
-      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <article v-for="day in playDays" :key="day.date" class="sub-card overflow-hidden p-0">
-          <div class="bg-gradient-to-br from-emerald-50 to-sky-50 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <div class="text-lg font-bold text-slate-900">{{ day.weekday }}</div>
-                <div class="text-sm text-slate-600">📅 {{ day.date }}</div>
-              </div>
-              <div class="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-800 shadow-sm">
-                <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                  <path d="M7 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm6.5-.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM7 10.5c-2.67 0-5 1.34-5 3v1A1.5 1.5 0 0 0 3.5 16h7A1.5 1.5 0 0 0 12 14.5v-1c0-1.66-2.33-3-5-3Zm6.5-.5c-.48 0-.95.05-1.38.15 1.15.82 1.88 1.98 1.88 3.35v1c0 .54-.14 1.05-.4 1.5h2.9a1.5 1.5 0 0 0 1.5-1.5v-.75c0-1.52-2.1-2.75-4.5-2.75Z" />
-                </svg>
-                <span>{{ day.totals.attendee_count }} people</span>
-              </div>
-            </div>
-
-            <div class="mt-3 grid grid-cols-2 gap-2 text-sm font-semibold">
-              <div class="rounded-xl border border-emerald-100 bg-white/80 p-3 text-emerald-700">✅ {{ day.totals.available_count || 0 }} available</div>
-              <div class="flex items-center gap-2 rounded-xl border border-amber-100 bg-white/80 p-3 text-amber-700"><TentativeIcon class="h-4 w-4 shrink-0" /> <span>{{ day.totals.tentative_count || 0 }} tentative</span></div>
-            </div>
-            <div v-if="isLoggedIn && (availabilityNamesByStatus(day, 'available').length || availabilityNamesByStatus(day, 'tentative').length)" class="mt-3 grid gap-2 rounded-xl border border-white/70 bg-white/80 p-3 text-sm text-slate-700 sm:grid-cols-2">
-              <div>
-                <div class="text-xs font-bold uppercase tracking-wide text-emerald-600">Available</div>
-                <div class="mt-2 flex flex-wrap gap-1.5">
-                  <span v-for="name in availabilityNamesByStatus(day, 'available')" :key="`available-${day.date}-${name}`" class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">{{ name }}</span>
-                  <span v-if="!availabilityNamesByStatus(day, 'available').length" class="text-xs text-slate-500">No available votes yet</span>
-                </div>
-              </div>
-              <div>
-                <div class="text-xs font-bold uppercase tracking-wide text-amber-600">Tentative</div>
-                <div class="mt-2 flex flex-wrap gap-1.5">
-                  <span v-for="name in availabilityNamesByStatus(day, 'tentative')" :key="`tentative-${day.date}-${name}`" class="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">{{ name }}</span>
-                  <span v-if="!availabilityNamesByStatus(day, 'tentative').length" class="text-xs text-slate-500">No tentative votes yet</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="activeView === 'availability' && isLoggedIn" class="space-y-3 p-4">
-            <div>
-              <label class="mb-1 block text-sm font-medium">Availability by member</label>
-              <div class="space-y-2 rounded border bg-white p-3">
-                <div v-for="person in availabilityPeople" :key="person.key" class="space-y-2 rounded border border-slate-100 p-2">
-                  <div class="text-sm font-medium text-slate-700">{{ person.name }}</div>
-                  <div class="grid grid-cols-3 gap-2">
-                    <button
-                      v-for="status in availabilityStatuses"
-                      :key="status.value"
-                      type="button"
-                      class="rounded border px-2 py-2 text-xs font-medium transition"
-                      :class="availabilityPersonStatus(day, person) === status.value ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'"
-                      @click="setAvailabilityPersonStatus(day, person, status.value)"
-                    >
-                      {{ status.label }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label class="mb-1 block text-sm font-medium">Notes</label>
-              <input v-model="day.notes" placeholder="Optional" class="form-input" />
-            </div>
-
-            <button class="btn-primary w-full" @click="saveAvailabilityVote(day)">Save vote</button>
-          </div>
-        </article>
-      </div>
-    </section>
+    <AvailabilityView v-if="activeView === 'availability' || activeView === 'poll'"
+      :active-view="activeView"
+      :all-public-poll-days-answered="allPublicPollDaysAnswered"
+      :availability-names-by-status="availabilityNamesByStatus"
+      :availability-people="availabilityPeople"
+      :availability-person-status="availabilityPersonStatus"
+      :availability-statuses="availabilityStatuses"
+      :copy-text="copyText"
+      :create-family-member="createFamilyMember"
+      :delete-family-member="deleteFamilyMember"
+      :family-members="familyMembers"
+      :is-admin="isAdmin"
+      :is-logged-in="isLoggedIn"
+      v-model:newFamilyName="newFamilyName"
+      :play-days="playDays"
+      :public-poll="publicPoll"
+      :public-poll-url="publicPollUrl"
+      :save-availability-vote="saveAvailabilityVote"
+      :save-public-availability-poll="savePublicAvailabilityPoll"
+      :send-whats-app-family-polls="sendWhatsAppFamilyPolls"
+      :set-availability-person-status="setAvailabilityPersonStatus"
+      v-model:whatsappPollDates="whatsappPollDates"
+      v-model:whatsappPollQuestion="whatsappPollQuestion"
+      :whatsapp-poll-sending="whatsappPollSending"
+    />
 
     <section v-if="activeView === 'costs'" class="space-y-6">
       <div>
-        <h2 class="section-title">My Costs</h2>
+        <div class="arena-view-heading"><ArenaIcon name="invoice" /><h2 class="section-title">My Costs</h2></div>
         <p class="section-copy mt-1">Review your family total, payment status, and every booking or shared cost included in the selected month.</p>
       </div>
 
@@ -759,130 +423,28 @@
         </div>
       </div>
 
-      <div v-if="monthlyInvoice" class="panel-card space-y-6">
-        <div class="grid gap-3 sm:grid-cols-3">
-          <div class="rounded-2xl border border-indigo-100 bg-indigo-50/80 p-4">
-            <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Bookings</div>
-            <div class="mt-1 text-2xl font-bold text-indigo-900">€{{ monthlyInvoice.booking_total }}</div>
-          </div>
-          <div class="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4">
-            <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Misc costs</div>
-            <div class="mt-1 text-2xl font-bold text-emerald-900">€{{ monthlyInvoice.misc_total }}</div>
-          </div>
-          <div class="rounded-2xl border p-4" :class="monthlyInvoice.balance_amount > 0 ? 'border-amber-100 bg-amber-50/80' : 'border-emerald-100 bg-emerald-50/80'">
-            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total due</div>
-            <div class="mt-1 text-2xl font-bold text-slate-900">€{{ monthlyInvoice.balance_amount ?? monthlyInvoice.total }}</div>
-          </div>
-        </div>
-
-        <div v-if="currentPaymentInvoice && currentPaymentInvoice.payment_status !== 'PAID' && (monthlyInvoice.balance_amount ?? monthlyInvoice.total) > 0" class="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 sm:p-5">
-          <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><h4 class="font-semibold text-slate-900">{{ currentPaymentInvoice.payment_method === 'PERSONAL_TIKKIE' ? 'Pay with Tikkie' : 'Pay by business bank account' }}</h4><p class="text-sm text-slate-600">Scan the QR or open the payment link to pay this invoice.</p></div><span class="w-fit rounded-full bg-white px-3 py-1 text-sm font-bold text-indigo-800">{{ paymentStatusLabel(currentPaymentInvoice.payment_status) }}</span></div>
-          <div v-if="currentPaymentInvoice.is_test_invoice" class="alert-warning">TEST MODE - This invoice is for testing only</div>
-          <div class="grid gap-5 md:grid-cols-[180px_minmax(0,1fr)] md:items-start"><img v-if="currentPaymentInvoice.qr_code_data_url" :src="currentPaymentInvoice.qr_code_data_url" alt="Payment QR code" class="mx-auto w-full max-w-[180px] rounded-xl border bg-white p-2 md:mx-0" /><div class="space-y-3 text-sm text-slate-700"><p v-if="currentPaymentInvoice.payment_url"><a :href="currentPaymentInvoice.payment_url" target="_blank" rel="noopener" class="btn-dark inline-flex">Open {{ currentPaymentInvoice.payment_method === 'PERSONAL_TIKKIE' ? 'Tikkie' : 'payment link' }}</a></p><p><strong>Total amount due:</strong> €{{ monthlyInvoice.balance_amount ?? currentPaymentInvoice.amount_due }}</p><p><strong>Due date:</strong> {{ currentPaymentInvoice.due_date }}</p><p v-if="currentPaymentInvoice.payment_method !== 'PERSONAL_TIKKIE'" class="flex flex-wrap items-center gap-2"><strong>IBAN:</strong> <span class="break-all">{{ currentPaymentInvoice.iban }}</span> <button class="btn-muted" @click="copyText(currentPaymentInvoice.iban)">Copy IBAN</button></p><p><strong>Account holder:</strong> {{ currentPaymentInvoice.account_holder_name }}</p><p class="flex flex-wrap items-center gap-2"><strong>Payment reference:</strong> <span>{{ currentPaymentInvoice.payment_reference }}</span> <button class="btn-muted" @click="copyText(currentPaymentInvoice.payment_reference)">Copy reference</button></p></div></div>
-        </div>
-
-        <div class="space-y-3">
-          <div>
-            <h3 class="text-lg font-semibold text-slate-900">Booking details</h3>
-            <p class="section-copy">Your share of each cost included in this month.</p>
-          </div>
-          <div class="overflow-x-auto rounded-xl border border-slate-200">
-            <table class="min-w-full divide-y divide-slate-200 text-sm">
-              <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th class="px-3 py-2">Type</th>
-                  <th class="px-3 py-2">Date</th>
-                  <th class="px-3 py-2">Details</th>
-                  <th class="px-3 py-2">Members</th>
-                  <th class="px-3 py-2 text-right">Total</th>
-                  <th class="px-3 py-2 text-right">Split</th>
-                  <th class="px-3 py-2 text-right">Share</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100 bg-white">
-                <tr v-for="item in monthlyInvoice.booking_items" :key="`my-booking-${item.booking_id}`" class="align-top">
-                  <td class="whitespace-nowrap px-3 py-2 font-medium text-indigo-800">Booking</td>
-                  <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ item.date }}<span class="block text-xs text-slate-500">{{ item.start_time }}-{{ item.end_time }}</span></td>
-                  <td class="px-3 py-2 text-slate-700">{{ item.court || 'Court booking' }}</td>
-                  <td class="px-3 py-2 text-slate-700">{{ (item.family_members || item.participants || []).join(' & ') }}</td>
-                  <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">€{{ item.total_cost }}</td>
-                  <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">{{ item.total_people_played }} players</td>
-                  <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ item.amount }}</td>
-                </tr>
-                <tr v-for="item in monthlyInvoice.misc_items" :key="`my-misc-${item.cost_id}`" class="align-top">
-                  <td class="whitespace-nowrap px-3 py-2 font-medium text-emerald-800">Misc</td>
-                  <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ item.purchase_date || 'No date' }}</td>
-                  <td class="px-3 py-2 text-slate-700">{{ item.title }}</td>
-                  <td class="px-3 py-2 text-slate-500">Family split</td>
-                  <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">€{{ item.amount_total || item.total_cost || 0 }}</td>
-                  <td class="whitespace-nowrap px-3 py-2 text-right text-slate-700">{{ item.split_count }} ways</td>
-                  <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ item.amount }}</td>
-                </tr>
-                <tr v-if="!monthlyInvoice.booking_items?.length && !monthlyInvoice.misc_items?.length">
-                  <td colspan="7" class="px-3 py-4 text-center text-slate-500">No booking or misc costs for this month.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      <MonthlyInvoiceDetails
+      :copy-text="copyText"
+      :current-payment-invoice="currentPaymentInvoice"
+      :monthly-invoice="monthlyInvoice"
+      :payment-status-label="paymentStatusLabel"
+    />
     </section>
 
 
-    <section v-if="activeView === 'payment-settings'" class="space-y-6">
-      <div>
-        <h2 class="section-title">Payment settings</h2>
-        <p class="section-copy mt-1">Add the two ways members can pay their monthly invoice.</p>
-      </div>
-      <div v-if="!isSuperAdmin" class="alert-warning">Only Super Admin can manage payment settings.</div>
-      <form v-else class="space-y-5" @submit.prevent="savePaymentSettings">
-        <section class="panel-card space-y-4">
-          <div>
-            <h3 class="text-lg font-semibold text-slate-900">Business bank account</h3>
-            <p class="section-copy mt-1">These details appear when Business bank account is selected for a month.</p>
-          </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label><span class="form-label">Account holder</span><input v-model="paymentSettings.account_holder_name" class="form-input" placeholder="Club or business name" /></label>
-            <label><span class="form-label">Bank name</span><input v-model="paymentSettings.bank_name" class="form-input" placeholder="Bank name" /></label>
-            <label><span class="form-label">IBAN</span><input v-model="paymentSettings.iban" class="form-input uppercase" placeholder="NL00 BANK 0000 0000 00" /></label>
-            <label><span class="form-label">BIC <span class="font-normal text-slate-400">(optional)</span></span><input v-model="paymentSettings.bic" class="form-input uppercase" placeholder="BIC" /></label>
-          </div>
-        </section>
-
-        <section class="panel-card space-y-4">
-          <div>
-            <h3 class="text-lg font-semibold text-slate-900">Monthly Tikkie link</h3>
-            <p class="section-copy mt-1">Choose a month and save the Tikkie link that belongs only to that month's invoices and reminders.</p>
-          </div>
-          <div class="grid gap-4 sm:grid-cols-3">
-            <label><span class="form-label">Invoice month</span><select v-model="paymentSettings.tikkie_month" class="form-input" @change="applyMonthlyTikkieLink"><option v-for="month in paymentMonthOptions" :key="month" :value="month">{{ monthName(month) }}</option></select></label>
-            <label><span class="form-label">Account holder</span><input v-model="paymentSettings.monthly_tikkie_account_holder_name" class="form-input" placeholder="Personal account holder name" /></label>
-            <label><span class="form-label">Tikkie link</span><input v-model="paymentSettings.monthly_tikkie_payment_url" type="url" class="form-input" placeholder="https://tikkie.me/pay/..." /></label>
-          </div>
-          <p class="text-xs text-slate-500">Changing the month loads its saved link. Saving updates only the selected month.</p>
-        </section>
-
-        <section class="panel-card space-y-4">
-          <div>
-            <h3 class="text-lg font-semibold text-slate-900">Invoice defaults</h3>
-            <p class="section-copy mt-1">Used for every newly generated monthly invoice.</p>
-          </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <label><span class="form-label">Payment description</span><input v-model="paymentSettings.description_prefix" class="form-input" placeholder="Nieuwegein Badminton Invoice" /></label>
-            <label><span class="form-label">Payment due after</span><div class="flex items-center gap-2"><input v-model.number="paymentSettings.default_due_days" type="number" min="1" max="60" class="form-input" /><span class="text-sm text-slate-600">days</span></div></label>
-          </div>
-        </section>
-
-        <div class="flex items-center gap-3">
-          <button type="submit" class="btn-dark" :disabled="paymentSettingsSaving">{{ paymentSettingsSaving ? 'Saving...' : 'Save payment settings' }}</button>
-          <span class="text-sm text-slate-500">Choose the payment method later on the monthly invoice page.</span>
-        </div>
-      </form>
-    </section>
+    <PaymentSettingsView v-if="activeView === 'payment-settings'"
+      :apply-monthly-tikkie-link="applyMonthlyTikkieLink"
+      :is-super-admin="isSuperAdmin"
+      :month-name="monthName"
+      :payment-month-options="paymentMonthOptions"
+      :payment-settings="paymentSettings"
+      :payment-settings-saving="paymentSettingsSaving"
+      :save-payment-settings="savePaymentSettings"
+    />
 
     <section v-if="activeView === 'admin-costs'" class="space-y-6">
       <div>
-        <h2 class="section-title">Invoices & Payments</h2>
+        <div class="arena-view-heading"><ArenaIcon name="invoice" /><h2 class="section-title">Invoices & Payments</h2></div>
         <p class="section-copy mt-1">Review family totals, prepare monthly invoices, and reconcile payments in one place.</p>
         <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
           <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'invoices' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'invoices'">Monthly invoices</button>
@@ -933,12 +495,12 @@
             <span v-if="adminMonthlyInvoices.month_status?.ready_at" class="text-slate-500">Ready {{ dateTimeLabel(adminMonthlyInvoices.month_status.ready_at) }}</span>
           </div>
           <div class="grid gap-3 sm:grid-cols-3">
-            <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
-              <div class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Booking total</div>
+            <div class="rounded border border-teal-100 bg-teal-50 p-3">
+              <div class="text-xs font-semibold uppercase tracking-wide text-teal-700">Booking total</div>
               <div class="mt-1 text-2xl font-bold text-indigo-900">€{{ adminMonthlyInvoices.totals.booking_total }}</div>
             </div>
-            <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
-              <div class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Shared costs</div>
+            <div class="rounded border border-teal-100 bg-teal-50 p-3">
+              <div class="text-xs font-semibold uppercase tracking-wide text-teal-700">Shared costs</div>
               <div class="mt-1 text-2xl font-bold text-emerald-900">€{{ adminMonthlyInvoices.totals.misc_total }}</div>
             </div>
             <div class="rounded border border-slate-200 bg-slate-50 p-3">
@@ -968,7 +530,7 @@
                   </div>
                   <div class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
                     <div class="rounded bg-slate-50 p-2"><div class="text-xs text-slate-500">Total cost</div><div class="font-bold">€{{ invoice.total }}</div></div>
-                    <div class="rounded bg-emerald-50 p-2"><div class="text-xs text-slate-500">Amount paid</div><div class="font-bold text-emerald-800">€{{ invoice.paid_amount || 0 }}</div></div>
+                    <div class="rounded bg-teal-50 p-2"><div class="text-xs text-slate-500">Amount paid</div><div class="font-bold text-emerald-800">€{{ invoice.paid_amount || 0 }}</div></div>
                     <div class="rounded bg-amber-50 p-2"><div class="text-xs text-slate-500">Balance</div><div class="font-bold text-amber-800">€{{ invoice.balance_amount ?? invoice.total }}</div></div>
                   </div>
                 </div>
@@ -1012,7 +574,7 @@
                     </tbody>
                   </table>
                 </div>
-                <div v-if="invoice.payment_invoice" class="flex flex-col gap-2 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+                <div v-if="invoice.payment_invoice" class="flex flex-col gap-2 rounded-lg border border-teal-100 bg-teal-50/60 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
                   <div class="min-w-0 text-slate-700">
                     <span class="font-semibold text-indigo-950">Payment</span>
                     <span class="mx-1 text-slate-400">·</span>
@@ -1056,11 +618,11 @@
                 <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th class="px-3 py-2">Invoice</th><th class="px-3 py-2">Family</th><th class="px-3 py-2">Month</th><th class="px-3 py-2 text-right">Due</th><th class="px-3 py-2">Status</th><th class="px-3 py-2 text-right">Actions</th></tr></thead>
                 <tbody class="divide-y divide-slate-100 bg-white">
                   <tr v-for="invoice in paymentInvoices" :key="invoice.id">
-                    <td class="px-3 py-2 font-semibold text-slate-900">{{ invoice.invoice_number }}<span v-if="invoice.is_test_invoice" class="ml-2 rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">Test</span><div class="text-xs font-normal text-slate-500">{{ invoice.payment_reference }}</div></td>
+                    <td class="px-3 py-2 font-semibold text-slate-900">{{ invoice.invoice_number }}<span v-if="invoice.is_test_invoice" class="ml-2 rounded bg-indigo-100 px-2 py-0.5 text-xs text-teal-800">Test</span><div class="text-xs font-normal text-slate-500">{{ invoice.payment_reference }}</div></td>
                     <td class="px-3 py-2 text-slate-700">{{ invoice.user?.name || invoice.user?.email || invoice.user?.phone || invoice.billing_name || 'Ad hoc player' }}</td>
                     <td class="whitespace-nowrap px-3 py-2 text-slate-700">{{ invoice.month || '—' }}<div class="text-xs text-slate-500">Due {{ invoice.due_date || '—' }}</div></td>
-                    <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ invoice.amount_due }}<div class="text-xs font-normal text-emerald-700">Paid €{{ invoice.paid_amount || 0 }}</div></td>
-                    <td class="px-3 py-2"><select :value="invoice.payment_status" class="form-input min-w-36" @change="setPaymentStatus(invoice, $event.target.value)"><option value="UNPAID">Payment pending</option><option value="PARTIALLY_PAID">Partially paid</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option><option value="EXPIRED">Expired</option></select></td>
+                    <td class="whitespace-nowrap px-3 py-2 text-right font-semibold text-slate-900">€{{ invoice.amount_due }}<div class="text-xs font-normal text-teal-700">Paid €{{ invoice.paid_amount || 0 }}</div></td>
+                    <td class="px-3 py-2"><select aria-label="Player account" :value="invoice.payment_status" class="form-input min-w-36" @change="setPaymentStatus(invoice, $event.target.value)"><option value="UNPAID">Payment pending</option><option value="PARTIALLY_PAID">Partially paid</option><option value="PAID">Paid</option><option value="CANCELLED">Cancelled</option><option value="EXPIRED">Expired</option></select></td>
                     <td class="px-3 py-2 text-right"><button class="btn-secondary" @click="loadPaymentInvoice(invoice.id)">Wise details</button></td>
                   </tr>
                   <tr v-if="!paymentInvoices.length"><td colspan="6" class="px-3 py-4 text-center text-slate-500">No payment invoices match this filter.</td></tr>
@@ -1069,7 +631,7 @@
             </div>
           </div>
 
-          <div v-if="selectedPaymentInvoice" class="rounded-lg border border-indigo-200 bg-indigo-50/60 p-3">
+          <div v-if="selectedPaymentInvoice" class="rounded-lg border border-indigo-200 bg-teal-50/60 p-3">
             <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h4 class="font-semibold text-slate-900">Wise payment details</h4>
@@ -1127,7 +689,7 @@
 
     <section v-if="activeView === 'members'" class="space-y-6">
       <div>
-        <h2 class="section-title">Members</h2>
+        <div class="arena-view-heading"><ArenaIcon name="family" /><h2 class="section-title">Members</h2></div>
         <p class="section-copy mt-1">Find a family, update its contact details, and expand it only when you need more options.</p>
       </div>
 
@@ -1139,7 +701,7 @@
         <section class="panel-card grid gap-4 p-4 sm:grid-cols-[1fr_auto] sm:items-end sm:p-5">
           <div>
             <label class="form-label">Find a member or family</label>
-            <input v-model="memberSearch" type="search" class="form-input" placeholder="Search name, email, phone, or family member" />
+            <input aria-label="Find a member or family" v-model="memberSearch" type="search" class="form-input" placeholder="Search name, email, phone, or family member" />
             <p class="mt-1 text-xs text-slate-500">Showing {{ filteredAdminUsers.length }} of {{ adminUsers.length }} accounts.</p>
           </div>
           <button class="btn-dark" :disabled="whatsappBackfillRunning" @click="backfillWhatsAppFamilyDetails">
@@ -1155,7 +717,7 @@
               <h3 class="text-base font-semibold text-slate-900">Club member selection</h3>
               <p class="section-copy mt-1">Select all active club players once. Linked family members are merged with their player account to keep the list unique.</p>
             </div>
-            <div class="rounded-2xl bg-indigo-50 px-4 py-2 text-center text-indigo-900">
+            <div class="rounded-2xl bg-teal-50 px-4 py-2 text-center text-indigo-900">
               <div class="text-xs font-bold uppercase tracking-wide text-indigo-500">Club members</div>
               <div class="text-2xl font-black">{{ selectedClubMemberKeys.length }}</div>
             </div>
@@ -1163,7 +725,7 @@
           <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <div>
               <label class="form-label">Players</label>
-              <select v-model="selectedClubMemberKeys" multiple size="6" class="form-input min-h-36">
+              <select aria-label="Players" v-model="selectedClubMemberKeys" multiple size="6" class="form-input min-h-36">
                 <option v-for="option in clubMemberOptions" :key="option.key" :value="option.key">{{ option.label }}</option>
               </select>
               <p class="mt-1 text-xs text-slate-500">Tip: use Ctrl/⌘ or Shift to select multiple players.</p>
@@ -1177,15 +739,15 @@
           <div class="grid gap-3 lg:grid-cols-[1.1fr_1fr_1fr_auto] lg:items-end">
             <div>
               <label class="form-label">Name</label>
-              <input v-model="member.name" class="form-input" placeholder="Name" />
+              <input aria-label="Name" v-model="member.name" class="form-input" placeholder="Name" />
             </div>
             <div>
               <label class="form-label">Email</label>
-              <input v-model="member.email" type="email" class="form-input" placeholder="Email" />
+              <input aria-label="Email" v-model="member.email" type="email" class="form-input" placeholder="Email" />
             </div>
             <div>
               <label class="form-label">WhatsApp</label>
-              <input v-model="member.whatsapp_number" class="form-input" placeholder="+31..." />
+              <input aria-label="WhatsApp" v-model="member.whatsapp_number" class="form-input" placeholder="+31..." />
             </div>
             <div class="grid gap-2">
               <button class="btn-secondary" @click="updateAdminUser(member)">Save</button>
@@ -1195,7 +757,7 @@
 
           <div class="flex flex-wrap items-center gap-2 text-xs font-semibold">
             <span class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">{{ member.family_members?.length || 0 }} family members</span>
-            <span :class="member.whatsapp_link ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" class="rounded-full px-2.5 py-1">
+            <span :class="member.whatsapp_link ? 'bg-teal-100 text-emerald-800' : 'bg-amber-100 text-amber-800'" class="rounded-full px-2.5 py-1">
               {{ member.whatsapp_link ? (member.whatsapp_link.is_primary ? 'Primary WhatsApp' : 'WhatsApp linked') : 'WhatsApp not prepared' }}
             </span>
           </div>
@@ -1205,7 +767,7 @@
             <div class="mt-4 grid gap-3 md:grid-cols-3">
             <div>
               <label class="form-label">Reset password</label>
-              <input
+              <input aria-label="Reset password"
                 v-model="newAdminUserPassword[member.id]"
                 type="password"
                 minlength="6"
@@ -1217,7 +779,7 @@
               <input
                 :checked="['admin', 'super_admin'].includes(member.role)"
                 type="checkbox"
-                class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                class="rounded border-slate-300 text-teal-700 focus:ring-indigo-500"
                 :disabled="member.role === 'super_admin' && !isSuperAdmin"
                 @change="member.role = $event.target.checked ? 'admin' : 'member'"
               />
@@ -1237,7 +799,7 @@
             </div>
           </div>
 
-          <div class="mt-3 grid gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 md:grid-cols-3">
+          <div class="mt-3 grid gap-3 rounded-xl border border-emerald-200 bg-teal-50 p-3 md:grid-cols-3">
             <label class="flex items-center gap-2 text-sm font-medium text-emerald-900">
               <input :checked="member.whatsapp_link?.is_primary" type="checkbox" @change="member.whatsapp_link = { ...(member.whatsapp_link || {}), is_primary: $event.target.checked }" />
               Primary family number
@@ -1257,13 +819,13 @@
 
           <div class="border-t border-slate-100 pt-3">
             <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <h3 class="text-sm font-semibold text-slate-900">Family members</h3>
+              <div class="arena-view-heading"><ArenaIcon name="family" /><h3 class="text-sm font-semibold text-slate-900">Family members</h3></div>
               <button class="btn-dark" @click="createAdminFamilyMember(member)">Add family member</button>
             </div>
             <div class="mb-3 grid gap-2 md:grid-cols-3">
-              <input v-model="newAdminFamilyName[member.id]" class="form-input" placeholder="Family member name" />
-              <input v-model="newAdminFamilyRelationship[member.id]" class="form-input" placeholder="Relationship" />
-              <select v-model="newAdminFamilyLinkedUser[member.id]" class="form-input">
+              <input aria-label="Family member name" v-model="newAdminFamilyName[member.id]" class="form-input" placeholder="Family member name" />
+              <input aria-label="Relationship" v-model="newAdminFamilyRelationship[member.id]" class="form-input" placeholder="Relationship" />
+              <select aria-label="Linked player account" v-model="newAdminFamilyLinkedUser[member.id]" class="form-input">
                 <option value="">No linked account</option>
                 <option v-for="option in linkableUserOptions(member.id)" :key="option.id" :value="option.id">{{ option.label }}</option>
               </select>
@@ -1274,9 +836,9 @@
                 :key="familyMember.id"
                 class="grid gap-2 rounded border bg-white p-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]"
               >
-                <input v-model="familyMember.name" class="form-input" placeholder="Family member name" />
-                <input v-model="familyMember.relationship" class="form-input" placeholder="Relationship" />
-                <select v-model="familyMember.linked_user_id" class="form-input">
+                <input aria-label="Family member name" v-model="familyMember.name" class="form-input" placeholder="Family member name" />
+                <input aria-label="Relationship" v-model="familyMember.relationship" class="form-input" placeholder="Relationship" />
+                <select aria-label="Linked player account" v-model="familyMember.linked_user_id" class="form-input">
                   <option :value="null">No linked account</option>
                   <option v-for="option in linkableUserOptions(member.id)" :key="option.id" :value="option.id">{{ option.label }}</option>
                 </select>
@@ -1325,7 +887,7 @@
                   <div class="font-semibold text-slate-900">{{ log.admin_name || log.admin_email || log.admin_phone || 'Unknown admin' }}</div>
                   <div class="text-xs text-slate-500">{{ log.admin_email || log.admin_phone || `User ${log.admin_user_id || 'unknown'}` }}</div>
                 </td>
-                <td class="px-3 py-3"><span class="rounded-full bg-indigo-50 px-2 py-1 text-xs font-bold uppercase text-indigo-700">{{ log.event_type }}</span></td>
+                <td class="px-3 py-3"><span class="rounded-full bg-teal-50 px-2 py-1 text-xs font-bold uppercase text-teal-800">{{ log.event_type }}</span></td>
                 <td class="px-3 py-3 text-slate-700">{{ log.entity_type }}<div v-if="log.entity_id" class="text-xs text-slate-500">#{{ log.entity_id }}</div></td>
                 <td class="px-3 py-3 text-slate-800">{{ log.summary }}</td>
                 <td class="px-3 py-3"><ul class="max-w-md space-y-1 text-xs text-slate-700"><li v-for="line in auditLogDetails(log.details)" :key="line" class="rounded bg-slate-50 px-2 py-1">{{ line }}</li></ul></td>
@@ -1513,7 +1075,7 @@
             <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div class="flex items-center justify-between gap-3">
                 <h4 class="font-semibold text-slate-900">Matched invoice</h4>
-                <span class="rounded-full px-3 py-1 text-xs font-bold" :class="systemChecks.payment_lookup.invoice ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">
+                <span class="rounded-full px-3 py-1 text-xs font-bold" :class="systemChecks.payment_lookup.invoice ? 'bg-teal-100 text-teal-700' : 'bg-amber-100 text-amber-700'">
                   {{ systemChecks.payment_lookup.invoice ? 'Found' : 'No match' }}
                 </span>
               </div>
@@ -1588,2424 +1150,52 @@
       </div>
     </section>
 
-    <section v-if="activeView === 'notifications'" class="space-y-6">
-      <div class="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-sky-50 p-4 shadow-sm sm:p-6">
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p class="text-xs font-bold uppercase tracking-[0.24em] text-emerald-700">Meta Cloud API</p>
-            <h2 class="mt-1 text-2xl font-black text-slate-950">WhatsApp notification admin</h2>
-            <p class="mt-2 max-w-2xl text-sm text-slate-600">Prepare English message content, control each event, and send a safe direct test before notifying families.</p>
-          </div>
-          <button class="btn-dark w-full sm:w-auto" @click="loadWhatsAppNotifications">Refresh</button>
-        </div>
-      </div>
+    <NotificationSettingsView v-if="activeView === 'notifications'"
+      :load-whats-app-notifications="loadWhatsAppNotifications"
+      :loading="loading"
+      :open-setting-notification-preview="openSettingNotificationPreview"
+      :save-whats-app-notification="saveWhatsAppNotification"
+      :test-whats-app-notification="testWhatsAppNotification"
+      :whatsapp-logs="whatsappLogs"
+      :whatsapp-settings="whatsappSettings"
+    />
 
-      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div class="space-y-4">
-          <article v-for="setting in whatsappSettings" :key="setting.id" class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div class="min-w-0">
-                <p class="text-xs font-bold uppercase tracking-wide text-slate-400">{{ setting.event_key }}</p>
-                <input v-model="setting.title" class="mt-1 w-full rounded-xl border border-transparent bg-slate-50 px-3 py-2 text-lg font-bold text-slate-900 focus:border-emerald-400 focus:outline-none" />
-                <p class="mt-1 text-sm text-slate-600">{{ setting.description }}</p>
-              </div>
-              <label class="flex items-center justify-between gap-3 rounded-full border px-3 py-2 text-sm font-semibold" :class="setting.is_enabled ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-500'">
-                Enabled
-                <input v-model="setting.is_enabled" type="checkbox" class="h-5 w-5 accent-emerald-600" />
-              </label>
-            </div>
-            <div class="mt-4 grid gap-3 sm:grid-cols-2">
-              <label class="block">
-                <span class="form-label">Fallback recipient number</span>
-                <input v-model="setting.group_id" class="form-input" placeholder="+31612345678 (optional)" />
-              </label>
-              <label class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
-                <input v-model="setting.send_to_group" type="checkbox" class="h-5 w-5 accent-emerald-600" />
-                Enable automatic delivery
-              </label>
-              <label class="block sm:col-span-2">
-                <span class="form-label">Test WhatsApp number</span>
-                <input v-model="setting.test_recipient_number" class="form-input" placeholder="+31612345678 (test sends only)" />
-                <span class="mt-1 block text-xs text-slate-500">Send test uses this number instead of the group. Use international format; it will be sent as a direct WhatsApp chat.</span>
-              </label>
-              <label class="block sm:col-span-2">
-                <span class="form-label">Message template</span>
-                <textarea v-model="setting.template" rows="5" class="form-input font-mono text-sm" placeholder="Use placeholders like {{date}}, {{court}}, {{available_count}}"></textarea>
-              </label>
-            </div>
-            <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <button class="btn-secondary" @click="testWhatsAppNotification(setting)">Send test</button>
-              <button class="btn-secondary" @click="openSettingNotificationPreview(setting)">Notify group</button>
-              <button class="btn-dark" @click="saveWhatsAppNotification(setting)">Save template</button>
-            </div>
-          </article>
-          <p v-if="!whatsappSettings.length && !loading" class="text-sm text-slate-600">No notification settings found.</p>
-        </div>
-
-        <aside class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:sticky lg:top-24 lg:self-start">
-          <h3 class="font-bold text-slate-900">Recent test sends</h3>
-          <div class="mt-3 space-y-3">
-            <div v-for="log in whatsappLogs" :key="log.id" class="rounded-xl border border-slate-100 bg-slate-50 p-3 text-sm">
-              <div class="flex items-center justify-between gap-2">
-                <span class="font-semibold text-slate-800">{{ log.event_key }}</span>
-                <span class="rounded-full px-2 py-0.5 text-xs font-bold" :class="log.status === 'sent' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">{{ log.status }}</span>
-              </div>
-              <p class="mt-2 line-clamp-4 whitespace-pre-line text-xs text-slate-600">{{ log.message }}</p>
-            </div>
-            <p v-if="!whatsappLogs.length" class="text-sm text-slate-500">No sends yet.</p>
-          </div>
-        </aside>
-      </div>
-    </section>
-
-    <div v-if="verificationDetails" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" @click.self="closeVerificationDetails">
-      <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl">
-        <div class="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
-          <div>
-            <h3 class="text-lg font-bold text-slate-900">Cost verification</h3>
-            <p class="text-sm text-slate-600">{{ verificationDetails.title }}</p>
-          </div>
-          <button class="btn-muted" @click="closeVerificationDetails">Close</button>
-        </div>
-        <div class="mt-4 grid gap-3 sm:grid-cols-4">
-          <div class="rounded border border-indigo-100 bg-indigo-50 p-3">
-            <div class="text-xs font-semibold uppercase text-indigo-600">{{ verificationDetails.itemLabel }}</div>
-            <div class="mt-1 text-xl font-bold text-indigo-900">{{ verificationDetails.items.length }}</div>
-          </div>
-          <div class="rounded border border-emerald-100 bg-emerald-50 p-3">
-            <div class="text-xs font-semibold uppercase text-emerald-600">{{ verificationDetails.peopleLabel }}</div>
-            <div class="mt-1 text-xl font-bold text-emerald-900">{{ verificationDetails.totalPeople }}</div>
-          </div>
-          <div class="rounded border border-slate-200 bg-slate-50 p-3">
-            <div class="text-xs font-semibold uppercase text-slate-500">Total cost</div>
-            <div class="mt-1 text-xl font-bold text-slate-900">€{{ verificationDetails.totalCost }}</div>
-          </div>
-          <div class="rounded border border-amber-100 bg-amber-50 p-3">
-            <div class="text-xs font-semibold uppercase text-amber-600">Your share</div>
-            <div class="mt-1 text-xl font-bold text-amber-900">€{{ verificationDetails.shareCost }}</div>
-          </div>
-        </div>
-        <div class="mt-4 overflow-x-auto rounded border border-slate-200">
-          <table class="min-w-full divide-y divide-slate-200 text-sm">
-            <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-              <tr><th class="px-3 py-2">Item</th><th class="px-3 py-2">Split count</th><th class="px-3 py-2">Total cost</th><th class="px-3 py-2">Per share</th><th class="px-3 py-2">Member share</th></tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-              <tr v-for="item in verificationDetails.items" :key="item.booking_id || item.date">
-                <td class="px-3 py-2 font-medium text-slate-900">{{ item.date || item.purchase_date }}<div class="text-xs font-normal text-slate-500">{{ item.detail || `${item.court || item.title || 'Cost'} · ${item.start_time || ''}${item.end_time ? '-' + item.end_time : ''}` }}</div></td>
-                <td class="px-3 py-2">{{ item.total_people_played || item.split_count }}</td>
-                <td class="px-3 py-2">€{{ item.total_cost || item.amount_total }}</td>
-                <td class="px-3 py-2">€{{ item.cost_per_person || item.amount }}</td>
-                <td class="px-3 py-2 font-semibold">€{{ item.amount }}<div v-if="item.participants?.length" class="text-xs font-normal text-slate-500">{{ item.participants.join(', ') }}</div></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <CostVerificationDialog
+      :close-verification-details="closeVerificationDetails"
+      :verification-details="verificationDetails"
+    />
 
   </div>
 </template>
 
 <script>
-import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { clearAuthSession, getAuthSessionVersion, getSessionValue, hasAuthSession, setSessionValue } from '../authSession'
-
-const TentativeIcon = (props) => h('svg', {
-  ...props,
-  viewBox: '0 0 20 20',
-  fill: 'currentColor',
-  'aria-hidden': 'true'
-}, [
-  h('path', { d: 'M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm0 13.25a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1.27-4.88c-.47.28-.52.42-.52.88a.75.75 0 0 1-1.5 0c0-1.21.58-1.78 1.25-2.17.68-.4 1.1-.7 1.1-1.43 0-.8-.63-1.35-1.55-1.35-.82 0-1.42.43-1.74 1.25a.75.75 0 0 1-1.4-.54c.54-1.4 1.74-2.21 3.14-2.21 1.78 0 3.05 1.16 3.05 2.85 0 1.58-1.04 2.2-1.83 2.67Z' })
-])
+import ArenaIcon from './ArenaIcon.vue'
+import TentativeIcon from './dashboard/TentativeIcon'
+import useDashboard from './dashboard/useDashboard'
+import PublicWelcome from './dashboard/PublicWelcome.vue'
+import NotificationPreviewDialog from './dashboard/NotificationPreviewDialog.vue'
+import MemberBookingsView from './dashboard/MemberBookingsView.vue'
+import AvailabilityView from './dashboard/AvailabilityView.vue'
+import PaymentSettingsView from './dashboard/PaymentSettingsView.vue'
+import NotificationSettingsView from './dashboard/NotificationSettingsView.vue'
+import CostVerificationDialog from './dashboard/CostVerificationDialog.vue'
+import MonthlyInvoiceDetails from './dashboard/MonthlyInvoiceDetails.vue'
 
 export default {
-  components: { TentativeIcon },
-  props: {
-    initialView: {
-      type: String,
-      default: 'availability'
-    }
+  components: {
+    ArenaIcon, TentativeIcon,
+    PublicWelcome,
+    NotificationPreviewDialog,
+    MemberBookingsView,
+    AvailabilityView,
+    PaymentSettingsView,
+    NotificationSettingsView,
+    CostVerificationDialog,
+    MonthlyInvoiceDetails
   },
-  setup(props) {
-    const router = useRouter()
-    const activeView = ref(props.initialView)
-    const bookings = ref([])
-    const completedBookingHistory = ref([])
-    const archivedBookingHistory = ref([])
-    const courts = ref([])
-    const freezePeriods = ref([])
-    const familyMembers = ref([])
-    const adminUsers = ref([])
-    const playDays = ref([])
-    const miscCosts = ref([])
-    const miscCostArchiveCutoffDate = ref(null)
-    const selectedClubMemberKeys = ref([])
-    const monthlyInvoice = ref(null)
-    const currentPaymentInvoice = ref(null)
-    const defaultWiseRedirectUrl = `${window.location.origin}/my-invoices`
-    const defaultWiseWebhookUrl = `${window.location.origin}/api/webhooks/wise/incoming-transfer`
-    const publicPollUrl = `${window.location.origin}/poll`
-    const adminMonthlyInvoices = ref(null)
-    const monthlyInvoiceMonth = ref(localIsoMonth())
-    const monthlyPaymentMethod = ref('BUSINESS_BANK')
-    const whatsappSettings = ref([])
-    const whatsappLogs = ref([])
-    const notificationPreview = ref({ open: false, type: '', title: '', endpoint: '', payload: {}, message: '', recipient: '', testRecipient: '', testRecipients: [], sending: false })
-    const publicPoll = ref({
-      name: window.localStorage.getItem('badminton_poll_name') || '',
-      voterToken: window.localStorage.getItem('badminton_poll_voter_token') || '',
-      responses: loadSavedPublicPollResponses(),
-      saving: false
-    })
-    const systemChecks = ref(null)
-    const systemCheckQuery = ref('')
-    const systemCheckWhatsAppRecipient = ref('')
-    const passwordResetTestIdentifier = ref('')
-    const passwordResetTestResult = ref(null)
-    const adminAuditLogs = ref([])
-    const completedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
-    const archivedBookingPagination = ref({ page: 1, per_page: 12, total: 0, pages: 0 })
-    const adminAuditPagination = ref({ page: 1, per_page: 50, total: 0, pages: 0 })
-    const openBookingIds = ref(new Set())
-    const openCompletedBookingIds = ref(new Set())
-    const openMiscCostIds = ref(new Set())
-    const loading = ref(false)
-    const paymentSettingsSaving = ref(false)
-    const paymentTestGenerating = ref(false)
-    const paymentTestRefreshing = ref(false)
-    const paymentWebhookSubscribing = ref(false)
-    const paymentWebhookStatusLoading = ref(false)
-    const systemCheckRefreshing = ref(false)
-    const systemCheckWhatsAppTesting = ref(false)
-    const passwordResetTesting = ref(false)
-    const retryingWiseEventId = ref(null)
-    const errorMsg = ref('')
-    const editingBookingId = ref(null)
-    const bookingDate = ref(localIsoDate())
-    const startTime = ref('18:00')
-    const endTime = ref('19:00')
-    const bookingCost = ref('0')
-    const bookingStatus = ref('confirmed')
-    const bookingNotes = ref('')
-    const selectedCourtId = ref('')
-    const recurringMode = ref(false)
-    const recurringIntervalWeeks = ref(1)
-    const recurringCount = ref(1)
-    const recurringEndDate = ref(localIsoDate())
-    const adminBookingTab = ref('bookings')
-    const adminCostTab = ref('invoices')
-    const completedBookingTab = ref('completed')
-    const invoiceDetailTab = ref('booking')
-    const newCourtName = ref('')
-    const newCourtLocation = ref('')
-    const newCourtDescription = ref('')
-    const newCourtMapLink = ref('')
-    const newCourtRate = ref('25')
-    const newCourtHalfHourRate = ref('12.5')
-    const newFreezeTitle = ref('')
-    const newFreezeStartDate = ref(localIsoDate())
-    const newFreezeEndDate = ref(localIsoDate())
-    const newFreezeReason = ref('')
-    const newFamilyName = ref('')
-    const newParticipantName = ref({})
-    const newParticipantPhone = ref({})
-    const newParticipantStatus = ref({})
-    const newParticipantMember = ref({})
-    const newAdminUserPassword = ref({})
-    const newAdminFamilyName = ref({})
-    const newAdminFamilyRelationship = ref({})
-    const newAdminFamilyLinkedUser = ref({})
-    const memberSearch = ref('')
-    const whatsappBackfillRunning = ref(false)
-    const whatsappPollDates = ref([])
-    const whatsappPollQuestion = ref('Who can play badminton?')
-    const whatsappPollSending = ref(false)
-    const newMiscTitle = ref('')
-    const newMiscDescription = ref('')
-    const newMiscAmount = ref('')
-    const newMiscPaidBy = ref('')
-    const newMiscPurchaseDate = ref(localIsoDate())
-    const newMiscSplitCount = ref(1)
-    const newMiscSplitScope = ref('all_members')
-    const msg = ref('')
-    const verificationDetails = ref(null)
-    const isAdmin = ref(false)
-    const isSuperAdmin = ref(false)
-    const paymentSettings = ref({ qr_enabled: true, test_mode: true, default_due_days: 14 })
-    const paymentWebhookStatus = ref(null)
-    const paymentMonthOptions = computed(() => {
-      const options = []
-      const current = new Date()
-      for (let offset = 12; offset >= -12; offset -= 1) {
-        const date = new Date(current.getFullYear(), current.getMonth() - offset, 1)
-        options.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`)
-      }
-      return options
-    })
-
-    const wiseWebhookHealthText = computed(() => {
-      const status = paymentWebhookStatus.value
-      if (!status) return 'Connection status has not been checked in this browser session.'
-      if (!status.subscription_configured) return 'Create the Wise webhook subscription once, then make a test payment using the exact invoice reference.'
-      if (!status.latest_event) return 'Subscription is saved, but no Wise webhook event has reached this app yet.'
-      if (status.latest_event.status === 'MATCHED') return 'Connection is working: the latest Wise webhook matched an invoice and updated its payment status.'
-      if (status.latest_event.status === 'UNMATCHED') return 'Webhook reached the app, but no invoice reference matched the incoming transfer.'
-      if (status.latest_event.status === 'ERROR') return `Webhook reached the app, but Wise transfer lookup failed: ${status.latest_event.error_message || 'unknown error'}.`
-      return `Webhook reached the app with status ${status.latest_event.status}.`
-    })
-    const paymentInvoices = ref([])
-    const paymentStatusSavingId = ref(null)
-    const selectedPaymentInvoice = ref(null)
-    const paymentFilter = ref('all')
-    const apiBase = import.meta.env.VITE_API_BASE || ''
-
-    function localIsoDate(date = new Date()) {
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
-      return `${year}-${month}-${day}`
-    }
-
-    function localIsoMonth(date = new Date()) {
-      return localIsoDate(date).slice(0, 7)
-    }
-
-    const token = () => getSessionValue('auth_token')
-    const hasToken = () => hasAuthSession()
-    const isLoggedIn = computed(() => hasAuthSession())
-    const activeCourts = computed(() => courts.value.filter((court) => court.is_active !== false))
-    const selectedCourt = computed(() => activeCourts.value.find((court) => String(court.id) === String(selectedCourtId.value)) || null)
-    const calculatedBookingCost = computed(() => {
-      const court = selectedCourt.value
-      const duration = bookingDurationMinutes(startTime.value, endTime.value)
-      if (!court || !duration) return '0.00'
-      const hourlyRate = Number(court.hourly_rate || 0)
-      const halfHourRate = Number(court.half_hour_rate ?? (hourlyRate / 2))
-      const hours = Math.floor(duration / 60)
-      const remainder = duration % 60
-      const halfHours = Math.ceil(remainder / 30)
-      return ((hours * hourlyRate) + (halfHours * halfHourRate)).toFixed(2)
-    })
-    const todayIso = () => localIsoDate()
-    const upcomingBookings = computed(() => {
-      const today = todayIso()
-      return bookings.value.filter((booking) => booking.booking_date >= today && booking.status !== 'completed')
-    })
-    const completedBookings = computed(() => completedBookingHistory.value)
-    const archivedBookings = computed(() => archivedBookingHistory.value)
-    const clubMemberOptions = computed(() => buildClubMemberOptions())
-    const filteredAdminUsers = computed(() => {
-      const query = memberSearch.value.trim().toLowerCase()
-      if (!query) return adminUsers.value
-      return adminUsers.value.filter((member) => [
-        member.name, member.email, member.phone, member.whatsapp_number,
-        ...(member.family_members || []).map((item) => item.name)
-      ].some((value) => String(value || '').toLowerCase().includes(query)))
-    })
-    const maxFamilyAttendees = computed(() => familyMembers.value.length + 1)
-    const familyAttendancePeople = computed(() => {
-      getAuthSessionVersion()
-      const selfName = getSessionValue('member_name') || getSessionValue('member_email') || getSessionValue('member_phone') || 'You'
-      return [
-        { key: 'self', type: 'self', name: selfName, phone: getSessionValue('member_phone') || '' },
-        ...familyMembers.value.map((member) => ({
-          key: `family:${member.id}`,
-          type: 'family',
-          family_member_id: member.id,
-          name: member.name
-        }))
-      ]
-    })
-    const availabilityPeople = computed(() => familyAttendancePeople.value)
-    function linkableUserOptions(ownerId) {
-      return adminUsers.value
-        .filter((candidate) => candidate.id !== ownerId)
-        .map((candidate) => ({
-          id: candidate.id,
-          label: candidate.name || candidate.email || candidate.phone || `User ${candidate.id}`
-        }))
-    }
-
-    const memberOptions = computed(() => adminUsers.value.flatMap((member) => {
-      const ownerLabel = member.name || member.email || member.phone || 'Member'
-      const options = [{
-        key: `user:${member.id}`,
-        label: ownerLabel,
-        name: ownerLabel,
-        phone: member.phone || member.email || ownerLabel,
-        is_adhoc: false
-      }]
-      for (const familyMember of member.family_members || []) {
-        options.push({
-          key: `family:${familyMember.id}`,
-          label: `${familyMember.name} (${ownerLabel})`,
-          name: familyMember.name,
-          phone: `family:${familyMember.id}`,
-          is_adhoc: false
-        })
-      }
-      return options
-    }))
-    const playTotalsByDate = computed(() => {
-      return playDays.value.reduce((totals, day) => {
-        totals[day.date] = day.totals || defaultPlayTotals()
-        return totals
-      }, {})
-    })
-    const attendanceStatuses = [
-      { value: 'attending', label: 'Attending' },
-      { value: 'participated', label: 'Participated' },
-      { value: 'not_attending', label: 'No' },
-      { value: 'tentative', label: 'Tentative' }
-    ]
-    const availabilityStatuses = [
-      { value: 'available', label: 'Available', shortLabel: 'Yes' },
-      { value: 'tentative', label: 'Tentative', shortLabel: 'Maybe' },
-      { value: 'not_available', label: 'No', shortLabel: 'No' }
-    ]
-    const allPublicPollDaysAnswered = computed(() => playDays.value.length > 0 && playDays.value.every(
-      (day) => availabilityStatuses.some((status) => status.value === publicPoll.value.responses[day.date])
-    ))
-
-    function parseBookingDate(dateValue) {
-      return new Date(`${dateValue}T00:00:00`)
-    }
-
-    function bookingDurationMinutes(startValue, endValue) {
-      const [startHour, startMinute] = (startValue || '').split(':').map(Number)
-      const [endHour, endMinute] = (endValue || '').split(':').map(Number)
-      if ([startHour, startMinute, endHour, endMinute].some((value) => Number.isNaN(value))) return 0
-      const start = startHour * 60 + startMinute
-      const end = endHour * 60 + endMinute
-      return end > start ? end - start : 0
-    }
-
-    function bookingDayLabel(dateValue) {
-      const date = parseBookingDate(dateValue)
-      return date.toLocaleDateString(undefined, { weekday: 'short' })
-    }
-
-    function bookingDateLabel(dateValue) {
-      const date = parseBookingDate(dateValue)
-      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    }
-
-    function statusLabel(value, fallback = 'Not started') {
-      const rawStatus = (value || '').toString().trim().toLowerCase()
-      if (!rawStatus) return fallback
-      const labels = {
-        confirmed: 'Created',
-        pending: 'Created',
-        not_generated: 'Created',
-        deleted: 'Cancelled',
-        cancelled: 'Cancelled',
-        completed: 'Completed',
-        settled: 'Settled',
-      }
-      if (labels[rawStatus]) return labels[rawStatus]
-      return rawStatus
-        .split('_')
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ')
-    }
-
-    function invoiceStatusLabel(value) {
-      return statusLabel(value, 'Created')
-    }
-
-    function bookingLifecycleStatus(booking) {
-      return statusLabel(booking?.status, 'Created')
-    }
-
-    function bookingStatusSummary(booking) {
-      return bookingLifecycleStatus(booking)
-    }
-
-    function bookingItemStatusSummary(item) {
-      return statusLabel(item?.booking_status, 'Completed')
-    }
-
-    function isBookingOpen(bookingId) {
-      return openBookingIds.value.has(bookingId)
-    }
-
-    function toggleBooking(bookingId) {
-      const nextOpenIds = new Set(openBookingIds.value)
-      if (nextOpenIds.has(bookingId)) nextOpenIds.delete(bookingId)
-      else nextOpenIds.add(bookingId)
-      openBookingIds.value = nextOpenIds
-    }
-
-    function isCompletedBookingOpen(bookingId) {
-      return openCompletedBookingIds.value.has(bookingId)
-    }
-
-    function toggleCompletedBooking(bookingId) {
-      const nextOpenIds = new Set(openCompletedBookingIds.value)
-      if (nextOpenIds.has(bookingId)) nextOpenIds.delete(bookingId)
-      else nextOpenIds.add(bookingId)
-      openCompletedBookingIds.value = nextOpenIds
-    }
-
-    function isMiscCostOpen(costId) {
-      return openMiscCostIds.value.has(costId)
-    }
-
-    function toggleMiscCost(costId) {
-      const nextOpenIds = new Set(openMiscCostIds.value)
-      if (nextOpenIds.has(costId)) nextOpenIds.delete(costId)
-      else nextOpenIds.add(costId)
-      openMiscCostIds.value = nextOpenIds
-    }
-
-    function participantStatusCounts(booking) {
-      return (booking.participants || []).reduce((counts, participant) => {
-        const status = participant.status || 'tentative'
-        if (status === 'attending' || status === 'participated') counts.attending += 1
-        else if (status === 'not_attending') counts.not_attending += 1
-        else counts.tentative += 1
-        return counts
-      }, { attending: 0, not_attending: 0, tentative: 0 })
-    }
-
-    function participantCompletedStatusLabel(participant) {
-      return participant?.status === 'participated' ? 'Participated' : statusLabel(participant?.status, 'Participated')
-    }
-
-    function participantName(participant) {
-      return participant.name || participant.phone || 'Player'
-    }
-
-    function participantNamesByStatus(booking, status) {
-      return (booking.participants || [])
-        .filter((participant) => (participant.status || 'tentative') === status)
-        .map(participantName)
-        .filter(Boolean)
-    }
-
-    function familyPersonBookingStatus(booking, person) {
-      const participantKey = person.type === 'self' ? person.phone : `family:${person.family_member_id}`
-      const participant = (booking.participants || []).find((item) => item.phone === participantKey)
-      return participant?.status || 'not_attending'
-    }
-
-    function bookingInterest(booking) {
-      return playTotalsByDate.value[booking.booking_date] || defaultPlayTotals()
-    }
-
-    function defaultPlayTotals() {
-      return {
-        available_families: 0,
-        tentative_families: 0,
-        attendee_count: 0,
-        available_count: 0,
-        tentative_count: 0,
-        available_attendees: [],
-        tentative_attendees: []
-      }
-    }
-
-    function completedInvoiceViewActive() {
-      return activeView.value === 'costs' || activeView.value === 'admin-costs'
-    }
-
-    function planningNames(booking, status) {
-      const totals = bookingInterest(booking)
-      const attendees = status === 'tentative'
-        ? totals.tentative_attendees || []
-        : totals.available_attendees || []
-      return attendees.map((attendee) => attendee.name).filter(Boolean)
-    }
-
-    function availabilityNamesByStatus(day, status) {
-      const totals = day?.totals || defaultPlayTotals()
-      const attendees = status === 'tentative' ? totals.tentative_attendees || [] : totals.available_attendees || []
-      const names = attendees.map((attendee) => attendee.name).filter(Boolean)
-      return [...new Set(names)].slice(0, 18)
-    }
-
-    function availabilityVoterNames(day) {
-      return [
-        ...availabilityNamesByStatus(day, 'available'),
-        ...availabilityNamesByStatus(day, 'tentative')
-      ].slice(0, 12)
-    }
-
-    function showVerificationDetails(invoice, title = 'Cost verification') {
-      const bookingItems = invoice?.booking_items || []
-      const miscItems = (invoice?.misc_items || []).map((item) => ({
-        ...item,
-        date: item.purchase_date || 'No purchase date',
-        detail: `${item.title || 'Misc cost'} · ${item.status || 'open'}`,
-        amount_total: Number(item.amount || 0) * Number(item.split_count || 1),
-        cost_per_person: item.amount,
-        total_people_played: item.split_count,
-      }))
-      const items = [...bookingItems, ...miscItems]
-      verificationDetails.value = {
-        title,
-        items,
-        itemLabel: 'Cost items',
-        peopleLabel: 'Split entries',
-        totalPeople: items.reduce((sum, item) => sum + Number(item.total_people_played || item.split_count || 0), 0),
-        totalCost: items.reduce((sum, item) => sum + Number(item.total_cost ?? item.amount_total ?? 0), 0).toFixed(2),
-        shareCost: Number(invoice?.total ?? ((invoice?.booking_total || 0) + (invoice?.misc_total || 0))).toFixed(2)
-      }
-    }
-
-    function closeVerificationDetails() {
-      verificationDetails.value = null
-    }
-
-    async function fetchJson(url, options = {}) {
-      const headers = { Accept: 'application/json', ...(options.headers || {}) }
-      if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
-        headers['Content-Type'] = 'application/json'
-      }
-      if (token()) headers.Authorization = `Bearer ${token()}`
-      const fullUrl = /^https?:\/\//.test(url) ? url : `${apiBase}${url}`
-      const res = await fetch(fullUrl, { ...options, headers, cache: 'no-store' })
-      const text = await res.text()
-      let data = {}
-      if (text) {
-        try {
-          data = JSON.parse(text)
-        } catch (err) {
-          const plainText = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-          data = { error: plainText || `Request failed (${res.status})` }
-        }
-      }
-      if (!res.ok) {
-        const fallback = res.status === 401
-          ? 'Please log in to continue.'
-          : res.status === 404
-            ? 'The requested service was not found.'
-            : `Request failed (${res.status})`
-        if (res.status === 401) clearAuthSession()
-        throw new Error(data.error || fallback)
-      }
-      return data
-    }
-
-    function normalizePlayDay(day) {
-      const vote = day.vote || {}
-      const status = vote.status || (vote.available ? 'available' : 'not_available')
-      const attendees = (vote.attendee_details || []).map((attendee) => ({
-        ...attendee,
-        status: attendee.status || 'available'
-      }))
-      if (!attendees.length && status !== 'not_available') {
-        attendees.push({
-          type: 'self',
-          name: getSessionValue('member_name') || getSessionValue('member_email') || getSessionValue('member_phone') || 'You',
-          phone: getSessionValue('member_phone') || '',
-          status
-        })
-      }
-      return {
-        ...day,
-        status,
-        available: status === 'available',
-        attendee_count: status === 'available' ? Math.max(1, vote.attendee_count || 1) : 0,
-        attendees,
-        notes: vote.notes || '',
-        totals: day.totals || defaultPlayTotals()
-      }
-    }
-
-    function normalizeVote(day) {
-      const availableCount = (day.attendees || []).filter((attendee) => attendee.status === 'available').length
-      const tentativeCount = (day.attendees || []).filter((attendee) => attendee.status === 'tentative').length
-      day.status = availableCount ? 'available' : tentativeCount ? 'tentative' : 'not_available'
-      day.available = availableCount > 0
-      day.attendee_count = availableCount
-    }
-
-    function setAvailabilityStatus(day, status) {
-      day.status = status
-      day.available = status === 'available'
-      normalizeVote(day)
-    }
-
-    function availabilityPersonPayload(person) {
-      return {
-        type: person.type,
-        family_member_id: person.family_member_id,
-        name: person.name,
-        phone: person.phone,
-        status: 'available'
-      }
-    }
-
-    function availabilityPersonKey(person) {
-      return person.type === 'self' ? 'self' : `family:${person.family_member_id}`
-    }
-
-    function availabilityPersonIndex(day, person) {
-      const key = availabilityPersonKey(person)
-      return (day.attendees || []).findIndex((attendee) => {
-        return attendee.type === 'self'
-          ? key === 'self'
-          : key === `family:${attendee.family_member_id}`
-      })
-    }
-
-    function availabilityPersonStatus(day, person) {
-      const index = availabilityPersonIndex(day, person)
-      return index >= 0 ? day.attendees[index].status || 'available' : 'not_available'
-    }
-
-    function setAvailabilityPersonStatus(day, person, status) {
-      const current = [...(day.attendees || [])]
-      const index = availabilityPersonIndex(day, person)
-      if (status === 'not_available') {
-        if (index >= 0) {
-          current.splice(index, 1)
-        }
-      } else {
-        const payload = { ...availabilityPersonPayload(person), status }
-        if (index >= 0) {
-          current[index] = { ...current[index], ...payload }
-        } else {
-          current.push(payload)
-        }
-      }
-      day.attendees = current
-      normalizeVote(day)
-    }
-
-    function clearPrivateState() {
-      familyMembers.value = []
-      adminUsers.value = []
-      courts.value = []
-      freezePeriods.value = []
-      systemChecks.value = null
-      systemCheckQuery.value = ''
-      systemCheckWhatsAppRecipient.value = ''
-      isAdmin.value = false
-      isSuperAdmin.value = false
-      newParticipantName.value = {}
-      newParticipantPhone.value = {}
-      newParticipantStatus.value = {}
-      newParticipantMember.value = {}
-      errorMsg.value = ''
-      msg.value = ''
-    }
-
-    async function handleAuthChanged() {
-      if (!hasToken()) {
-        clearPrivateState()
-      } else {
-        await loadCurrentUser()
-      }
-      await loadDashboard()
-    }
-
-    async function loadBookings(options = {}) {
-      const params = new URLSearchParams()
-      if (options.status) params.set('status', options.status)
-      if (options.scope) params.set('scope', options.scope)
-      if (options.page) params.set('page', options.page)
-      if (options.perPage) params.set('per_page', options.perPage)
-      if (options.month) params.set('month', options.month)
-      const query = params.toString()
-      const bookingsData = await fetchJson(`/api/bookings${query ? `?${query}` : ''}`)
-      if (options.status === 'completed') {
-        completedBookingPagination.value = bookingsData.pagination || completedBookingPagination.value
-        completedBookingHistory.value = bookingsData.bookings || []
-      } else if (options.status === 'archive') {
-        archivedBookingPagination.value = bookingsData.pagination || archivedBookingPagination.value
-        archivedBookingHistory.value = bookingsData.bookings || []
-      } else {
-        bookings.value = bookingsData.bookings || []
-      }
-    }
-
-    async function loadCourts() {
-      const courtsData = await fetchJson('/api/admin/courts?include_inactive=0')
-      courts.value = courtsData.courts || []
-      if (!selectedCourtId.value && activeCourts.value.length) {
-        selectedCourtId.value = activeCourts.value[0].id
-      }
-    }
-
-    async function loadFreezePeriods() {
-      const data = await fetchJson('/api/admin/freeze-periods')
-      freezePeriods.value = data.periods || []
-    }
-
-    async function loadFamilyMembers() {
-      const data = await fetchJson('/api/family-members')
-      familyMembers.value = data.members || []
-    }
-
-    async function loadPlayAvailability() {
-      const params = new URLSearchParams({ start_date: localIsoDate(), days: '7' })
-      const data = await fetchJson(`/api/play-availability?${params.toString()}`)
-      playDays.value = (data.days || []).map(normalizePlayDay)
-    }
-
-    function loadSavedPublicPollResponses() {
-      try {
-        return JSON.parse(window.localStorage.getItem('badminton_poll_responses') || '{}')
-      } catch (_error) {
-        return {}
-      }
-    }
-
-    function publicPollVoterToken() {
-      if (!publicPoll.value.voterToken) {
-        const randomPart = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
-        publicPoll.value.voterToken = randomPart.replace(/[^A-Za-z0-9_-]/g, '')
-        window.localStorage.setItem('badminton_poll_voter_token', publicPoll.value.voterToken)
-      }
-      return publicPoll.value.voterToken
-    }
-
-    async function savePublicAvailabilityPoll() {
-      publicPoll.value.saving = true
-      errorMsg.value = ''
-      msg.value = ''
-      try {
-        const responses = playDays.value.map((day) => ({
-          play_date: day.date,
-          status: publicPoll.value.responses[day.date]
-        }))
-        await fetchJson('/api/play-availability/public', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: publicPoll.value.name.trim(),
-            voter_token: publicPollVoterToken(),
-            responses
-          })
-        })
-        window.localStorage.setItem('badminton_poll_name', publicPoll.value.name.trim())
-        window.localStorage.setItem('badminton_poll_responses', JSON.stringify(publicPoll.value.responses))
-        msg.value = 'Your availability is saved. You can update it here at any time.'
-        await loadPlayAvailability()
-        window.scrollTo({ top: 0, behavior: 'smooth' })
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        publicPoll.value.saving = false
-      }
-    }
-
-    async function loadMiscCosts(options = {}) {
-      const params = new URLSearchParams()
-      if (options.status) params.set('status', options.status)
-      const query = params.toString()
-      const data = await fetchJson(`/api/misc-costs${query ? `?${query}` : ''}`)
-      miscCosts.value = data.costs || []
-      miscCostArchiveCutoffDate.value = data.archive_cutoff_date || miscCostArchiveCutoffDate.value
-    }
-
-    async function loadMonthlyInvoice() {
-      const data = await fetchJson(`/api/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
-      monthlyInvoice.value = data
-      const paymentData = await fetchJson(`/api/payment-invoices/current?month=${monthlyInvoiceMonth.value}`)
-      currentPaymentInvoice.value = paymentData.invoice === undefined ? paymentData : paymentData.invoice
-      completedBookingPagination.value = { ...completedBookingPagination.value, page: 1 }
-      await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
-    }
-
-    async function loadAdminMonthlyInvoices() {
-      const data = await fetchJson(`/api/admin/invoices/monthly?month=${monthlyInvoiceMonth.value}`)
-      adminMonthlyInvoices.value = data
-      monthlyPaymentMethod.value = data.month_status?.payment_method || 'BUSINESS_BANK'
-      completedBookingPagination.value = { ...completedBookingPagination.value, page: 1 }
-      await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
-    }
-
-    async function loadAdminUsers() {
-      const data = await fetchJson('/api/admin/users')
-      adminUsers.value = data.users || []
-      syncSelectedClubMembers()
-    }
-
-
-    async function loadAdminAuditLogs() {
-      const data = await fetchJson(`/api/admin/audit-logs?page=${adminAuditPagination.value.page}&per_page=${adminAuditPagination.value.per_page}`)
-      adminAuditLogs.value = data.logs || []
-      adminAuditPagination.value = data.pagination || adminAuditPagination.value
-    }
-
-    function auditLogDate(value) {
-      if (!value) return 'Unknown time'
-      return new Date(value).toLocaleString()
-    }
-
-    function auditLogDetails(details) {
-      if (!details || (typeof details === 'object' && !Object.keys(details).length)) return ['No additional details']
-      const lines = []
-      const source = details.booking || details.court || details.user || details.family_member || details.cost || details.invoice || details.freeze_period || details
-      if (source.name || source.title) lines.push(`Name: ${source.name || source.title}`)
-      if (source.booking_date || source.date) lines.push(`Date: ${source.booking_date || source.date}${source.start_time ? ` ${source.start_time}-${source.end_time || ''}` : ''}`)
-      if (source.court?.name || source.court) lines.push(`Court: ${source.court?.name || source.court}`)
-      if (source.amount || source.total_amount || source.cost) lines.push(`Amount: €${source.amount || source.total_amount || source.cost}`)
-      if (details.owner_id) lines.push(`Owner user: #${details.owner_id}`)
-      if (details.changes) {
-        Object.entries(details.changes).forEach(([field, change]) => lines.push(`${field.replaceAll('_', ' ')}: ${change.from ?? 'blank'} → ${change.to ?? 'blank'}`))
-      }
-      return lines.length ? lines : Object.entries(source).slice(0, 6).map(([key, value]) => `${key.replaceAll('_', ' ')}: ${typeof value === 'object' ? 'updated' : value}`)
-    }
-
-    async function changeAdminAuditPage(page) {
-      if (page < 1 || (adminAuditPagination.value.pages && page > adminAuditPagination.value.pages)) return
-      adminAuditPagination.value = { ...adminAuditPagination.value, page }
-      await loadDashboard()
-    }
-
-
-    function normalizePaymentSettings(settings = {}) {
-      settings = settings || {}
-      const textFields = [
-        'account_holder_name',
-        'bank_name',
-        'bic',
-        'iban',
-        'description_prefix',
-        'wise_api_base_url',
-        'wise_client_key',
-        'wise_payment_url',
-        'wise_profile_id',
-        'wise_redirect_url',
-        'wise_webhook_url',
-        'wise_webhook_subscription_id'
-      ]
-      const normalized = {
-        qr_enabled: true,
-        test_mode: true,
-        default_due_days: 14,
-        wise_api_base_url: 'https://api.wise.com',
-        ...settings,
-        wise_api_token: '',
-        wise_redirect_url: settings.wise_redirect_url || defaultWiseRedirectUrl,
-        wise_webhook_url: settings.wise_webhook_url || defaultWiseWebhookUrl
-      }
-      normalized.tikkie_month = settings.tikkie_month || localIsoMonth()
-      normalized.monthly_tikkie_links = settings.monthly_tikkie_links || []
-      for (const field of textFields) {
-        normalized[field] = normalized[field] ?? ''
-      }
-      normalized.default_due_days = Number(normalized.default_due_days || 14)
-      normalized.qr_enabled = Boolean(normalized.qr_enabled)
-      normalized.test_mode = Boolean(normalized.test_mode)
-      normalized.wise_api_token_configured = Boolean(normalized.wise_api_token_configured)
-      return normalized
-    }
-
-    function applyMonthlyTikkieLink() {
-      const saved = (paymentSettings.value.monthly_tikkie_links || []).find((item) => item.month === paymentSettings.value.tikkie_month)
-      paymentSettings.value.monthly_tikkie_payment_url = saved?.tikkie_payment_url || ''
-      paymentSettings.value.monthly_tikkie_account_holder_name = saved?.tikkie_account_holder_name || ''
-    }
-
-    async function loadPaymentSettings() {
-      if (!isSuperAdmin.value) return
-      const settings = await fetchJson('/api/admin/payment-settings')
-      paymentSettings.value = normalizePaymentSettings(settings)
-      applyMonthlyTikkieLink()
-    }
-
-    async function savePaymentSettings() {
-      paymentSettingsSaving.value = true
-      try {
-        const settings = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
-        paymentSettings.value = normalizePaymentSettings(settings)
-        applyMonthlyTikkieLink()
-        msg.value = 'Payment settings saved.'
-        errorMsg.value = ''
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        paymentSettingsSaving.value = false
-      }
-    }
-
-    async function persistPaymentSettingsForTest() {
-      const settings = await fetchJson('/api/admin/payment-settings', { method: 'PUT', body: JSON.stringify(paymentSettings.value) })
-      paymentSettings.value = normalizePaymentSettings(settings)
-    }
-
-    async function createWiseWebhookSubscription() {
-      paymentWebhookSubscribing.value = true
-      try {
-        const data = await fetchJson('/api/admin/payment-settings/wise-webhook-subscription', { method: 'POST', body: JSON.stringify(paymentSettings.value) })
-        paymentSettings.value = normalizePaymentSettings(data.settings)
-        await loadWiseWebhookStatus()
-        msg.value = 'Wise webhook subscription created.'
-        errorMsg.value = ''
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        paymentWebhookSubscribing.value = false
-      }
-    }
-
-    async function loadWiseWebhookStatus() {
-      if (!isSuperAdmin.value) return
-      paymentWebhookStatusLoading.value = true
-      try {
-        paymentWebhookStatus.value = await fetchJson('/api/admin/payment-settings/wise-webhook-status')
-        errorMsg.value = ''
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        paymentWebhookStatusLoading.value = false
-      }
-    }
-
-    async function loadPaymentInvoices() {
-      if (!isAdmin.value) return
-      const data = await fetchJson(`/api/admin/payment-invoices?status=${paymentFilter.value}`)
-      paymentInvoices.value = data.invoices || []
-    }
-
-    async function loadPaymentInvoice(id) {
-      selectedPaymentInvoice.value = await fetchJson(`/api/payment-invoices/${id}`)
-    }
-
-    async function downloadPaymentInvoicePdf(invoice) {
-      const response = await fetch(`${apiBase}/api/payment-invoices/${invoice.id}/pdf`, {
-        headers: token() ? { Authorization: `Bearer ${token()}` } : {},
-        cache: 'no-store'
-      })
-      if (!response.ok) throw new Error('Unable to generate invoice PDF.')
-      const url = URL.createObjectURL(await response.blob())
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = `${invoice.invoice_number || 'invoice'}.pdf`
-      anchor.click()
-      URL.revokeObjectURL(url)
-    }
-
-    async function loadLatestTestInvoice() {
-      paymentTestRefreshing.value = true
-      try {
-        const data = await fetchJson('/api/admin/payment-invoices/test/latest')
-        selectedPaymentInvoice.value = data.invoice || null
-        errorMsg.value = ''
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        paymentTestRefreshing.value = false
-      }
-    }
-
-    async function setPaymentStatus(invoice, status) {
-      paymentStatusSavingId.value = invoice.id
-      errorMsg.value = ''
-      try {
-        const updated = await fetchJson(`/api/admin/payment-invoices/${invoice.id}/status`, { method: 'POST', body: JSON.stringify({ payment_status: status }) })
-        selectedPaymentInvoice.value = updated
-        msg.value = `${updated.invoice_number} marked ${paymentStatusLabel(updated.payment_status).toLowerCase()}.`
-        await loadPaymentInvoices()
-        if (adminMonthlyInvoices.value) await loadAdminMonthlyInvoices()
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        paymentStatusSavingId.value = null
-      }
-    }
-
-    async function setMonthlyInvoiceStatus(status) {
-      const data = await fetchJson('/api/admin/invoices/monthly/status', { method: 'POST', body: JSON.stringify({ month: monthlyInvoiceMonth.value, status, payment_method: monthlyPaymentMethod.value }) })
-      msg.value = `${monthStatusLabel(data.month_status?.status)} saved for ${monthName(monthlyInvoiceMonth.value)}.`
-      if (data.payment_generation_errors?.length) {
-        errorMsg.value = 'The month status was saved, but one or more payment invoices need Wise payment details regenerated.'
-      } else {
-        errorMsg.value = ''
-      }
-      await loadAdminMonthlyInvoices()
-    }
-
-    async function generateTestInvoice() {
-      paymentTestGenerating.value = true
-      try {
-        msg.value = 'Preparing Wise test invoice...'
-        await persistPaymentSettingsForTest()
-        selectedPaymentInvoice.value = await fetchJson('/api/admin/payment-invoices/test', { method: 'POST', body: JSON.stringify({}) })
-        msg.value = '€1 test invoice generated.'
-        errorMsg.value = ''
-        if (isAdmin.value) await loadPaymentInvoices()
-        await loadWiseWebhookStatus()
-      } catch (err) {
-        errorMsg.value = err.message
-        msg.value = ''
-      } finally {
-        paymentTestGenerating.value = false
-      }
-    }
-
-    async function openNotificationPreview({ type, title, previewEndpoint, sendEndpoint, payload }) {
-      const data = await fetchJson(previewEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload || {})
-      })
-      notificationPreview.value = {
-        open: true,
-        type,
-        title,
-        endpoint: sendEndpoint,
-        payload: payload || {},
-        message: data.message || '',
-        recipient: data.recipient || '',
-        testRecipient: data.test_recipients?.[0]?.value || '',
-        testRecipients: data.test_recipients || [],
-        sending: false
-      }
-      errorMsg.value = ''
-    }
-
-    async function openSettingNotificationPreview(setting) {
-      await openNotificationPreview({
-        type: setting.event_key,
-        title: `${setting.title || 'WhatsApp'} notification`,
-        previewEndpoint: `/api/admin/whatsapp-notifications/${setting.id}/preview`,
-        sendEndpoint: `/api/admin/whatsapp-notifications/${setting.id}/send`,
-        payload: {}
-      })
-    }
-
-    async function openMonthlyInvoiceNotificationPreview() {
-      await openNotificationPreview({
-        type: 'monthly_invoice_ready',
-        title: 'Monthly invoice notification',
-        previewEndpoint: '/api/admin/payment-invoices/monthly/notify/preview',
-        sendEndpoint: '/api/admin/payment-invoices/monthly/notify',
-        payload: { month: monthlyInvoiceMonth.value }
-      })
-    }
-
-    async function openPendingPaymentNotificationPreview() {
-      await openNotificationPreview({
-        type: 'monthly_payment_pending',
-        title: `Pending payment reminder · ${monthName(monthlyInvoiceMonth.value)}`,
-        previewEndpoint: '/api/admin/payment-invoices/monthly/pending/preview',
-        sendEndpoint: '/api/admin/payment-invoices/monthly/pending',
-        payload: { month: monthlyInvoiceMonth.value, payment_method: monthlyPaymentMethod.value }
-      })
-    }
-
-    function closeNotificationPreview() {
-      notificationPreview.value.open = false
-    }
-
-    async function sendNotificationPreview(test = false) {
-      notificationPreview.value.sending = true
-      try {
-        const data = await fetchJson(notificationPreview.value.endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...notificationPreview.value.payload,
-            message: notificationPreview.value.message,
-            test,
-            recipient: test ? notificationPreview.value.testRecipient : undefined
-          })
-        })
-        msg.value = test
-          ? `Test notification ${data.status || data.log?.status || 'sent'} to ${data.log?.recipient || notificationPreview.value.testRecipient}.`
-          : `Notification ${data.status || data.log?.status || 'sent'} to group.`
-        errorMsg.value = ''
-        if (!test) closeNotificationPreview()
-        await loadWhatsAppNotifications().catch(() => {})
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        notificationPreview.value.sending = false
-      }
-    }
-
-    async function copyText(value) {
-      if (navigator?.clipboard) await navigator.clipboard.writeText(value || '')
-      msg.value = 'Copied.'
-    }
-
-    function paymentStatusLabel(status) {
-      return ({ UNPAID: 'Payment pending', PAID: 'Paid', PARTIALLY_PAID: 'Partially paid', CANCELLED: 'Cancelled', EXPIRED: 'Expired' })[status] || status
-    }
-
-    function monthStatusLabel(status) {
-      return ({ OPEN: 'Open', READY_FOR_PAYMENT: 'Ready for payment', SETTLED: 'Settled' })[status] || 'Open'
-    }
-
-    function monthStatusClass(status) {
-      return ({
-        OPEN: 'bg-slate-200 text-slate-800',
-        READY_FOR_PAYMENT: 'bg-indigo-100 text-indigo-800',
-        SETTLED: 'bg-emerald-100 text-emerald-800'
-      })[status] || 'bg-slate-200 text-slate-800'
-    }
-
-    function monthName(value) {
-      if (!value) return 'this month'
-      const [year, month] = value.split('-').map(Number)
-      return new Date(year, (month || 1) - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-    }
-
-    function dateTimeLabel(value) {
-      if (!value) return ''
-      return new Date(value).toLocaleString()
-    }
-
-    function connectionStatusLabel(status) {
-      return ({
-        ok: 'OK',
-        warning: 'Warning',
-        error: 'Error',
-        not_configured: 'Not configured',
-        matched: 'Matched',
-        unmatched: 'Unmatched',
-        received: 'Received',
-        sent: 'Sent',
-        failed: 'Failed',
-        skipped: 'Skipped',
-        full_reference: 'Full reference',
-        suffix_reference: 'Suffix reference',
-        contains_reference: 'Contains reference',
-      })[status] || statusLabel(status, 'Unknown')
-    }
-
-    function connectionStatusClass(status) {
-      return ({
-        ok: 'bg-emerald-100 text-emerald-700',
-        matched: 'bg-emerald-100 text-emerald-700',
-        sent: 'bg-emerald-100 text-emerald-700',
-        warning: 'bg-amber-100 text-amber-700',
-        unmatched: 'bg-amber-100 text-amber-700',
-        not_configured: 'bg-slate-200 text-slate-700',
-        received: 'bg-sky-100 text-sky-700',
-        error: 'bg-rose-100 text-rose-700',
-        failed: 'bg-rose-100 text-rose-700',
-        skipped: 'bg-slate-200 text-slate-700',
-      })[status] || 'bg-slate-200 text-slate-700'
-    }
-
-    function connectionStatusTextClass(status) {
-      return ({
-        ok: 'text-emerald-700',
-        matched: 'text-emerald-700',
-        sent: 'text-emerald-700',
-        warning: 'text-amber-700',
-        unmatched: 'text-amber-700',
-        not_configured: 'text-slate-700',
-        received: 'text-sky-700',
-        error: 'text-rose-700',
-        failed: 'text-rose-700',
-        skipped: 'text-slate-700',
-      })[status] || 'text-slate-700'
-    }
-
-    async function loadSystemChecks(query = systemCheckQuery.value.trim()) {
-      systemCheckRefreshing.value = true
-      try {
-        const params = new URLSearchParams()
-        const trimmedQuery = (query || '').trim()
-        if (trimmedQuery) params.set('query', trimmedQuery)
-        const suffix = params.toString() ? `?${params.toString()}` : ''
-        systemChecks.value = await fetchJson(`/api/admin/system-checks${suffix}`)
-        systemCheckQuery.value = trimmedQuery
-        if (!systemCheckWhatsAppRecipient.value && systemChecks.value?.whatsapp?.default_test_recipient) {
-          systemCheckWhatsAppRecipient.value = systemChecks.value.whatsapp.default_test_recipient
-        }
-      } finally {
-        systemCheckRefreshing.value = false
-      }
-    }
-
-    async function runWhatsAppConnectionTest() {
-      systemCheckWhatsAppTesting.value = true
-      try {
-        const payload = await fetchJson('/api/admin/system-checks/whatsapp-test', {
-          method: 'POST',
-          body: JSON.stringify({ recipient: (systemCheckWhatsAppRecipient.value || '').trim() })
-        })
-        msg.value = `${payload.message} (${payload.recipient})`
-        errorMsg.value = ''
-        await loadSystemChecks(systemCheckQuery.value)
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        systemCheckWhatsAppTesting.value = false
-      }
-    }
-
-    async function runPasswordResetDeliveryTest() {
-      passwordResetTesting.value = true
-      passwordResetTestResult.value = null
-      try {
-        const payload = await fetchJson('/api/admin/system-checks/password-reset-test', {
-          method: 'POST',
-          body: JSON.stringify({ identifier: passwordResetTestIdentifier.value.trim() })
-        })
-        passwordResetTestResult.value = payload
-        msg.value = `Password-reset delivery test sent to ${payload.recipient}.`
-        errorMsg.value = ''
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        passwordResetTesting.value = false
-      }
-    }
-
-    async function retryWiseWebhookEvent(event) {
-      retryingWiseEventId.value = event.id
-      try {
-        const payload = await fetchJson(`/api/admin/wise-webhook-events/${event.id}/retry`, { method: 'POST' })
-        msg.value = `Wise webhook retry result: ${connectionStatusLabel(payload.status)}.`
-        errorMsg.value = ''
-        await loadSystemChecks(systemCheckQuery.value)
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        retryingWiseEventId.value = null
-      }
-    }
-
-    async function clearSystemCheckLookup() {
-      systemCheckQuery.value = ''
-      await loadSystemChecks('')
-    }
-
-    async function loadWhatsAppNotifications() {
-      const data = await fetchJson('/api/admin/whatsapp-notifications')
-      whatsappSettings.value = data.settings || []
-      whatsappLogs.value = data.logs || []
-    }
-
-    async function saveWhatsAppNotification(setting) {
-      await fetchJson(`/api/admin/whatsapp-notifications/${setting.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(setting)
-      })
-      msg.value = 'WhatsApp notification template saved.'
-      await loadWhatsAppNotifications()
-    }
-
-    async function testWhatsAppNotification(setting) {
-      const data = await fetchJson(`/api/admin/whatsapp-notifications/${setting.id}/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipient: setting.test_recipient_number || '' })
-      })
-      msg.value = `Test sent to ${data.log.recipient || 'configured group'}: ${data.log.status}`
-      await loadWhatsAppNotifications()
-    }
-
-    async function loadDashboard() {
-      loading.value = true
-      errorMsg.value = ''
-      try {
-        const loggedIn = hasToken()
-        if (!loggedIn) {
-          isAdmin.value = false
-          isSuperAdmin.value = false
-        }
-
-        if (activeView.value === 'bookings') {
-          await Promise.all([
-            loadBookings({ status: 'upcoming', perPage: 100 }),
-            loadPlayAvailability()
-          ])
-          if (loggedIn) {
-            await loadFamilyMembers()
-            await loadBookings({ status: 'completed', scope: 'mine', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
-          }
-          if (loggedIn && isAdmin.value) {
-            await loadCourts()
-          }
-        } else if (activeView.value === 'availability' || activeView.value === 'poll') {
-          await loadPlayAvailability()
-          if (loggedIn && activeView.value === 'availability') {
-            await loadFamilyMembers()
-          }
-        } else if (activeView.value === 'costs') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          await Promise.all([
-            loadMiscCosts(),
-            loadMonthlyInvoice(),
-            loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page })
-          ])
-        } else if (activeView.value === 'admin-bookings') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          if (!isAdmin.value) {
-            errorMsg.value = 'Admin access is required.'
-            return
-          }
-          await Promise.all([
-            loadBookings({ status: 'upcoming', perPage: 100 }),
-            loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page }),
-            loadPlayAvailability(),
-            loadCourts(),
-            loadAdminUsers(),
-            loadMiscCosts({ status: 'all' })
-          ])
-        } else if (activeView.value === 'admin-courts') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          if (!isAdmin.value) {
-            errorMsg.value = 'Admin access is required.'
-            return
-          }
-          await Promise.all([
-            loadCourts(),
-            loadFreezePeriods()
-          ])
-        } else if (activeView.value === 'admin-costs') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          if (!isAdmin.value) {
-            errorMsg.value = 'Admin access is required.'
-            return
-          }
-          await Promise.all([
-            loadMiscCosts(),
-            loadAdminMonthlyInvoices(),
-            loadPaymentInvoices(),
-            loadBookings({ status: 'archive', page: archivedBookingPagination.value.page, perPage: archivedBookingPagination.value.per_page }),
-            loadAdminUsers()
-          ])
-        } else if (activeView.value === 'payment-settings') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          if (!isSuperAdmin.value) { errorMsg.value = 'Only Super Admin can manage payment settings.'; return }
-          await loadPaymentSettings()
-        } else if (activeView.value === 'admin-audit-logs') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          if (!isAdmin.value) {
-            errorMsg.value = 'Admin access is required.'
-            return
-          }
-          await loadAdminAuditLogs()
-        } else if (activeView.value === 'system-checks') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          if (!isAdmin.value) {
-            errorMsg.value = 'Admin access is required.'
-            return
-          }
-          await loadSystemChecks()
-        } else if (activeView.value === 'notifications') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          if (!isAdmin.value) {
-            errorMsg.value = 'Admin access is required.'
-            return
-          }
-          await loadWhatsAppNotifications()
-        } else if (activeView.value === 'members') {
-          if (!loggedIn) {
-            router.push('/login')
-            return
-          }
-          if (!isAdmin.value) {
-            errorMsg.value = 'Admin access is required.'
-            return
-          }
-          await loadAdminUsers()
-        }
-      } catch (err) {
-        errorMsg.value = err.message
-      } finally {
-        loading.value = false
-      }
-    }
-
-    async function changeArchivedBookingPage(page) {
-      if (page < 1 || (archivedBookingPagination.value.pages && page > archivedBookingPagination.value.pages)) {
-        return
-      }
-      archivedBookingPagination.value = { ...archivedBookingPagination.value, page }
-      await loadDashboard()
-    }
-
-    async function changeCompletedBookingPage(page) {
-      if (page < 1 || (completedBookingPagination.value.pages && page > completedBookingPagination.value.pages)) {
-        return
-      }
-      completedBookingPagination.value = { ...completedBookingPagination.value, page }
-      await loadDashboard()
-    }
-
-    async function createFamilyMember() {
-      msg.value = ''
-      if (!newFamilyName.value.trim()) {
-        msg.value = 'Please enter a family member name.'
-        return
-      }
-
-      try {
-        await fetchJson('/api/family-members', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: newFamilyName.value
-          })
-        })
-        newFamilyName.value = ''
-        msg.value = 'Family member added.'
-        await loadFamilyMembers()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function deleteFamilyMember(member) {
-      try {
-        await fetchJson(`/api/family-members/${member.id}`, { method: 'DELETE' })
-        msg.value = `Removed ${member.name}.`
-        await loadFamilyMembers()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function saveAvailabilityVote(day) {
-      msg.value = ''
-      if (!hasToken()) {
-        router.push('/login')
-        return
-      }
-      normalizeVote(day)
-      const attendeeCount = day.status === 'available' ? (day.attendees || []).length : 0
-
-      try {
-        await fetchJson('/api/play-availability', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            play_date: day.date,
-            status: day.status,
-            available: day.status === 'available',
-            attendee_count: attendeeCount,
-            attendees: day.attendees || [],
-            notes: day.notes
-          })
-        })
-        msg.value = `Vote saved for ${day.date}.`
-        await loadPlayAvailability()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    function resetBookingForm() {
-      editingBookingId.value = null
-      bookingDate.value = localIsoDate()
-      startTime.value = '18:00'
-      endTime.value = '19:00'
-      bookingCost.value = '0'
-      bookingStatus.value = 'confirmed'
-      bookingNotes.value = ''
-      recurringMode.value = false
-      recurringIntervalWeeks.value = 1
-      recurringCount.value = 1
-      recurringEndDate.value = bookingDate.value
-      if (activeCourts.value.length) {
-        selectedCourtId.value = activeCourts.value[0].id
-      }
-    }
-
-    function startEditBooking(booking) {
-      editingBookingId.value = booking.id
-      selectedCourtId.value = booking.court?.id || ''
-      bookingDate.value = booking.booking_date
-      startTime.value = booking.start_time
-      endTime.value = booking.end_time
-      bookingCost.value = String(booking.cost || 0)
-      bookingStatus.value = booking.status || 'confirmed'
-      bookingNotes.value = booking.notes || ''
-      recurringMode.value = false
-      msg.value = ''
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
-
-    async function saveBooking() {
-      if (editingBookingId.value) {
-        await updateBooking()
-        return
-      }
-      await createBooking()
-    }
-
-    async function createBooking() {
-      const courtId = selectedCourtId.value
-      if (!courtId) {
-        msg.value = 'Please select a court first.'
-        return
-      }
-      try {
-        await fetchJson('/api/bookings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            court_id: courtId,
-            booking_date: bookingDate.value,
-            start_time: startTime.value,
-            end_time: endTime.value,
-            recurring: recurringMode.value,
-            recurring_interval_weeks: recurringIntervalWeeks.value,
-            recurring_count: recurringCount.value,
-            recurring_end_date: recurringEndDate.value,
-            notes: bookingNotes.value,
-            participants: []
-          })
-        })
-        msg.value = recurringMode.value ? 'Recurring booking created successfully.' : 'Booking created successfully.'
-        await loadBookings({ status: 'upcoming', perPage: 100 })
-        resetBookingForm()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function updateBooking() {
-      if (!selectedCourtId.value) {
-        msg.value = 'Please select a court first.'
-        return
-      }
-      try {
-        await fetchJson(`/api/bookings/${editingBookingId.value}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            court_id: selectedCourtId.value,
-            booking_date: bookingDate.value,
-            start_time: startTime.value,
-            end_time: endTime.value,
-            manual_cost: true,
-            cost: parseFloat(bookingCost.value || 0),
-            notes: bookingNotes.value,
-            status: bookingStatus.value
-          })
-        })
-        msg.value = 'Booking updated successfully.'
-        if (activeView.value === 'admin-bookings' || activeView.value === 'admin-costs') await loadDashboard()
-        else await loadBookings({ status: 'upcoming', perPage: 100 })
-        resetBookingForm()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function deleteBooking(booking) {
-      const label = `${booking.court?.name || 'booking'} on ${booking.booking_date} ${booking.start_time}-${booking.end_time}`
-      if (!window.confirm(`Delete ${label}? This will also remove its participants and invoice.`)) {
-        return
-      }
-      try {
-        await fetchJson(`/api/bookings/${booking.id}`, { method: 'DELETE' })
-        msg.value = 'Booking deleted successfully.'
-        if (editingBookingId.value === booking.id) resetBookingForm()
-        await loadBookings({ status: 'upcoming', perPage: 100 })
-        if (activeView.value === 'admin-bookings' || activeView.value === 'admin-costs') {
-          await loadDashboard()
-        }
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function createInvoice(bookingId) {
-      try {
-        const data = await fetchJson(`/api/bookings/${bookingId}/invoice`, { method: 'POST' })
-        msg.value = `Invoice generated: €${data.total_amount}`
-        if (activeView.value === 'admin-bookings') await loadDashboard()
-        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function saveBookingRsvp(booking, status) {
-      try {
-        await fetchJson(`/api/bookings/${booking.id}/rsvp`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status })
-        })
-        msg.value = 'Attendance updated.'
-        if (activeView.value === 'admin-bookings') await loadDashboard()
-        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function saveFamilyPersonAttendance(booking, person, status) {
-      try {
-        await fetchJson(`/api/bookings/${booking.id}/family-attendance`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            attendees: [{
-              type: person.type,
-              family_member_id: person.family_member_id,
-              status
-            }]
-          })
-        })
-        msg.value = 'Attendance updated.'
-        if (activeView.value === 'admin-bookings') await loadDashboard()
-        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    function selectedMemberOption(key) {
-      return memberOptions.value.find((member) => member.key === key) || null
-    }
-
-    function applyParticipantMember(participant, key) {
-      const member = selectedMemberOption(key)
-      if (!member) return
-      participant.name = member.name
-      participant.phone = member.phone
-      participant.is_adhoc = member.is_adhoc
-    }
-
-    async function addParticipant(booking) {
-      const member = selectedMemberOption(newParticipantMember.value[booking.id])
-      const name = member?.name || newParticipantName.value[booking.id] || ''
-      const phone = member?.phone || newParticipantPhone.value[booking.id] || name
-      const status = newParticipantStatus.value[booking.id] || 'attending'
-      try {
-        await fetchJson(`/api/bookings/${booking.id}/participants`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, phone, status, is_adhoc: !member })
-        })
-        newParticipantMember.value[booking.id] = ''
-        newParticipantName.value[booking.id] = ''
-        newParticipantPhone.value[booking.id] = ''
-        newParticipantStatus.value[booking.id] = 'attending'
-        msg.value = 'Participant added.'
-        if (activeView.value === 'admin-bookings') await loadDashboard()
-        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function updateParticipant(booking, participant) {
-      try {
-        await fetchJson(`/api/bookings/${booking.id}/participants/${participant.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(participant)
-        })
-        msg.value = 'Participant updated.'
-        if (activeView.value === 'admin-bookings') await loadDashboard()
-        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function deleteParticipant(booking, participant) {
-      const label = participantName(participant)
-      if (!window.confirm(`Remove ${label} from this booking?`)) {
-        return
-      }
-      try {
-        await fetchJson(`/api/bookings/${booking.id}/participants/${participant.id}`, { method: 'DELETE' })
-        msg.value = 'Participant removed.'
-        if (activeView.value === 'admin-bookings') await loadDashboard()
-        else await loadBookings({ status: completedInvoiceViewActive() ? 'completed' : 'upcoming', month: completedInvoiceViewActive() ? monthlyInvoiceMonth.value : undefined, page: completedBookingPagination.value.page, perPage: completedInvoiceViewActive() ? completedBookingPagination.value.per_page : 100 })
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function createCourt() {
-      try {
-        const data = await fetchJson('/api/admin/courts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: newCourtName.value,
-            location: newCourtLocation.value,
-            description: newCourtDescription.value,
-            map_link: newCourtMapLink.value,
-            hourly_rate: parseFloat(newCourtRate.value || 25),
-            half_hour_rate: newCourtHalfHourRate.value === '' ? null : parseFloat(newCourtHalfHourRate.value || 0)
-          })
-        })
-        msg.value = `Added court ${data.name}.`
-        newCourtName.value = ''
-        newCourtLocation.value = ''
-        newCourtDescription.value = ''
-        newCourtMapLink.value = ''
-        newCourtRate.value = '25'
-        newCourtHalfHourRate.value = '12.5'
-        await loadCourts()
-        selectedCourtId.value = data.id
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function updateCourt(court) {
-      try {
-        const data = await fetchJson(`/api/admin/courts/${court.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: court.name,
-            location: court.location,
-            description: court.description,
-            map_link: court.map_link,
-            hourly_rate: court.hourly_rate,
-            half_hour_rate: court.half_hour_rate,
-            is_active: court.is_active
-          })
-        })
-        msg.value = `Updated court ${data.name}.`
-        await loadCourts()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function deleteCourt(court) {
-      try {
-        await fetchJson(`/api/admin/courts/${court.id}`, { method: 'DELETE' })
-        msg.value = `Deleted court ${court.name}.`
-        await loadCourts()
-        await loadBookings({ status: 'upcoming', perPage: 100 })
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function createFreezePeriod() {
-      try {
-        const data = await fetchJson('/api/admin/freeze-periods', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: newFreezeTitle.value,
-            start_date: newFreezeStartDate.value,
-            end_date: newFreezeEndDate.value,
-            reason: newFreezeReason.value,
-            is_active: true
-          })
-        })
-        msg.value = `Added freeze period ${data.title}.`
-        newFreezeTitle.value = ''
-        newFreezeReason.value = ''
-        await Promise.all([loadFreezePeriods(), loadPlayAvailability()])
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function updateFreezePeriod(period) {
-      try {
-        const data = await fetchJson(`/api/admin/freeze-periods/${period.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(period)
-        })
-        msg.value = `Updated freeze period ${data.title}.`
-        await Promise.all([loadFreezePeriods(), loadPlayAvailability()])
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function deleteFreezePeriod(period) {
-      if (!window.confirm(`Delete freeze period ${period.title}?`)) {
-        return
-      }
-      try {
-        await fetchJson(`/api/admin/freeze-periods/${period.id}`, { method: 'DELETE' })
-        msg.value = `Deleted freeze period ${period.title}.`
-        await Promise.all([loadFreezePeriods(), loadPlayAvailability()])
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    function isArchivedMiscCost(cost) {
-      return Boolean(cost?.purchase_date && miscCostArchiveCutoffDate.value && cost.purchase_date < miscCostArchiveCutoffDate.value)
-    }
-
-    function clubMemberLabel(person) {
-      return person.name || person.email || person.phone || 'Unnamed player'
-    }
-
-    function buildClubMemberOptions() {
-      const options = []
-      const seenUserIds = new Set()
-      for (const member of adminUsers.value) {
-        const key = `user:${member.id}`
-        seenUserIds.add(Number(member.id))
-        const linkedNames = (member.family_members || [])
-          .filter((familyMember) => Number(familyMember.linked_user_id) === Number(member.id))
-          .map((familyMember) => familyMember.name)
-          .filter(Boolean)
-        options.push({
-          key,
-          type: 'user',
-          id: member.id,
-          familyIds: (member.family_members || [])
-            .filter((familyMember) => Number(familyMember.linked_user_id) === Number(member.id))
-            .map((familyMember) => familyMember.id),
-          label: linkedNames.length ? `${clubMemberLabel(member)} (${linkedNames.join(', ')})` : clubMemberLabel(member),
-          selected: Boolean(member.is_club_member)
-        })
-      }
-      for (const owner of adminUsers.value) {
-        for (const familyMember of owner.family_members || []) {
-          if (familyMember.linked_user_id && seenUserIds.has(Number(familyMember.linked_user_id))) continue
-          options.push({
-            key: `family:${familyMember.id}`,
-            type: 'family',
-            id: familyMember.id,
-            label: `${clubMemberLabel(familyMember)} · family of ${clubMemberLabel(owner)}`,
-            selected: Boolean(familyMember.is_club_member)
-          })
-        }
-      }
-      return options.sort((a, b) => a.label.localeCompare(b.label))
-    }
-
-    function syncSelectedClubMembers() {
-      selectedClubMemberKeys.value = buildClubMemberOptions()
-        .filter((option) => option.selected)
-        .map((option) => option.key)
-    }
-
-    async function saveClubMemberSelection() {
-      const selected = new Set(selectedClubMemberKeys.value)
-      try {
-        const requests = []
-        for (const option of buildClubMemberOptions()) {
-          const isSelected = selected.has(option.key)
-          if (option.type === 'user') {
-            const member = adminUsers.value.find((user) => Number(user.id) === Number(option.id))
-            if (member && Boolean(member.is_club_member) !== isSelected) {
-              requests.push(fetchJson(`/api/admin/users/${member.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ is_club_member: isSelected })
-              }))
-            }
-            for (const familyId of option.familyIds || []) {
-              const familyMember = adminUsers.value.flatMap((user) => user.family_members || []).find((item) => Number(item.id) === Number(familyId))
-              if (familyMember && Boolean(familyMember.is_club_member) !== isSelected) {
-                requests.push(fetchJson(`/api/admin/family-members/${familyMember.id}`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ is_club_member: isSelected })
-                }))
-              }
-            }
-          } else {
-            const familyMember = adminUsers.value.flatMap((user) => user.family_members || []).find((item) => Number(item.id) === Number(option.id))
-            if (familyMember && Boolean(familyMember.is_club_member) !== isSelected) {
-              requests.push(fetchJson(`/api/admin/family-members/${familyMember.id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ is_club_member: isSelected })
-              }))
-            }
-          }
-        }
-        await Promise.all(requests)
-        msg.value = requests.length ? `Updated ${selected.size} club members.` : 'Club member selection is already up to date.'
-        await loadAdminUsers()
-      } catch (err) {
-        msg.value = err.message
-        await loadAdminUsers()
-      }
-    }
-
-    function splitScopeLabel(scope) {
-      return scope === 'club_members' ? 'Club members only' : 'All members'
-    }
-
-    async function createMiscCost() {
-      try {
-        const data = await fetchJson('/api/misc-costs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: newMiscTitle.value,
-            description: newMiscDescription.value,
-            amount: parseFloat(newMiscAmount.value || 0),
-            paid_by: newMiscPaidBy.value,
-            purchase_date: newMiscPurchaseDate.value,
-            split_count: newMiscSplitCount.value,
-            split_scope: newMiscSplitScope.value
-          })
-        })
-        msg.value = `Added cost ${data.title}.`
-        newMiscTitle.value = ''
-        newMiscDescription.value = ''
-        newMiscAmount.value = ''
-        newMiscPaidBy.value = ''
-        newMiscPurchaseDate.value = localIsoDate()
-        newMiscSplitCount.value = 1
-        newMiscSplitScope.value = 'all_members'
-        await loadMiscCosts()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function updateMiscCost(cost) {
-      try {
-        await fetchJson(`/api/misc-costs/${cost.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(cost)
-        })
-        msg.value = 'Cost updated.'
-        await loadMiscCosts()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function deleteMiscCost(cost) {
-      try {
-        await fetchJson(`/api/misc-costs/${cost.id}`, { method: 'DELETE' })
-        msg.value = `Deleted cost ${cost.title}.`
-        await loadMiscCosts()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function settleBookingCost(booking) {
-      try {
-        await fetchJson(`/api/bookings/${booking.id}/settle`, { method: 'POST' })
-        msg.value = 'Booking cost settled.'
-        if (activeView.value === 'admin-bookings') await loadDashboard()
-        else await loadBookings({ status: 'completed', month: monthlyInvoiceMonth.value, page: completedBookingPagination.value.page, perPage: completedBookingPagination.value.per_page })
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function updateAdminUser(member) {
-      try {
-        const payload = {
-          name: member.name,
-          email: member.email,
-          phone: member.phone,
-          whatsapp_number: member.whatsapp_number,
-          whatsapp_is_primary: member.whatsapp_link?.is_primary || false,
-          whatsapp_notifications_enabled: member.whatsapp_link?.notifications_enabled !== false,
-          whatsapp_delivery_mode: member.whatsapp_delivery_mode || 'ALL_LINKED',
-          role: member.role,
-          is_club_member: member.is_club_member
-        }
-        const password = (newAdminUserPassword.value[member.id] || '').trim()
-        if (password) payload.password = password
-        const data = await fetchJson(`/api/admin/users/${member.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-        Object.assign(member, data)
-        newAdminUserPassword.value[member.id] = ''
-        msg.value = `Updated ${data.name || data.email || data.phone}.`
-      } catch (err) {
-        msg.value = err.message
-        await loadAdminUsers()
-      }
-    }
-
-    async function backfillWhatsAppFamilyDetails() {
-      if (!window.confirm('Link all existing member WhatsApp numbers to their current families? This is safe to run more than once.')) return
-      whatsappBackfillRunning.value = true
-      try {
-        const result = await fetchJson('/api/admin/whatsapp-family-links/backfill', { method: 'POST' })
-        msg.value = `WhatsApp details ready: ${result.created} added, ${result.updated} refreshed, ${result.skipped} without a number${result.errors.length ? `, ${result.errors.length} need attention` : ''}.`
-        await loadAdminUsers()
-      } catch (err) {
-        msg.value = err.message
-      } finally {
-        whatsappBackfillRunning.value = false
-      }
-    }
-
-    async function sendWhatsAppFamilyPolls() {
-      whatsappPollSending.value = true
-      try {
-        const result = await fetchJson('/api/admin/availability-polls/send', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dates: whatsappPollDates.value,
-            question_prefix: whatsappPollQuestion.value,
-            send_to_families: true
-          })
-        })
-        msg.value = `Sent ${result.sent} poll message(s) to ${result.families} families.`
-      } catch (err) {
-        msg.value = err.message
-      } finally {
-        whatsappPollSending.value = false
-      }
-    }
-
-    async function deleteAdminUser(member) {
-      try {
-        await fetchJson(`/api/admin/users/${member.id}`, { method: 'DELETE' })
-        msg.value = `Removed ${member.name || member.email || member.phone}.`
-        await loadAdminUsers()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function updateAdminFamilyMember(owner, familyMember) {
-      try {
-        const data = await fetchJson(`/api/admin/family-members/${familyMember.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: familyMember.name,
-            relationship: familyMember.relationship,
-            is_club_member: familyMember.is_club_member,
-            linked_user_id: familyMember.linked_user_id || null
-          })
-        })
-        Object.assign(familyMember, data)
-        msg.value = `Updated ${data.name}.`
-      } catch (err) {
-        msg.value = err.message
-        await loadAdminUsers()
-      }
-    }
-
-    async function createAdminFamilyMember(owner) {
-      const name = (newAdminFamilyName.value[owner.id] || '').trim()
-      if (!name) {
-        msg.value = 'Please enter a family member name.'
-        return
-      }
-      try {
-        await fetchJson('/api/admin/family-members', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: owner.id,
-            name,
-            relationship: newAdminFamilyRelationship.value[owner.id] || '',
-            linked_user_id: newAdminFamilyLinkedUser.value[owner.id] || null
-          })
-        })
-        newAdminFamilyName.value[owner.id] = ''
-        newAdminFamilyRelationship.value[owner.id] = ''
-        newAdminFamilyLinkedUser.value[owner.id] = ''
-        msg.value = `Added family member for ${owner.name || owner.email || owner.phone}.`
-        await loadAdminUsers()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function deleteAdminFamilyMember(owner, familyMember) {
-      try {
-        await fetchJson(`/api/admin/family-members/${familyMember.id}`, { method: 'DELETE' })
-        msg.value = `Removed ${familyMember.name}.`
-        await loadAdminUsers()
-      } catch (err) {
-        msg.value = err.message
-      }
-    }
-
-    async function loadCurrentUser() {
-      try {
-        const meRes = await fetchJson('/api/auth/me')
-        setSessionValue('member_name', meRes.user?.name || '')
-        setSessionValue('member_email', meRes.user?.email || '')
-        setSessionValue('member_phone', meRes.user?.phone || '')
-        setSessionValue('member_role', meRes.user?.role || 'member')
-        isAdmin.value = ['admin', 'super_admin'].includes(meRes.user?.role)
-        isSuperAdmin.value = meRes.user?.role === 'super_admin'
-      } catch (err) {
-        const savedRole = getSessionValue('member_role')
-        isAdmin.value = ['admin', 'super_admin'].includes(savedRole)
-        isSuperAdmin.value = savedRole === 'super_admin'
-      }
-    }
-
-    watch(() => props.initialView, async (view) => {
-      activeView.value = view || 'availability'
-      if (!hasToken()) {
-        clearPrivateState()
-      }
-      await loadDashboard()
-    })
-
-    onMounted(async () => {
-      window.addEventListener('badminton-auth-changed', handleAuthChanged)
-      if (token()) {
-        await loadCurrentUser()
-      } else {
-        isAdmin.value = false
-      }
-      await loadDashboard()
-    })
-
-    onBeforeUnmount(() => {
-      window.removeEventListener('badminton-auth-changed', handleAuthChanged)
-    })
-
-    return {
-      activeView,
-      activeCourts,
-      adminUsers,
-      filteredAdminUsers,
-      memberSearch,
-      whatsappBackfillRunning,
-      whatsappPollDates,
-      whatsappPollQuestion,
-      whatsappPollSending,
-      adminAuditLogs,
-      adminAuditPagination,
-      auditLogDate,
-      auditLogDetails,
-      availabilityVoterNames,
-      availabilityNamesByStatus,
-      bookingInterest,
-      bookingDateLabel,
-      bookingDayLabel,
-      bookingStatusSummary,
-      bookingItemStatusSummary,
-      invoiceStatusLabel,
-      bookings,
-      upcomingBookings,
-      completedBookings,
-      archivedBookings,
-      selectedClubMemberKeys,
-      clubMemberOptions,
-      completedBookingPagination,
-      archivedBookingPagination,
-      completedBookingTab,
-      invoiceDetailTab,
-      courts,
-      calculatedBookingCost,
-      freezePeriods,
-      familyMembers,
-      familyAttendancePeople,
-      availabilityPeople,
-      publicPoll,
-      publicPollUrl,
-      allPublicPollDaysAnswered,
-      miscCosts,
-      isArchivedMiscCost,
-      saveClubMemberSelection,
-      backfillWhatsAppFamilyDetails,
-      sendWhatsAppFamilyPolls,
-      monthlyInvoice,
-      currentPaymentInvoice,
-      memberOptions,
-      adminMonthlyInvoices,
-      monthlyInvoiceMonth,
-      paymentMonthOptions,
-      monthlyPaymentMethod,
-      whatsappSettings,
-      whatsappLogs,
-      notificationPreview,
-      systemChecks,
-      systemCheckQuery,
-      systemCheckWhatsAppRecipient,
-      passwordResetTestIdentifier,
-      passwordResetTestResult,
-      isLoggedIn,
-      isAdmin,
-      isSuperAdmin,
-      paymentSettingsSaving,
-      paymentTestGenerating,
-      paymentTestRefreshing,
-      paymentWebhookSubscribing,
-      paymentWebhookStatusLoading,
-      systemCheckRefreshing,
-      systemCheckWhatsAppTesting,
-      passwordResetTesting,
-      retryingWiseEventId,
-      paymentSettings,
-      paymentWebhookStatus,
-      wiseWebhookHealthText,
-      defaultWiseRedirectUrl,
-      defaultWiseWebhookUrl,
-      paymentInvoices,
-      paymentStatusSavingId,
-      selectedPaymentInvoice,
-      paymentFilter,
-      apiBase,
-      isBookingOpen,
-      toggleBooking,
-      isCompletedBookingOpen,
-      toggleCompletedBooking,
-      isMiscCostOpen,
-      toggleMiscCost,
-      splitScopeLabel,
-      participantCompletedStatusLabel,
-      loading,
-      errorMsg,
-      msg,
-      verificationDetails,
-      editingBookingId,
-      playDays,
-      maxFamilyAttendees,
-      bookingDate,
-      adminBookingTab,
-      adminCostTab,
-      startTime,
-      endTime,
-      bookingCost,
-      bookingStatus,
-      bookingNotes,
-      selectedCourtId,
-      recurringMode,
-      recurringIntervalWeeks,
-      recurringCount,
-      recurringEndDate,
-      newCourtName,
-      newCourtLocation,
-      newCourtDescription,
-      newCourtMapLink,
-      newCourtRate,
-      newCourtHalfHourRate,
-      newFreezeTitle,
-      newFreezeStartDate,
-      newFreezeEndDate,
-      newFreezeReason,
-      newFamilyName,
-      newAdminUserPassword,
-      newAdminFamilyName,
-      newAdminFamilyRelationship,
-      newAdminFamilyLinkedUser,
-      newParticipantName,
-      newParticipantPhone,
-      newParticipantStatus,
-      newParticipantMember,
-      newMiscTitle,
-      newMiscDescription,
-      newMiscAmount,
-      newMiscPaidBy,
-      newMiscPurchaseDate,
-      newMiscSplitCount,
-      newMiscSplitScope,
-      attendanceStatuses,
-      availabilityStatuses,
-      addParticipant,
-      applyParticipantMember,
-      createCourt,
-      createFreezePeriod,
-      createAdminFamilyMember,
-      changeArchivedBookingPage,
-      changeAdminAuditPage,
-      changeCompletedBookingPage,
-      createFamilyMember,
-      createMiscCost,
-      closeVerificationDetails,
-      deleteCourt,
-      deleteFreezePeriod,
-      deleteAdminFamilyMember,
-      deleteAdminUser,
-      deleteBooking,
-      deleteFamilyMember,
-      deleteMiscCost,
-      deleteParticipant,
-      linkableUserOptions,
-      loadMonthlyInvoice,
-      loadAdminMonthlyInvoices,
-      loadPlayAvailability,
-      loadFreezePeriods,
-      loadSystemChecks,
-      loadWhatsAppNotifications,
-      loadPaymentSettings,
-      savePaymentSettings,
-      applyMonthlyTikkieLink,
-      createWiseWebhookSubscription,
-      loadWiseWebhookStatus,
-      loadPaymentInvoices,
-      loadPaymentInvoice,
-      downloadPaymentInvoicePdf,
-      loadLatestTestInvoice,
-      setPaymentStatus,
-      setMonthlyInvoiceStatus,
-      generateTestInvoice,
-      openSettingNotificationPreview,
-      openMonthlyInvoiceNotificationPreview,
-      openPendingPaymentNotificationPreview,
-      closeNotificationPreview,
-      sendNotificationPreview,
-      clearSystemCheckLookup,
-      copyText,
-      paymentStatusLabel,
-      monthStatusLabel,
-      monthStatusClass,
-      monthName,
-      dateTimeLabel,
-      connectionStatusLabel,
-      connectionStatusClass,
-      connectionStatusTextClass,
-      familyPersonBookingStatus,
-      availabilityPersonStatus,
-      normalizeVote,
-      participantName,
-      participantNamesByStatus,
-      participantStatusCounts,
-      planningNames,
-      resetBookingForm,
-      saveBooking,
-      saveAvailabilityVote,
-      savePublicAvailabilityPoll,
-      saveBookingRsvp,
-      saveFamilyPersonAttendance,
-      saveWhatsAppNotification,
-      runWhatsAppConnectionTest,
-      runPasswordResetDeliveryTest,
-      testWhatsAppNotification,
-      retryWiseWebhookEvent,
-      setAvailabilityPersonStatus,
-      startEditBooking,
-      showVerificationDetails,
-      updateCourt,
-      updateFreezePeriod,
-      updateAdminFamilyMember,
-      updateAdminUser,
-      updateMiscCost,
-      updateParticipant
-    }
-  }
+  props: {
+    initialView: { type: String, default: 'availability' }
+  },
+  setup: useDashboard
 }
 </script>

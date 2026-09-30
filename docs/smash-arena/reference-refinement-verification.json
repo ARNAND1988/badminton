@@ -1,0 +1,183 @@
+{
+  "scope": "Presentation-only reference fidelity refinement; no backend/controller/auth/router/dependency/build-system edits.",
+  "assets": {
+    "mascot": "badminton-frontend/src/assets/arena-mascot.webp",
+    "family": "badminton-frontend/src/assets/arena-family.webp",
+    "featureIcons": "badminton-frontend/src/components/ArenaFeatureIcon.vue"
+  },
+  "checks": {
+    "failed": true,
+    "succeeded": true,
+    "persisted": true,
+    "denied": true,
+    "logout": true,
+    "guarded": true
+  },
+  "authComparison": {
+    "requestCount": 14,
+    "identical": true,
+    "initialStoredSessionRefreshExcluded": true
+  },
+  "formStates": {
+    "pairs": 56,
+    "identical": true
+  },
+  "layouts": {
+    "widths": [
+      375,
+      390,
+      768,
+      1440
+    ],
+    "pageViewportPairs": 56,
+    "horizontalOverflow": [],
+    "clippedControls": [],
+    "javascriptErrors": [],
+    "consoleErrors": [],
+    "unexpectedApiResponses": []
+  },
+  "finishedLayoutCaptures": {
+    "layouts": [
+      {
+        "width": 375,
+        "route": "availability",
+        "scroll": 375,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 375,
+        "route": "login",
+        "scroll": 375,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 375,
+        "route": "bookings",
+        "scroll": 375,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 390,
+        "route": "availability",
+        "scroll": 390,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 390,
+        "route": "login",
+        "scroll": 390,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 390,
+        "route": "bookings",
+        "scroll": 390,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 768,
+        "route": "availability",
+        "scroll": 753,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 768,
+        "route": "login",
+        "scroll": 768,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 768,
+        "route": "bookings",
+        "scroll": 768,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 1440,
+        "route": "availability",
+        "scroll": 1425,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 1440,
+        "route": "login",
+        "scroll": 1440,
+        "loadedImages": true,
+        "clipped": []
+      },
+      {
+        "width": 1440,
+        "route": "bookings",
+        "scroll": 1440,
+        "loadedImages": true,
+        "clipped": []
+      }
+    ],
+    "errors": [],
+    "consoleErrors": []
+  },
+  "interactionChecks": [
+    {
+      "name": "court creation",
+      "pass": true
+    },
+    {
+      "name": "booking creation",
+      "pass": true
+    },
+    {
+      "name": "booking update",
+      "pass": true
+    },
+    {
+      "name": "family creation",
+      "pass": true
+    },
+    {
+      "name": "family vote saved",
+      "pass": true
+    },
+    {
+      "name": "family vote persists",
+      "pass": true
+    },
+    {
+      "name": "family attendance saved",
+      "pass": true
+    },
+    {
+      "name": "login action reachable in keyboard-sized viewport",
+      "pass": true
+    },
+    {
+      "name": "input focus visible",
+      "pass": true
+    },
+    {
+      "name": "reduced motion",
+      "pass": true
+    }
+  ],
+  "interactionErrors": [],
+  "focusedFrontendTests": {
+    "passed": 11,
+    "failed": 0
+  },
+  "regressionReports": {
+    "baselineFast": "\n\nChange detected:\nbadminton-frontend/agent.md, badminton-frontend/src/App.vue, badminton-frontend/src/components/Dashboard.vue, badminton-frontend/src/components/Navbar.vue, badminton-frontend/src/components/Register.vue, badminton-frontend/src/index.css\n\nMode:\nFAST\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 19\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n",
+    "finalFast": "\n\nChange detected:\nbadminton-frontend/agent.md, badminton-frontend/src/App.vue, badminton-frontend/src/components/Dashboard.vue, badminton-frontend/src/components/Navbar.vue, badminton-frontend/src/components/Register.vue, badminton-frontend/src/index.css\n\nMode:\nFAST\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 19\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n",
+    "finalFull": "\n\nChange detected:\nbadminton-frontend/agent.md, badminton-frontend/src/App.vue, badminton-frontend/src/components/Dashboard.vue, badminton-frontend/src/components/Navbar.vue, badminton-frontend/src/components/Register.vue, badminton-frontend/src/index.css\n\nMode:\nFULL\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 107\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n"
+  },
+  "limits": "Only isolated SQLite test data and mocked external integrations. No real notifications or payments. Real OS keyboards and screen readers remain unverified; no PWA/passkey support exists in the repository.",
+  "deployment": "Not performed"
+}

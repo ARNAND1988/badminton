@@ -1,0 +1,278 @@
+{
+  "deployedAt": "2026-10-01T00:38:22.153595+02:00",
+  "url": "https://nieuwegeinbadminton.nl",
+  "releaseCommit": "679cc4c9432dc634ab095e63182879440fb63944",
+  "sourceBranch": "design/smash-arena-theme",
+  "releaseImage": "badminton-frontend:smash-arena-679cc4c",
+  "rollbackImage": "badminton-frontend:smash-arena-rollback-20261001",
+  "before": {
+    "badminton-backend": {
+      "id": "a95c21c57080c454270efcd25cf775d18c87559db23da589f5de687ea98ba040",
+      "image": "sha256:cf5b6b01b622ece3f580fb7e0733f874cd4f44ab0135420367ffdc21e1a8931b",
+      "started": "2026-09-30T20:48:44.752593253Z",
+      "state": "running",
+      "health": "healthy"
+    },
+    "badminton-frontend": {
+      "id": "75b21d583a57b92e63fc1b28f6083aaca583415bc44ba75cce224be87274f6e6",
+      "image": "sha256:98420ab4b0572b60451e80ae479d9941c6d26ab8f41f86cd906f58100971c53b",
+      "started": "2026-09-30T20:48:45.00165642Z",
+      "state": "running",
+      "health": "healthy"
+    },
+    "cloudflared": {
+      "id": "740ccdbc0232c9fbf8a953ac8d0185e0a70bdc869545e80a4e0607e057b59413",
+      "image": "sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283",
+      "started": "2026-09-30T20:21:52.573623387Z",
+      "state": "running",
+      "health": null
+    },
+    "postgres": {
+      "id": "2d0ce9b523f72ae74a30272a6c77647b996f6e8e62a5d6254828c0529ca974b4",
+      "image": "sha256:5fe8ca7fc662071188c30271cb870d1ce9a6ec4578c934b064697ae77a9241e1",
+      "started": "2026-09-30T20:21:44.648013098Z",
+      "state": "running",
+      "health": "healthy"
+    },
+    "redis": {
+      "id": "a9a2b74a06720682bb2fa7976159ecc84ee3802d28dd854fd37d1a509bd7f6a7",
+      "image": "sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf",
+      "started": "2026-09-30T20:21:45.69156627Z",
+      "state": "running",
+      "health": "healthy"
+    },
+    "whatsapp-bot": {
+      "id": "6bdd717428cb501e61af7480ed24738b3970aec950269befef97b53af224e3b5",
+      "image": "sha256:f420bd666a19af299aa8bb62e44adc5aab60f45a185d4174be25c63dcaf6f640",
+      "started": "2026-09-30T20:48:44.042424138Z",
+      "state": "running",
+      "health": null
+    }
+  },
+  "after": {
+    "badminton-backend": {
+      "id": "a95c21c57080c454270efcd25cf775d18c87559db23da589f5de687ea98ba040",
+      "image": "sha256:cf5b6b01b622ece3f580fb7e0733f874cd4f44ab0135420367ffdc21e1a8931b",
+      "started": "2026-09-30T20:48:44.752593253Z",
+      "state": "running",
+      "health": "healthy"
+    },
+    "badminton-frontend": {
+      "id": "7980470858e3c766b258508fe9fdfcc9d5ad5c42f4f246ca87cf577025fdf10f",
+      "image": "sha256:58576a2e224cb115c98b498dc029af4f3b8c2136e732ed28390fa7513159dc74",
+      "started": "2026-09-30T22:33:41.066892081Z",
+      "state": "running",
+      "health": "healthy"
+    },
+    "cloudflared": {
+      "id": "740ccdbc0232c9fbf8a953ac8d0185e0a70bdc869545e80a4e0607e057b59413",
+      "image": "sha256:6d91c121b803126f7a5344005d17a9324788fc09d305b6e2560ec6040a7ae283",
+      "started": "2026-09-30T20:21:52.573623387Z",
+      "state": "running",
+      "health": null
+    },
+    "postgres": {
+      "id": "2d0ce9b523f72ae74a30272a6c77647b996f6e8e62a5d6254828c0529ca974b4",
+      "image": "sha256:5fe8ca7fc662071188c30271cb870d1ce9a6ec4578c934b064697ae77a9241e1",
+      "started": "2026-09-30T20:21:44.648013098Z",
+      "state": "running",
+      "health": "healthy"
+    },
+    "redis": {
+      "id": "a9a2b74a06720682bb2fa7976159ecc84ee3802d28dd854fd37d1a509bd7f6a7",
+      "image": "sha256:02f2cc4882f8bf87c79a220ac958f58c700bdec0dfb9b9ea61b62fb0e8f1bfcf",
+      "started": "2026-09-30T20:21:45.69156627Z",
+      "state": "running",
+      "health": "healthy"
+    },
+    "whatsapp-bot": {
+      "id": "6bdd717428cb501e61af7480ed24738b3970aec950269befef97b53af224e3b5",
+      "image": "sha256:f420bd666a19af299aa8bb62e44adc5aab60f45a185d4174be25c63dcaf6f640",
+      "started": "2026-09-30T20:48:44.042424138Z",
+      "state": "running",
+      "health": null
+    }
+  },
+  "otherServicesUnchanged": {
+    "badminton-backend": true,
+    "cloudflared": true,
+    "postgres": true,
+    "redis": true,
+    "whatsapp-bot": true
+  },
+  "publicMatchesLocal": true,
+  "publicHtmlChanged": true,
+  "publicHtmlSha256": "cd5ead2f6e11d8a4af4855ee148e3d8a05c2140b2a21a8066460c675f910990a",
+  "health": {
+    "public": {
+      "status": "ok"
+    },
+    "local": {
+      "status": "ok"
+    }
+  },
+  "liveBrowser": {
+    "layouts": [
+      {
+        "width": 375,
+        "route": "availability",
+        "path": "/availability",
+        "scroll": 375,
+        "hasTheme": true,
+        "heroExpected": true,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 375,
+        "route": "login",
+        "path": "/login",
+        "scroll": 375,
+        "hasTheme": true,
+        "heroExpected": true,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 375,
+        "route": "bookings",
+        "path": "/bookings",
+        "scroll": 375,
+        "hasTheme": true,
+        "heroExpected": false,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 390,
+        "route": "availability",
+        "path": "/availability",
+        "scroll": 390,
+        "hasTheme": true,
+        "heroExpected": true,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 390,
+        "route": "login",
+        "path": "/login",
+        "scroll": 390,
+        "hasTheme": true,
+        "heroExpected": true,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 390,
+        "route": "bookings",
+        "path": "/bookings",
+        "scroll": 390,
+        "hasTheme": true,
+        "heroExpected": false,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 768,
+        "route": "availability",
+        "path": "/availability",
+        "scroll": 753,
+        "hasTheme": true,
+        "heroExpected": true,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 768,
+        "route": "login",
+        "path": "/login",
+        "scroll": 768,
+        "hasTheme": true,
+        "heroExpected": true,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 768,
+        "route": "bookings",
+        "path": "/bookings",
+        "scroll": 768,
+        "hasTheme": true,
+        "heroExpected": false,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 1440,
+        "route": "availability",
+        "path": "/availability",
+        "scroll": 1425,
+        "hasTheme": true,
+        "heroExpected": true,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 1440,
+        "route": "login",
+        "path": "/login",
+        "scroll": 1440,
+        "hasTheme": true,
+        "heroExpected": true,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      },
+      {
+        "width": 1440,
+        "route": "bookings",
+        "path": "/bookings",
+        "scroll": 1440,
+        "hasTheme": true,
+        "heroExpected": false,
+        "heroLoaded": true,
+        "imagesLoaded": true,
+        "alertErrors": [],
+        "clipped": []
+      }
+    ],
+    "errors": [],
+    "consoleErrors": [],
+    "httpErrors": [],
+    "writes": []
+  },
+  "isolatedRegression": {
+    "passed": 107,
+    "failed": 0,
+    "report": "\n\nChange detected:\nbadminton-frontend/agent.md, badminton-frontend/src/App.vue, badminton-frontend/src/components/Dashboard.vue, badminton-frontend/src/components/Navbar.vue, badminton-frontend/src/components/Register.vue, badminton-frontend/src/index.css\n\nMode:\nFULL\n\nAuthentication: PASS\nMembers: PASS\nFamilies: PASS\nBookings: PASS\nParticipation: PASS\nInvoices: PASS\nAdmin: PASS\nFrontend: PASS\nMobile: PASS\nPWA: N/A\nBuild: PASS\n\nTests:\nPassed: 107\nFailed: 0\nSkipped: 0\n\nFailures introduced by this change:\nNone\n\nPre-existing failures:\nNone detected (compare with REGRESSION_BASE when triaging a known baseline).\n\nFinal result:\n\nPASS\n"
+  },
+  "focusedTests": {
+    "passed": 11,
+    "failed": 0
+  },
+  "imageBuild": "PASS",
+  "nginxConfiguration": "PASS",
+  "productionMutations": "Only frontend image/container replacement; browser issued no write requests. No login, booking, invoice or notification mutation performed."
+}

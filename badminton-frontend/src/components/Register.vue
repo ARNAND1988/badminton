@@ -1,12 +1,14 @@
 <template>
-  <div class="flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-8">
-    <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-lg sm:p-8">
+  <div class="arena-auth">
+    <ArenaHero compact />
+    <div class="arena-auth-card w-full max-w-md">
+      <p class="arena-eyebrow">Your next rally starts here</p>
       <div v-if="mode !== 'forgot'" class="mb-6">
         <div class="grid grid-cols-2 rounded-lg bg-slate-100 p-1">
           <button
             type="button"
             class="rounded-md px-4 py-2 text-sm font-semibold transition"
-            :class="mode === 'login' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+            :class="mode === 'login' ? 'arena-auth-tab-active' : 'text-slate-600 hover:text-slate-900'"
             @click="setMode('login')"
           >
             Login
@@ -14,7 +16,7 @@
           <button
             type="button"
             class="rounded-md px-4 py-2 text-sm font-semibold transition"
-            :class="mode === 'register' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+            :class="mode === 'register' ? 'arena-auth-tab-active' : 'text-slate-600 hover:text-slate-900'"
             @click="setMode('register')"
           >
             Register
@@ -37,43 +39,47 @@
 
       <form class="space-y-4" @submit.prevent="submitAuth">
         <div v-if="mode === 'register'">
-          <label class="mb-1 block text-sm font-medium text-slate-700">Name</label>
+          <label for="auth-name" class="mb-1 block text-sm font-medium text-slate-700">Name</label>
           <input
+            id="auth-name"
             v-model="name"
             autocomplete="name"
-            class="w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+            class="form-input"
             placeholder="Your name"
           />
         </div>
 
         <div>
-          <label class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'register' ? 'Email' : 'Name or email' }}</label>
+          <label for="auth-email" class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'register' ? 'Email' : 'Name or email' }}</label>
           <input
+            id="auth-email"
             v-model="email"
             :type="mode === 'register' ? 'email' : 'text'"
             autocomplete="email"
             required
-            class="w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+            class="form-input"
             :placeholder="mode === 'register' ? 'you@example.com' : 'Your name or you@example.com'"
           />
         </div>
 
         <div v-if="mode !== 'forgot' || resetCodeSent">
-          <label class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'forgot' ? 'New password' : 'Password' }}</label>
+          <label for="auth-password" class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'forgot' ? 'New password' : 'Password' }}</label>
           <input
+            id="auth-password"
             v-model="password"
             type="password"
             :autocomplete="mode === 'login' ? 'current-password' : 'new-password'"
             required
             minlength="6"
-            class="w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+            class="form-input"
             placeholder="At least 6 characters"
           />
         </div>
 
         <div v-if="mode === 'forgot' && resetCodeSent">
-          <label class="mb-1 block text-sm font-medium text-slate-700">WhatsApp code</label>
+          <label for="auth-code" class="mb-1 block text-sm font-medium text-slate-700">WhatsApp code</label>
           <input
+            id="auth-code"
             v-model="resetCode"
             type="text"
             inputmode="numeric"
@@ -81,17 +87,18 @@
             required
             maxlength="6"
             pattern="[0-9]{6}"
-            class="w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+            class="form-input"
             placeholder="6-digit code"
           />
         </div>
 
         <div v-if="mode === 'register'">
-          <label class="mb-1 block text-sm font-medium text-slate-700">WhatsApp number <span class="font-normal text-slate-400">optional</span></label>
+          <label for="auth-whatsapp" class="mb-1 block text-sm font-medium text-slate-700">WhatsApp number <span class="font-normal text-slate-400">optional</span></label>
           <input
+            id="auth-whatsapp"
             v-model="whatsappNumber"
             autocomplete="tel"
-            class="w-full rounded-lg border border-slate-300 px-4 py-2 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500"
+            class="form-input"
             placeholder="+31 6 12345678"
           />
         </div>
@@ -102,7 +109,7 @@
         </label>
 
         <button
-          class="w-full rounded-lg bg-indigo-600 py-2.5 font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
+          class="btn-primary w-full"
           :disabled="isSubmitting"
         >
           {{ isSubmitting ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'register' ? 'Create account' : resetCodeSent ? 'Set new password' : 'Send WhatsApp code' }}
@@ -112,7 +119,7 @@
       <button
         v-if="mode === 'login'"
         type="button"
-        class="mt-4 w-full text-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
+        class="mt-4 w-full text-center text-sm font-medium arena-auth-link"
         @click="setMode('forgot')"
       >
         Forgot password?
@@ -120,26 +127,26 @@
       <button
         v-if="mode === 'forgot' && resetCodeSent"
         type="button"
-        class="mt-4 w-full text-center text-sm font-medium text-indigo-600 hover:text-indigo-500 disabled:text-slate-400"
+        class="mt-4 w-full text-center text-sm font-medium arena-auth-link disabled:text-slate-400"
         :disabled="isSubmitting"
         @click="requestAnotherCode"
       >
         Request a new code
       </button>
 
-      <div v-if="msg" class="mt-4 rounded-lg border p-3 text-sm leading-6" :class="messageClass">
+      <div v-if="msg" role="status" aria-live="polite" class="mt-4 rounded-lg border p-3 text-sm leading-6" :class="messageClass">
         {{ msg }}
       </div>
 
       <div v-if="mode !== 'forgot'" class="mt-6 text-center text-sm text-slate-600">
         {{ mode === 'login' ? 'Need a new account?' : 'Already registered?' }}
-        <button type="button" class="font-medium text-indigo-600 hover:text-indigo-500" @click="toggleMode">
+        <button type="button" class="font-medium arena-auth-link" @click="toggleMode">
           {{ mode === 'login' ? 'Register' : 'Login' }}
         </button>
       </div>
       <div v-else class="mt-6 text-center text-sm text-slate-600">
         Remembered your password?
-        <button type="button" class="font-medium text-indigo-600 hover:text-indigo-500" @click="setMode('login')">Back to login</button>
+        <button type="button" class="font-medium arena-auth-link" @click="setMode('login')">Back to login</button>
       </div>
     </div>
   </div>
@@ -147,10 +154,12 @@
 
 <script>
 import { computed, ref } from 'vue'
+import ArenaHero from './ArenaHero.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { notifyAuthChanged, setSessionValue } from '../authSession'
 
 export default {
+  components: { ArenaHero },
   setup() {
     const mode = ref('login')
     const email = ref('')

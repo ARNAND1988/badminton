@@ -1,6 +1,6 @@
 # Smash Arena presentation review
 
-Work is on `design/smash-arena-theme`. No deployment was performed. The working tree was clean before work began. Active application: top-level `badminton-frontend` (Vue 3, Vue Router, Vite, Tailwind); legacy nested copies were left alone.
+Work is on `design/smash-arena-theme`. The initial review preceded deployment; the subsequent user-authorized frontend release is recorded in [DEPLOYMENT.md](DEPLOYMENT.md). The working tree was clean before work began. Active application: top-level `badminton-frontend` (Vue 3, Vue Router, Vite, Tailwind); legacy nested copies were left alone.
 
 ## Existing flows inspected before editing
 

@@ -10,9 +10,20 @@ import click
 import redis as _redis
 from flask.cli import with_appcontext
 from passlib.hash import pbkdf2_sha256
+from sqlalchemy.engine import make_url
 
 db = SQLAlchemy()
 limiter = Limiter(key_func=get_remote_address)
+
+
+def _database_uri(database_url):
+    """Select the installed PostgreSQL driver without relying on ORM defaults."""
+    url = make_url(database_url)
+    if url.drivername in ('postgres', 'postgresql'):
+        # SQLAlchemy 2.1 defaults to psycopg (v3), while this app installs
+        # psycopg2-binary. Preserve credentials, options and explicit drivers.
+        return url.set(drivername='postgresql+psycopg2').render_as_string(hide_password=False)
+    return database_url
 
 
 def create_app():
@@ -22,7 +33,7 @@ def create_app():
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     database_url = os.environ.get("DATABASE_URL") or "sqlite:///db.sqlite"
-    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    app.config['SQLALCHEMY_DATABASE_URI'] = _database_uri(database_url)
     app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY") or "dev-secret"
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 

@@ -51,6 +51,7 @@ ENDPOINT_DOCS = {
     '/api/admin/system-checks/password-reset-test': ('Diagnostics', 'Test password-reset WhatsApp delivery without creating a code.'),
     '/api/admin/system-checks': ('Admin Diagnostics', 'Check backend, WhatsApp bot, Wise profile, and Wise webhook subscription status.'),
     '/api/admin/system-checks/whatsapp-test': ('Admin Diagnostics', 'Send a direct WhatsApp connection test to the configured or provided recipient.'),
+    '/api/admin/system-checks/whatsapp-connection': ('Admin Diagnostics', 'Inspect QR linking, reconnect, or reset the WhatsApp session.'),
     '/api/admin/wise-webhook-events/{event_id}/retry': ('Admin Diagnostics', 'Retry reconciliation for a stored Wise webhook event.'),
 }
 

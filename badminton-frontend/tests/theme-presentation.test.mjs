@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import { parse } from '@vue/compiler-dom'
 import { compileScript, parse as parseSfc } from '@vue/compiler-sfc'
 import { parse as parseJavaScript } from '@babel/parser'
-import { computed, reactive, shallowReadonly } from 'vue'
+import { computed, reactive, ref, shallowReadonly } from 'vue'
 
 const source = (name) => readFileSync(new URL(`../src/components/${name}.vue`, import.meta.url), 'utf8')
 const template = (name) => {
@@ -38,7 +38,8 @@ function attribute(node, name) {
 // Intentional future interaction changes must update this reviewed baseline.
 const interactionBaseline = {
   Register: '0b14e5624de7009b96972836b7280f291c446c787a3c2a524dbd4e85740a33e4',
-  Dashboard: 'fe85a1cd85f26e2dcb32a598d8e25c0fdbf9120c2a5bd28521dacdb3b2f3fa9b',
+  // Reviewed addition: reconnect and explicit session-reset buttons.
+  Dashboard: 'a47bef0bd917a49d48f7c0b841081f5642706d729e81edb8d6267ac8d6b39911',
   Navbar: 'e44b2c04e66c4522497fe65fa745329efa23acdd3054241ff59686b2abdf4dbe'
 }
 for (const [name, expected] of Object.entries(interactionBaseline)) {
@@ -159,5 +160,37 @@ test('shared controller preserves the original state, handlers and lifecycle', (
   const semanticBody = JSON.stringify(controller.body, (key, value) => nonSemanticKeys.has(key) ? undefined : value)
   // Captured from Dashboard.setup before extraction; comments and formatting
   // can change freely. Intentional behavior changes require baseline review.
-  assert.equal(createHash('sha256').update(semanticBody).digest('hex'), '0d15fea284a10ed6752830ebb83ceee751c14a1cb1b92a415474a03c4751cb4b')
+  // Reviewed addition: WhatsApp reconnect/reset and connection refresh lifecycle.
+  assert.equal(createHash('sha256').update(semanticBody).digest('hex'), 'a8a3cfcec975753c80be8f530728cf8d32d4666c6b41fa7d60a3fa9106ff1895')
+})
+
+test('WhatsApp reset requires confirmation and reconnect preserves the session', async () => {
+  const code = readFileSync(new URL('../src/components/dashboard/useDashboard.js', import.meta.url), 'utf8')
+    .replace(/^import .*$/gm, '').replace('export default', 'return').replace('import.meta.env.VITE_API_BASE', "''")
+  const calls = []
+  let confirmed = false, unmount
+  const browser = { location: { origin: 'http://test' }, localStorage: { getItem: () => null },
+    confirm: () => confirmed, clearInterval: () => {}, removeEventListener: () => {} }
+  const mockFetch = async (url, options) => {
+    calls.push({ url, options })
+    return { ok: true, text: async () => JSON.stringify({ ready: false, state: 'qr_required', qr_image: 'new-qr' }) }
+  }
+  const dashboard = new Function('computed', 'ref', 'watch', 'onMounted', 'onBeforeUnmount', 'useRouter',
+    'getSessionValue', 'hasAuthSession', 'clearAuthSession', 'setSessionValue', 'getAuthSessionVersion', 'window', 'fetch', code)(
+    computed, ref, () => {}, () => {}, fn => { unmount = fn }, () => ({}),
+    key => key === 'auth_token' ? 'admin-token' : '', () => true, () => {}, () => {}, () => 0, browser, mockFetch
+  )({ initialView: 'system-checks' })
+  dashboard.systemChecks.value = { whatsapp: { default_test_recipient: '+31612345678' } }
+  await dashboard.reconnectWhatsApp(true)
+  assert.equal(calls.length, 0)
+  await dashboard.reconnectWhatsApp(false)
+  assert.equal(JSON.parse(calls[0].options.body).reset_session, false)
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer admin-token')
+  assert.equal(dashboard.systemChecks.value.whatsapp.qr_image, 'new-qr')
+  assert.equal(dashboard.systemChecks.value.whatsapp.default_test_recipient, '+31612345678')
+  confirmed = true
+  await dashboard.reconnectWhatsApp(true)
+  assert.equal(JSON.parse(calls[2].options.body).reset_session, true)
+  assert.equal(dashboard.whatsappReconnecting.value, false)
+  unmount()
 })

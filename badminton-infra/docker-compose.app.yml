@@ -66,6 +66,9 @@ services:
       context: ../whatsapp-bot
     restart: unless-stopped
     environment:
+      WHATSAPP_PROVIDER: ${WHATSAPP_PROVIDER:-whatsapp_web}
+      WHATSAPP_GROUP_ID: ${WHATSAPP_GROUP_ID:-}
+      WHATSAPP_SESSION_PATH: /data/session
       WHATSAPP_BOT_TOKEN: ${WHATSAPP_BOT_TOKEN:-dev-whatsapp-bot-token}
       BACKEND_URL: http://badminton-backend:8000
       WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
@@ -73,6 +76,9 @@ services:
       WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
       WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
       WHATSAPP_GRAPH_API_VERSION: ${WHATSAPP_GRAPH_API_VERSION:-v23.0}
+    volumes:
+      - whatsapp_bot_data:/data
+    shm_size: 256mb
     ports:
       - "3000:3000"
 
@@ -87,3 +93,4 @@ services:
 
 volumes:
   postgres_app_data:
+  whatsapp_bot_data:

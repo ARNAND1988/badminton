@@ -19,6 +19,7 @@ def send_whatsapp_message(to_phone, message):
     TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, WHATSAPP_FROM.
     """
     bot_url = (os.environ.get('WHATSAPP_BOT_URL') or '').strip()
+    bot_error = None
     if bot_url:
         headers = {}
         bot_token = os.environ.get('WHATSAPP_BOT_TOKEN')
@@ -34,7 +35,9 @@ def send_whatsapp_message(to_phone, message):
             if response.ok:
                 return {'status': 'sent', 'provider': 'whatsapp_bot'}
             current_app.logger.warning('Linked WhatsApp bot failed to send: %s', response.text[:1000])
-        except Exception:
+            bot_error = response.text[:1000]
+        except Exception as exc:
+            bot_error = str(exc)
             current_app.logger.exception('Failed to send through linked WhatsApp bot')
 
     sid = os.environ.get('TWILIO_ACCOUNT_SID')
@@ -53,4 +56,4 @@ def send_whatsapp_message(to_phone, message):
     else:
         # fallback: log message so developer can see it
         logging.getLogger('whatsapp_fallback').info('WhatsApp to %s: %s', to_phone, message)
-        return {'status': 'unavailable', 'error': 'No WhatsApp provider is configured'}
+        return {'status': 'failed' if bot_error else 'unavailable', 'error': bot_error or 'No WhatsApp provider is configured'}

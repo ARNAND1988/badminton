@@ -949,6 +949,15 @@
               <div><strong class="text-slate-700">Token:</strong> {{ systemChecks?.whatsapp?.token_configured ? 'Configured' : 'Missing' }}</div>
               <div><strong class="text-slate-700">Ready:</strong> {{ systemChecks?.whatsapp?.ready ? 'Yes' : 'No' }}</div>
             </div>
+            <template v-if="systemChecks?.whatsapp?.provider === 'whatsapp_web'">
+              <img v-if="systemChecks.whatsapp.qr_image" :src="systemChecks.whatsapp.qr_image" alt="WhatsApp linking QR code" class="mx-auto w-64 max-w-full rounded-xl bg-white p-2" />
+              <p v-if="systemChecks.whatsapp.state === 'qr_required'" class="text-sm text-slate-600">On your phone, open WhatsApp → Linked devices → Link a device, then scan this code. It refreshes automatically.</p>
+              <p v-if="systemChecks.whatsapp.error" class="text-sm text-red-700">{{ systemChecks.whatsapp.error }}</p>
+              <div class="flex flex-wrap gap-2">
+                <button class="btn-dark" :disabled="whatsappReconnecting" @click="reconnectWhatsApp(false)">{{ whatsappReconnecting ? 'Reconnecting…' : 'Reconnect WhatsApp' }}</button>
+                <button class="btn-outline" :disabled="whatsappReconnecting" @click="reconnectWhatsApp(true)">Reset session and get QR code</button>
+              </div>
+            </template>
           </article>
 
           <article class="panel-card space-y-3">

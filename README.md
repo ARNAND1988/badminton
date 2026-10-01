@@ -282,11 +282,44 @@ Production notes:
 - Disable `AUTH_MOCK`.
 - Consider setting `JWT_EXP_SECONDS`.
 
-## Meta WhatsApp Cloud API
+## WhatsApp QR connection and recovery
 
-The WhatsApp adapter uses the official Meta Cloud API. Configure the values from the Meta app dashboard in `badminton-infra/.env`; the backend and adapter must share the same internal `WHATSAPP_BOT_TOKEN`:
+The default WhatsApp provider is the QR-linked bot (`WHATSAPP_PROVIDER=whatsapp_web`).
+Its linked session persists in the `whatsapp_bot_data` Docker volume. The bot
+supports existing group notifications, direct password-reset messages and polls.
+
+To apply WhatsApp changes without restarting the database:
+
+```bash
+cd /home/admin/git-repo/badminton/badminton-infra
+docker compose -f docker-compose.app.yml up -d --build --no-deps whatsapp-bot badminton-backend badminton-frontend
+```
+
+Open **Admin → System checks**. If a QR code appears, scan it from your phone's
+**WhatsApp → Linked devices → Link a device** screen. The connection refreshes
+automatically. **Reconnect WhatsApp** keeps the saved session; **Reset session
+and get QR code** clears only WhatsApp's saved link and requires another scan.
+You can also view the QR code in the terminal:
+
+```bash
+docker compose -f docker-compose.app.yml logs --tail=100 -f whatsapp-bot
+```
+
+After the status becomes ready, use **Send connection test** with your own saved
+number, then **Password-reset delivery test** with an account that has a linked
+WhatsApp number. Group notifications need an enabled template and a valid group
+ID from the WhatsApp Management page. Failed scheduled reminders can retry;
+successful sends remain deduplicated. Do not delete Docker volumes to reconnect.
+
+## Optional Meta WhatsApp Cloud API
+
+To explicitly use the Meta adapter instead of QR linking, configure these values
+from the Meta app dashboard in `badminton-infra/.env`; the backend and adapter
+must share the same internal `WHATSAPP_BOT_TOKEN`. QR reconnect controls are
+available only for `whatsapp_web`:
 
 ```dotenv
+WHATSAPP_PROVIDER=meta_cloud_api
 WHATSAPP_BOT_TOKEN=long-random-internal-token
 WHATSAPP_ACCESS_TOKEN=meta-system-user-token
 WHATSAPP_PHONE_NUMBER_ID=meta-phone-number-id

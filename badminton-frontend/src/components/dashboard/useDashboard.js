@@ -55,6 +55,8 @@ export default function useDashboard(props) {
     const paymentWebhookStatusLoading = ref(false)
     const systemCheckRefreshing = ref(false)
     const systemCheckWhatsAppTesting = ref(false)
+    const whatsappReconnecting = ref(false)
+    let whatsappConnectionTimer
     const passwordResetTesting = ref(false)
     const retryingWiseEventId = ref(null)
     const errorMsg = ref('')
@@ -1095,6 +1097,33 @@ export default function useDashboard(props) {
       }
     }
 
+    async function refreshWhatsAppConnection() {
+      if (activeView.value !== 'system-checks' || !hasToken() || !systemChecks.value || whatsappReconnecting.value) return
+      try {
+        systemChecks.value.whatsapp = {
+          ...systemChecks.value.whatsapp,
+          ...await fetchJson('/api/admin/system-checks/whatsapp-connection')
+        }
+      } catch (_) { /* Keep the last result until the next refresh. */ }
+    }
+
+    async function reconnectWhatsApp(resetSession = false) {
+      if (resetSession && !window.confirm('Reset the WhatsApp session? You will need to scan a new QR code to link WhatsApp again.')) return
+      whatsappReconnecting.value = true
+      try {
+        await fetchJson('/api/admin/system-checks/whatsapp-connection', {
+          method: 'POST', body: JSON.stringify({ reset_session: resetSession })
+        })
+        msg.value = resetSession ? 'WhatsApp session reset. Scan the new QR code when it appears.' : 'WhatsApp is reconnecting.'
+        errorMsg.value = ''
+      } catch (err) {
+        errorMsg.value = err.message
+      } finally {
+        whatsappReconnecting.value = false
+        await refreshWhatsAppConnection()
+      }
+    }
+
     async function runWhatsAppConnectionTest() {
       systemCheckWhatsAppTesting.value = true
       try {
@@ -2048,6 +2077,7 @@ export default function useDashboard(props) {
     })
 
     onMounted(async () => {
+      whatsappConnectionTimer = window.setInterval(refreshWhatsAppConnection, 5000)
       window.addEventListener('badminton-auth-changed', handleAuthChanged)
       if (token()) {
         await loadCurrentUser()
@@ -2058,6 +2088,7 @@ export default function useDashboard(props) {
     })
 
     onBeforeUnmount(() => {
+      window.clearInterval(whatsappConnectionTimer)
       window.removeEventListener('badminton-auth-changed', handleAuthChanged)
     })
 
@@ -2132,6 +2163,8 @@ export default function useDashboard(props) {
       paymentWebhookStatusLoading,
       systemCheckRefreshing,
       systemCheckWhatsAppTesting,
+      whatsappReconnecting,
+      reconnectWhatsApp,
       passwordResetTesting,
       retryingWiseEventId,
       paymentSettings,

@@ -2862,6 +2862,7 @@ def _send_whatsapp_event(event_key, context, dedupe_key=None, message_override=N
         from .models import WhatsAppNotificationLog
         existing_log = WhatsAppNotificationLog.query.filter(
             WhatsAppNotificationLog.event_key == event_key,
+            WhatsAppNotificationLog.status == 'sent',
             WhatsAppNotificationLog.response.contains(dedupe_key)
         ).first()
         if existing_log:
@@ -4114,17 +4115,26 @@ def _check_whatsapp_bot_status():
             'message': 'WHATSAPP_BOT_URL is not configured.',
         }
     try:
-        response = requests.get(f"{bot_url.rstrip('/')}/health", timeout=5)
+        headers = {'X-Bot-Token': os.environ.get('WHATSAPP_BOT_TOKEN', '')}
+        response = requests.get(f"{bot_url.rstrip('/')}/health", headers=headers, timeout=5)
         response.raise_for_status()
         payload = response.json() or {}
+        if payload.get('provider') == 'whatsapp_web':
+            response = requests.get(f"{bot_url.rstrip('/')}/connection", headers=headers, timeout=5)
+            response.raise_for_status()
+            payload = response.json() or {}
         return {
             'status': 'ok' if payload.get('ready') else 'warning',
             'bot_url': bot_url,
             'token_configured': token_configured,
             'ready': bool(payload.get('ready')),
-            'message': 'WhatsApp bot is reachable.',
+            'provider': payload.get('provider'),
+            'state': payload.get('state'),
+            'qr_image': payload.get('qr_image'),
+            'error': payload.get('error'),
+            'message': payload.get('message') or ('WhatsApp is connected.' if payload.get('ready') else 'WhatsApp is not configured. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID for Meta, or use WHATSAPP_PROVIDER=whatsapp_web for QR linking.'),
         }
-    except requests.exceptions.RequestException as exc:
+    except (requests.exceptions.RequestException, ValueError) as exc:
         return {
             'status': 'error',
             'bot_url': bot_url,
@@ -4499,6 +4509,37 @@ def admin_system_checks():
             'related_events': [event.to_dict() for event in _related_wise_events(invoice=invoice, query=query, limit=8)],
         } if query else None,
     })
+
+
+@bookings_bp.route('/admin/system-checks/whatsapp-connection', methods=['GET', 'POST'])
+def admin_whatsapp_connection():
+    user, error = _require_any_admin()
+    if error:
+        return error
+    if request.method == 'GET':
+        return jsonify(_check_whatsapp_bot_status())
+    import os
+    data = request.get_json() or {}
+    reset = data.get('reset_session', False)
+    if not isinstance(reset, bool):
+        return jsonify({'error': 'reset_session must be a boolean'}), 400
+    bot_url = (os.environ.get('WHATSAPP_BOT_URL') or '').strip()
+    if not bot_url:
+        return jsonify({'error': 'WHATSAPP_BOT_URL is not configured.'}), 503
+    try:
+        response = requests.post(
+            f"{bot_url.rstrip('/')}/reconnect", json={'reset_session': reset},
+            headers={'X-Bot-Token': os.environ.get('WHATSAPP_BOT_TOKEN', '')}, timeout=20,
+        )
+        payload = response.json()
+        if not response.ok:
+            return jsonify({'error': payload.get('error') or 'WhatsApp reconnect failed.'}), 502
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        return jsonify({'error': str(exc)}), 502
+    _record_admin_audit(user, 'update', 'whatsapp_connection', None,
+                        'Reset WhatsApp session' if reset else 'Reconnected WhatsApp', {'reset_session': reset})
+    db.session.commit()
+    return jsonify({'status': 'reconnecting'})
 
 
 @bookings_bp.route('/admin/system-checks/whatsapp-test', methods=['POST'])

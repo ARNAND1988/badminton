@@ -448,9 +448,12 @@
         <p class="section-copy mt-1">Review family totals, prepare monthly invoices, and reconcile payments in one place.</p>
         <div class="mt-3 grid gap-2 sm:inline-grid sm:grid-flow-col sm:auto-cols-fr sm:rounded-xl sm:bg-slate-100 sm:p-1">
           <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'invoices' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'invoices'">Monthly invoices</button>
+          <button v-if="isAdmin" class="btn-secondary w-full justify-center" @click="adminCostTab = 'participation'">Participation report</button>
           <button class="btn-secondary w-full justify-center" :class="adminCostTab === 'booking' ? 'bg-white text-indigo-800 shadow-sm' : ''" @click="adminCostTab = 'booking'">Booking costs</button>
         </div>
       </div>
+
+      <ParticipationReport v-if="isAdmin && adminCostTab === 'participation'" />
 
       <div v-if="adminCostTab === 'invoices'" class="panel-card">
         <div class="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
@@ -1189,6 +1192,7 @@ import PaymentSettingsView from './dashboard/PaymentSettingsView.vue'
 import NotificationSettingsView from './dashboard/NotificationSettingsView.vue'
 import CostVerificationDialog from './dashboard/CostVerificationDialog.vue'
 import MonthlyInvoiceDetails from './dashboard/MonthlyInvoiceDetails.vue'
+import ParticipationReport from './dashboard/ParticipationReport.vue'
 
 export default {
   components: {
@@ -1200,7 +1204,8 @@ export default {
     PaymentSettingsView,
     NotificationSettingsView,
     CostVerificationDialog,
-    MonthlyInvoiceDetails
+    MonthlyInvoiceDetails,
+    ParticipationReport
   },
   props: {
     initialView: { type: String, default: 'availability' }

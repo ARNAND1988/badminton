@@ -77,6 +77,7 @@ def create_app():
 
     from app.auth import auth_bp
     from app.bookings import bookings_bp
+    from app import participation  # Register read-only report routes before blueprint setup.
     from app.docs import docs_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')

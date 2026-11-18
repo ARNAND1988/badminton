@@ -125,3 +125,44 @@ test('bot HTTP contract protects QR/reset, gates sends, and supports group notif
     assert.equal(clients[0].loggedOut, true)
   } finally { await new Promise((resolve) => server.close(resolve)) }
 })
+
+test('private QR chat forwards verified sender metadata and replies only to the original chat', async () => {
+  const http = require('node:http')
+  const callbacks = []
+  const replies = []
+  const backend = http.createServer(async (req, res) => {
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    callbacks.push({ url: req.url, token: req.headers['x-bot-token'], body: JSON.parse(Buffer.concat(chunks)) })
+    if (callbacks.length === 2) return res.writeHead(204).end()
+    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ reply: 'Member reply' }))
+  })
+  await new Promise((resolve) => backend.listen(0, '127.0.0.1', resolve))
+  try {
+    const { clients } = fixture({ backendUrl: `http://127.0.0.1:${backend.address().port}`, botToken: 'fixture-token' })
+    const [client] = clients
+    client.emit('ready')
+    client.getContactLidAndPhone = async (ids) => {
+      assert.deepEqual(ids, ['31600000000@c.us'])
+      return [{ lid: '12345@lid' }]
+    }
+    client.sendMessage = async (...args) => replies.push(args)
+    const [receive] = client.listeners('message')
+    const message = { type: 'chat', body: '  balance  ', id: { _serialized: 'message-1' }, from: '31600000000@c.us' }
+    await receive({ ...message, from: '111@g.us', author: '12345@lid' })
+    await receive({ ...message, fromMe: true })
+    await receive({ ...message, isStatus: true })
+    assert.equal(callbacks.length, 0)
+
+    await receive(message)
+    await receive({ ...message, from: '12345@lid' })
+    assert.deepEqual(callbacks, Array(2).fill({
+      url: '/internal/whatsapp/member-message',
+      token: 'fixture-token',
+      body: { provider: 'whatsapp_web', message_id: 'message-1', sender: '12345@lid', text: '  balance  ', private: true }
+    }))
+    assert.deepEqual(replies, [['31600000000@c.us', 'Member reply', { linkPreview: false }]])
+  } finally {
+    await new Promise((resolve) => backend.close(resolve))
+  }
+})

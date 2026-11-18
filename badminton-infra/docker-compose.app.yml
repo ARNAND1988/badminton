@@ -35,7 +35,7 @@ services:
       DATABASE_URL: postgresql://badminton_user:strongpassword@postgres:5432/badminton
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: dev-secret
-      JWT_SECRET: dev-jwt-secret
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret}
       FLASK_ENV: production
       # Password-reset and login OTPs must use the linked WhatsApp bot in this
       # public stack. Mock mode returns a code only in the API response and does
@@ -50,6 +50,8 @@ services:
       # Required for the super-admin "Forgot password" WhatsApp journey.
       ANAND_SUPER_ADMIN_PHONE: ${ANAND_SUPER_ADMIN_PHONE:-email:arnand0413@gmail.com}
       WHATSAPP_BOT_URL: http://whatsapp-bot:3000
+      WHATSAPP_BOT_NUMBER: ${WHATSAPP_BOT_NUMBER:-}
+      WHATSAPP_MEMBER_SITE_URL: ${WHATSAPP_MEMBER_SITE_URL:-https://nieuwegeinbadminton.nl}
       WHATSAPP_BOT_TOKEN: ${WHATSAPP_BOT_TOKEN:-dev-whatsapp-bot-token}
     depends_on:
       postgres:
@@ -59,7 +61,7 @@ services:
       whatsapp-bot:
         condition: service_started
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
   whatsapp-bot:
     build:

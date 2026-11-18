@@ -12,6 +12,7 @@ ENDPOINT_DOCS = {
     '/api/auth/login': ('Auth', 'Login with username/email and password.'),
     '/api/auth/forgot-password': ('Auth', 'Send a password reset code to the WhatsApp number on an account.'),
     '/api/auth/reset-password': ('Auth', 'Reset a password with a WhatsApp verification code.'),
+    '/api/account/whatsapp': ('WhatsApp', 'View, create or revoke a private WhatsApp member link.'),
     '/api/auth/me': ('Auth', 'Return the current authenticated user.'),
     '/api/bookings/availability': ('Bookings', 'Check court availability for a date.'),
     '/api/bookings': ('Bookings', 'List or create bookings.'),

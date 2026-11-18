@@ -627,6 +627,29 @@ class WhatsAppNotificationLog(db.Model):
         }
 
 
+class WhatsAppMemberLink(db.Model):
+    __tablename__ = 'whatsapp_member_links'
+
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), primary_key=True)
+    identity = db.Column(db.String(128), unique=True)
+    code_digest = db.Column(db.String(64), unique=True)
+    code_expires_at = db.Column(db.DateTime)
+
+
+class WhatsAppInboundEvent(db.Model):
+    __tablename__ = 'whatsapp_inbound_events'
+
+    event_digest = db.Column(db.String(64), primary_key=True)
+
+
+class WhatsAppLinkRateLimit(db.Model):
+    __tablename__ = 'whatsapp_link_rate_limits'
+
+    key = db.Column(db.String(64), primary_key=True)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    attempts = db.Column(db.Integer, nullable=False)
+
+
 class WhatsAppAccountLink(db.Model):
     """Delivery metadata linking a WhatsApp address to an existing member.
 

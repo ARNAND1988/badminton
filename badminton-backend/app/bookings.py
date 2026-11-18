@@ -7,7 +7,7 @@ import jwt
 from passlib.hash import pbkdf2_sha256
 
 from . import db
-from .models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, MonthlyInvoiceStatus, PlayAvailabilityVote, User, WhatsAppAccountLink, WhatsAppAvailabilityAudit, WhatsAppNotificationPreference, rounded_up_cost_split
+from .models import AdminAuditLog, Booking, BookingParticipant, Court, CourtFreezePeriod, FamilyMember, Invoice, MiscCost, MonthlyInvoiceStatus, PlayAvailabilityVote, User, WhatsAppAccountLink, WhatsAppAvailabilityAudit, WhatsAppMemberLink, WhatsAppNotificationPreference, rounded_up_cost_split
 
 bookings_bp = Blueprint('bookings', __name__)
 
@@ -466,12 +466,13 @@ def _monthly_invoice_status(month_value, create=False):
     return status
 
 
-def _monthly_invoice_summary(user, month_value):
+def _monthly_invoice_summary(user, month_value, *, refresh_bookings=True):
     start_date, end_date = _month_bounds(month_value)
     if not start_date:
         return None
 
-    _mark_past_bookings_completed()
+    if refresh_bookings:
+        _mark_past_bookings_completed()
 
     requested_user = user
     user = _family_owner_for_user(user)
@@ -486,12 +487,20 @@ def _monthly_invoice_summary(user, month_value):
                 participant_labels[member.linked_user.phone] = member.name or member.linked_user.name or member.linked_user.email or member.linked_user.phone
     booking_items = []
     booking_total = 0.0
+    completed = Booking.status.in_(COMPLETED_BOOKING_STATUSES)
+    if not refresh_bookings:
+        # Apply the same cutoff without changing booking or attendance records.
+        today_value, current_time = _current_booking_cutoff_values()
+        completed = db.or_(
+            completed,
+            db.and_(Booking.status != 'cancelled', _booking_ended_filter(today_value, current_time)),
+        )
     bookings = (
         Booking.query
         .filter(
             Booking.booking_date >= start_date,
             Booking.booking_date < end_date,
-            Booking.status.in_(COMPLETED_BOOKING_STATUSES),
+            completed,
         )
         .order_by(Booking.booking_date.asc(), Booking.start_time.asc())
         .all()
@@ -782,14 +791,28 @@ def _is_completed_booking(booking, today_value=None, current_time=None):
     return booking.status in COMPLETED_BOOKING_STATUSES or _booking_has_ended(booking.booking_date, booking.end_time, today_value, current_time)
 
 
+def _booking_ended_filter(today_value, current_time):
+    return db.or_(
+        Booking.booking_date < today_value,
+        db.and_(Booking.booking_date == today_value, Booking.end_time <= current_time),
+    )
+
+
+def _upcoming_bookings_query(today_value, current_time):
+    return Booking.query.filter(
+        ~Booking.status.in_(COMPLETED_BOOKING_STATUSES | {'cancelled'}),
+        db.or_(
+            Booking.booking_date > today_value,
+            db.and_(Booking.booking_date == today_value, Booking.end_time > current_time),
+        ),
+    ).order_by(Booking.booking_date.asc(), Booking.start_time.asc())
+
+
 def _mark_past_bookings_completed(today_value=None, current_time=None):
     if not today_value or not current_time:
         today_value, current_time = _current_booking_cutoff_values()
     completed_bookings = Booking.query.filter(
-        db.or_(
-            Booking.booking_date < today_value,
-            db.and_(Booking.booking_date == today_value, Booking.end_time <= current_time),
-        ),
+        _booking_ended_filter(today_value, current_time),
         ~Booking.status.in_(COMPLETED_BOOKING_STATUSES | {'cancelled'})
     ).all()
     for booking in completed_bookings:
@@ -1526,13 +1549,7 @@ def list_bookings():
                 query = query.filter(Booking.booking_date >= month_start, Booking.booking_date < month_end)
             query = query.order_by(Booking.booking_date.desc(), Booking.start_time.desc())
     elif status_filter == 'upcoming':
-        query = Booking.query.filter(
-            ~Booking.status.in_(COMPLETED_BOOKING_STATUSES | {'cancelled'}),
-            db.or_(
-                Booking.booking_date > today_value,
-                db.and_(Booking.booking_date == today_value, Booking.end_time > current_time),
-            )
-        ).order_by(Booking.booking_date.asc(), Booking.start_time.asc())
+        query = _upcoming_bookings_query(today_value, current_time)
     else:
         query = Booking.query.order_by(Booking.booking_date.asc(), Booking.start_time.asc())
 
@@ -1870,14 +1887,19 @@ def current_user_monthly_invoice():
     if not summary:
         return jsonify({'error': 'month must use YYYY-MM'}), 400
     payment_invoice = _payment_invoice_for_user_month(user, month_value)
+    return jsonify(_apply_monthly_payment_status(summary, payment_invoice))
+
+
+def _apply_monthly_payment_status(summary, payment_invoice):
     if payment_invoice:
-        paid_amount = min(float(summary['total'] or 0.0), float(payment_invoice.paid_amount or 0.0))
+        total = float(summary['total'] or 0.0)
+        paid_amount = min(total, float(payment_invoice.paid_amount or 0.0))
         if payment_invoice.payment_status == 'PAID':
-            paid_amount = float(summary['total'] or 0.0)
+            paid_amount = total
         summary['payment_status'] = payment_invoice.payment_status
         summary['paid_amount'] = round(paid_amount, 2)
-        summary['balance_amount'] = round(max(0.0, float(summary['total'] or 0.0) - paid_amount), 2)
-    return jsonify(summary)
+        summary['balance_amount'] = round(max(0.0, total - paid_amount), 2)
+    return summary
 
 
 @bookings_bp.route('/admin/invoices/monthly', methods=['GET'])
@@ -2431,6 +2453,7 @@ def delete_admin_user(user_id):
         synchronize_session=False
     )
     WhatsAppAccountLink.query.filter_by(user_id=target_user.id).delete()
+    WhatsAppMemberLink.query.filter_by(user_id=target_user.id).delete()
     WhatsAppNotificationPreference.query.filter_by(family_owner_user_id=target_user.id).delete()
     db.session.delete(target_user)
     db.session.commit()

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Register from '../components/Register.vue'
 import Dashboard from '../components/Dashboard.vue'
+import AccountSettings from '../components/AccountSettings.vue'
 import NotFound from '../components/NotFound.vue'
 import { clearAuthSession, getSessionValue, hasAuthSession } from '../authSession'
 
@@ -53,6 +54,12 @@ const routes = [
     component: Dashboard,
     props: { initialView: 'costs' },
     meta: { navLabel: 'My Invoices', requiresAuth: true }
+  },
+  {
+    path: '/account/settings',
+    name: 'account-settings',
+    component: AccountSettings,
+    meta: { navLabel: 'Account settings', requiresAuth: true }
   },
   {
     path: '/admin/bookings',

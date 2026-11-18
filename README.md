@@ -365,6 +365,12 @@ WHATSAPP_GRAPH_API_VERSION=v23.0
 
 Configure the Meta webhook URL as `https://nieuwegeinbadminton.nl/whatsapp/webhook` and subscribe it to WhatsApp message events. Frontend Nginx preserves Meta's signature header and forwards this path to the adapter. Private member commands require `WHATSAPP_APP_SECRET` and a valid signature for the configured phone number ID.
 
+After linking, the Cloud API bot displays **Check balance**, **Latest invoice**,
+and **Next booking** as native reply buttons. A tap runs the command and
+returns an **Open member menu** button. Members can also send `MENU` to reopen
+the choices. An unlinked sender sees **Link my account**, which points to the
+club website's registration and link-code request.
+
 ## Tests
 
 Backend tests:

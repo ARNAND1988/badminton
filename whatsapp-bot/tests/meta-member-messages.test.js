@@ -13,7 +13,12 @@ test('Meta forwards signed private messages, preserves poll handling and sends r
   let onReply
   global.fetch = async (url, options) => {
     calls.push({ url, headers: options.headers, body: JSON.parse(options.body) })
-    if (url.endsWith('/member-message')) return Response.json({ reply: 'Member reply' })
+    if (url.endsWith('/member-message')) {
+      if (JSON.parse(options.body).action_id) {
+        return Response.json({ reply: 'Member reply', buttons: [{ id: 'member:menu', title: 'Open member menu' }] })
+      }
+      return Response.json({ reply: 'Member reply' })
+    }
     if (url.startsWith('https://graph.facebook.com/')) onReply()
     return Response.json({})
   }
@@ -56,6 +61,26 @@ test('Meta forwards signed private messages, preserves poll handling and sends r
     })
     assert.equal(calls[2].body.to, message.from)
     assert.equal(calls[2].body.text.body, 'Member reply')
+
+    const menuTap = {
+      id: 'tap-1', from: message.from, context: { id: 'original-menu' }, type: 'interactive',
+      interactive: { type: 'button_reply', button_reply: { id: 'member:balance', title: 'Check balance' } }
+    }
+    assert.equal((await post([menuTap], { signed: false })).status, 401)
+    const tapped = new Promise((resolve) => { onReply = resolve })
+    assert.equal((await post([{ ...menuTap, group_id: 'test-group' }, menuTap])).status, 200)
+    await tapped
+    assert.equal(calls.length, 5)
+    assert.equal(calls[3].url, 'https://backend.example/internal/whatsapp/member-message')
+    assert.deepEqual(calls[3].body, {
+      provider: 'meta_cloud_api', message_id: 'tap-1', sender: message.from, text: '', private: true, action_id: 'member:balance'
+    })
+    assert.equal(calls[4].body.to, message.from)
+    assert.equal(calls[4].body.type, 'interactive')
+    assert.deepEqual(calls[4].body.interactive, {
+      type: 'button', body: { text: 'Member reply' },
+      action: { buttons: [{ type: 'reply', reply: { id: 'member:menu', title: 'Open member menu' } }] }
+    })
   } finally {
     global.fetch = networkFetch
     await new Promise((resolve) => server.close(resolve))

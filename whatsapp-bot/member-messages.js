@@ -4,13 +4,13 @@ function createMemberMessageForwarder({ backendUrl, botToken, provider }) {
   if (!backendUrl || !botToken || botToken === 'dev-whatsapp-bot-token') return null
   const url = `${backendUrl.replace(/\/$/, '')}/internal/whatsapp/member-message`
 
-  return async ({ id, sender, text, sendReply, trace }) => {
+  return async ({ id, sender, text, actionId, sendReply, trace }) => {
     try {
       const response = await fetch(url, {
         method: 'POST',
         signal: AbortSignal.timeout(10000),
         headers: { 'Content-Type': 'application/json', 'X-Bot-Token': botToken },
-        body: JSON.stringify({ provider, message_id: id, sender, text, private: true })
+        body: JSON.stringify({ provider, message_id: id, sender, text, private: true, ...(actionId ? { action_id: actionId } : {}) })
       })
       trace?.(`Flask returned HTTP ${response.status}`)
       if (!response.ok) {
@@ -18,9 +18,9 @@ function createMemberMessageForwarder({ backendUrl, botToken, provider }) {
         return
       }
       if (response.status === 204) return
-      const { reply } = await response.json()
+      const { reply, buttons } = await response.json()
       if (reply) {
-        await sendReply(reply)
+        await sendReply(reply, buttons)
         trace?.('reply submitted to WhatsApp')
       } else {
         trace?.('Flask returned no reply')

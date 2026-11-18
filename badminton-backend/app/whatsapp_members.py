@@ -43,6 +43,12 @@ menu_actions = (
     ('INVOICE', 'Latest invoice'),
     ('NEXT', 'Next booking'),
 )
+menu_button = ('MENU', 'Open member menu')
+link_button = ('LINK_ACCOUNT', 'Link my account')
+member_buttons = {
+    f'member:{command.lower()}': command
+    for command, _ in (*menu_actions, menu_button, link_button)
+}
 invalid_code = 'That code is invalid or expired. Generate a new code in Account settings.'
 window = timedelta(minutes=10)
 provider_senders = {
@@ -254,7 +260,7 @@ def _redeem(identity, code):
         return 'This WhatsApp account is already linked. Unlink it in Account settings first.'
     if not updated:
         return invalid_code
-    return f'WhatsApp linked.\n\n{_menu_reply()}'
+    return None
 
 
 def _member_invoices(user):
@@ -323,27 +329,55 @@ def _next_booking():
     return f'Next booking: {date}, {booking.start_time}–{booking.end_time} (Europe/Amsterdam)\n{venue}'
 
 
-def _reply(identity, text):
+def _reply_payload(text, buttons=()):
+    payload = {'reply': text}
+    if buttons:
+        payload['buttons'] = [
+            {'id': f'member:{command.lower()}', 'title': title}
+            for command, title in buttons
+        ]
+    return payload
+
+
+def _reply(identity, text, *, native_menu=False):
     parts = text.strip().upper().split(maxsplit=1)
     if not parts:
-        return None
+        return _reply_payload(None)
     command = parts[0]
     if command == 'LINK':
-        return _redeem(identity, parts[1] if len(parts) == 2 else '')
+        error = _redeem(identity, parts[1] if len(parts) == 2 else '')
+        if error:
+            return _reply_payload(error)
+        if native_menu:
+            return _reply_payload('WhatsApp linked. Choose an option.', menu_actions)
+        return _reply_payload(f'WhatsApp linked.\n\n{_menu_reply()}')
+    if native_menu and parts == ['LINK_ACCOUNT']:
+        website = os.environ.get('WHATSAPP_MEMBER_SITE_URL', 'https://nieuwegeinbadminton.nl').rstrip('/')
+        return _reply_payload(
+            'To link your existing account, open Register on the club website and choose '
+            f'Already a member? Link WhatsApp.\n{website}/login',
+        )
     if len(parts) != 1 or command not in {'MENU', 'BALANCE', 'INVOICE', 'NEXT'}:
-        return _with_menu_link('Send MENU for available commands.')
+        if native_menu:
+            return _reply_payload('Open the member menu for available options.', (menu_button,))
+        return _reply_payload(_with_menu_link('Send MENU for available commands.'))
 
     user = User.query.join(WhatsAppMemberLink, WhatsAppMemberLink.user_id == User.id).filter(
         WhatsAppMemberLink.identity == identity,
     ).first()
+    if native_menu and not user:
+        return _reply_payload('Link your account to use the member menu.', (link_button,))
     if command == 'MENU':
+        if native_menu:
+            return _reply_payload('Choose an option.', menu_actions)
         menu = _menu_reply()
-        return menu if user else f'{menu}\n\n{link_help}'
+        return _reply_payload(menu if user else f'{menu}\n\n{link_help}')
     if not user:
-        return link_help
-    if command == 'NEXT':
-        return _with_menu_link(_next_booking())
-    return _with_menu_link(_invoice_reply(user, command))
+        return _reply_payload(link_help)
+    reply = _next_booking() if command == 'NEXT' else _invoice_reply(user, command)
+    if native_menu:
+        return _reply_payload(reply, (menu_button,))
+    return _reply_payload(_with_menu_link(reply))
 
 
 @whatsapp_members_bp.post('/internal/whatsapp/member-message')
@@ -365,6 +399,12 @@ def receive_member_message():
     if not sender_pattern or not sender_pattern.fullmatch(sender) or not 0 < len(message_id) <= 512 or len(text) > 65536:
         return jsonify(error='invalid_message'), 400
 
+    action_id = data.get('action_id')
+    if action_id is not None:
+        if provider != 'meta_cloud_api' or not isinstance(action_id, str) or action_id not in member_buttons:
+            return '', 204
+        text = member_buttons[action_id]
+
     event = WhatsAppInboundEvent
     statement = _insert(event).values(event_digest=_digest(f'{provider}:{message_id}'))
     result = db.session.execute(statement.on_conflict_do_nothing(index_elements=[event.event_digest]))
@@ -375,10 +415,10 @@ def receive_member_message():
     if provider == 'whatsapp_web' and sender.endswith('@c.us'):
         # This address can receive a diagnostic reply. Only a verified LID
         # can resolve the member or redeem a link code.
-        reply = 'I could not verify your WhatsApp identity. Please try again or contact the club if this continues.'
+        payload = _reply_payload('I could not verify your WhatsApp identity. Please try again or contact the club if this continues.')
     else:
-        reply = _reply(f'{provider}:{sender}', text)
+        payload = _reply(f'{provider}:{sender}', text, native_menu=provider == 'meta_cloud_api')
     db.session.commit()
-    response = jsonify(reply=reply)
+    response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store'
     return response

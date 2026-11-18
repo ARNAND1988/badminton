@@ -132,7 +132,7 @@ def test_profile_delivery_number_cannot_access_commands_and_private_menu_is_avai
     user, _ = members[0]
     db.session.add(WhatsAppAccountLink(user_id=user.id, whatsapp_number=user.whatsapp_number))
     db.session.commit()
-    assert 'Account settings' in _reply(receive('  balance  ', sender='31600000003', provider='meta_cloud_api'))
+    assert 'Link your account' in _reply(receive('  balance  ', sender='31600000003', provider='meta_cloud_api'))
     assert 'NEXT' in _reply(receive(' mEnU '))
     assert 'Account settings' in _reply(receive('MENU'))
     assert _reply(receive('BALANCE 31600000003')).startswith('Send MENU for available commands.')
@@ -319,3 +319,39 @@ def test_public_link_code_preserves_pending_and_rejects_ambiguous_recipients(cli
     assert 'WhatsApp linked' in _reply(receive(existing))
     assert client.post(endpoint, json={'identifier': member.email}).status_code == 202
     assert delivered == []
+
+
+
+def test_meta_native_member_buttons_recheck_links_and_deduplicate(client, members, receive):
+    _, headers = members[0]
+    sender = '31600000003'
+
+    def tap(action, message_id, private=True):
+        return client.post(CALLBACK, json={
+            'provider': 'meta_cloud_api', 'private': private, 'sender': sender,
+            'message_id': message_id, 'text': '', 'action_id': action,
+        }, headers={'X-Bot-Token': BOT_TOKEN})
+
+    menu = tap('member:menu', 'unlinked').get_json()
+    assert menu['buttons'] == [{'id': 'member:link_account', 'title': 'Link my account'}]
+    assert 'Already a member?' in _reply(tap('member:link_account', 'link-help'))
+    assert tap('member:unknown', 'unknown').status_code == 204
+    assert tap('member:balance', 'group', private=False).status_code == 204
+
+    code = _issue(client, headers)['message']
+    linked = receive(code, sender=sender, provider='meta_cloud_api').get_json()
+    assert 'WhatsApp linked' in linked['reply']
+    assert [choice['id'] for choice in linked['buttons']] == ['member:balance', 'member:invoice', 'member:next']
+    assert tap('member:menu', 'linked-menu').get_json()['buttons'] == linked['buttons']
+    for action, expected in (
+        ('balance', 'no outstanding balance'),
+        ('invoice', 'no invoices'),
+        ('next', 'no upcoming bookings'),
+    ):
+        result = tap(f'member:{action}', action).get_json()
+        assert expected in result['reply']
+        assert result['buttons'] == [{'id': 'member:menu', 'title': 'Open member menu'}]
+        assert tap(f'member:{action}', action).status_code == 204
+
+    client.delete(SETTINGS, headers=headers)
+    assert tap('member:balance', 'revoked').get_json()['buttons'] == menu['buttons']

@@ -193,3 +193,38 @@ test('MENU continues to the verification reply when WhatsApp identity lookup sta
   assert.equal(callbacks[0].sender, from)
   assert.deepEqual(replies, [[from, 'Identity unavailable', { linkPreview: false }]])
 })
+
+test('accepts device-qualified private chat IDs and split message keys while rejecting group chats', async (t) => {
+  const callbacks = []
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    callbacks.push(JSON.parse(options.body))
+    return Response.json({ reply: 'Member menu' })
+  })
+  const { clients } = fixture({ backendUrl: 'http://backend.invalid', botToken: 'fixture-token' })
+  const [client] = clients
+  const replies = []
+  client.getContactLidAndPhone = async (ids) => {
+    assert.deepEqual(ids, ['31600000000@c.us'])
+    return [{ lid: '12345@lid' }]
+  }
+  client.sendMessage = async (...args) => replies.push(args)
+  client.emit('ready')
+  const [receive] = client.listeners('message')
+  const message = { type: 'chat', body: 'MENU', from: '12345:12@lid' }
+
+  await receive({ ...message, id: { remote: '12345:12@lid', id: 'ABC123' } })
+  await receive({
+    ...message,
+    from: '31600000000:7@s.whatsapp.net',
+    id: { remote: { _serialized: '31600000000:7@s.whatsapp.net' }, _serialized: 'phone-key' }
+  })
+  await receive({ ...message, id: { remote: '77@g.us', id: 'GROUP123' } })
+  await receive({ ...message, from: '77@g.us', id: { remote: '12345@lid', id: 'GROUP456' } })
+  await receive({ ...message, id: {} })
+
+  assert.deepEqual(callbacks.map(({ sender, message_id }) => [sender, message_id]), [
+    ['12345@lid', 'false_12345:12@lid_ABC123'],
+    ['12345@lid', 'phone-key']
+  ])
+  assert.deepEqual(replies.map(([address]) => address), ['12345@lid', '31600000000@c.us'])
+})

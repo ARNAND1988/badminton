@@ -135,7 +135,7 @@ def test_profile_delivery_number_cannot_access_commands_and_private_menu_is_avai
     assert 'Account settings' in _reply(receive('  balance  ', sender='31600000003', provider='meta_cloud_api'))
     assert 'NEXT' in _reply(receive(' mEnU '))
     assert 'Account settings' in _reply(receive('MENU'))
-    assert _reply(receive('BALANCE 31600000003')) == 'Send MENU for available commands.'
+    assert _reply(receive('BALANCE 31600000003')).startswith('Send MENU for available commands.')
 
 
 def test_rate_limits_are_scoped_and_do_not_reset_on_unlink(client, members, receive):
@@ -189,11 +189,11 @@ def test_family_balance_matches_website_and_latest_invoice_excludes_unissued_or_
     months = ('2026-03', '2026-04', '2026-05')
     website_balance = sum(client.get(f'/api/invoices/monthly?month={month}', headers=headers).get_json()['balance_amount'] for month in months)
     assert website_balance == 27.46
-    assert _reply(receive(' balance ')) == f'Outstanding balance: €{website_balance:.2f} across 2 invoices.\nhttps://club.example/my-invoices'
+    assert _reply(receive(' balance ')).startswith(f'Outstanding balance: €{website_balance:.2f} across 2 invoices.\nhttps://club.example/my-invoices')
     latest = _reply(receive('invoice'))
     assert '€30.00 · Partially paid' in latest
     assert 'Due 2026-05-20' in latest
-    assert latest.endswith('https://club.example/my-invoices')
+    assert 'https://club.example/my-invoices' in latest
     assert 'payments.example' not in latest
 
 
@@ -201,7 +201,7 @@ def test_next_uses_amsterdam_times_for_a_visible_booking_and_handles_empty_sched
     _, headers = members[0]
     _reply(receive(_issue(client, headers)['message']))
     assert _reply(receive('INVOICE')).startswith('You have no invoices.')
-    assert _reply(receive('NEXT')) == 'There are no upcoming bookings.'
+    assert _reply(receive('NEXT')).startswith('There are no upcoming bookings.')
 
     venue = Court(name='Club court', location='Nieuwegein')
     tomorrow = (datetime.now(AMSTERDAM_TZ) + timedelta(days=1)).date()
@@ -232,3 +232,26 @@ def test_unresolved_web_sender_gets_deduplicated_feedback_without_consuming_code
     assert client.get(SETTINGS, headers=headers).get_json()['linked'] is False
     assert 'WhatsApp linked' in _reply(receive(code))
     assert 'could not verify' in _reply(receive('BALANCE', sender='31600000003@c.us'))
+
+
+
+def test_link_confirmation_and_menu_include_tap_to_fill_actions(client, members, receive, monkeypatch):
+    _, headers = members[0]
+    linked_reply = _reply(receive(_issue(client, headers)['message']))
+    menu_reply = _reply(receive('MENU'))
+    for reply in (linked_reply, menu_reply):
+        assert 'then tap Send' in reply
+        for command in ('BALANCE', 'INVOICE', 'NEXT'):
+            assert f'https://wa.me/31600000001?text={command}' in reply
+
+    menu_url = 'https://wa.me/31600000001?text=MENU'
+    assert client.get(SETTINGS, headers=headers).get_json()['menu_url'] == menu_url
+    assert menu_url in _reply(receive('NEXT'))
+    assert client.delete(SETTINGS, headers=headers).status_code == 200
+    assert 'menu_url' not in client.get(SETTINGS, headers=headers).get_json()
+    assert 'Account settings' in _reply(receive('INVOICE'))
+
+    monkeypatch.setenv('WHATSAPP_BOT_NUMBER', 'invalid/number')
+    fallback = _reply(receive('MENU'))
+    assert 'INVOICE — Latest invoice' in fallback
+    assert 'wa.me' not in fallback

@@ -36,7 +36,11 @@ from .models import (
 
 whatsapp_members_bp = Blueprint('whatsapp_members', __name__)
 link_help = 'Open Account settings on the club website to link WhatsApp.'
-menu = 'MENU — show commands\nBALANCE — outstanding invoices\nINVOICE — latest invoice\nNEXT — next booking'
+menu_actions = (
+    ('BALANCE', 'Check balance'),
+    ('INVOICE', 'Latest invoice'),
+    ('NEXT', 'Next booking'),
+)
 invalid_code = 'That code is invalid or expired. Generate a new code in Account settings.'
 window = timedelta(minutes=10)
 provider_senders = {
@@ -90,6 +94,25 @@ def _allow_attempt(key, now, limit):
     return db.session.execute(statement).rowcount == 1
 
 
+def _chat_url(message):
+    number = os.environ.get('WHATSAPP_BOT_NUMBER', '').strip().removeprefix('+')
+    if re.fullmatch(r'[1-9][0-9]{6,14}', number):
+        return f'https://wa.me/{number}?{urlencode({"text": message})}'
+    return None
+
+
+def _menu_reply():
+    if not _chat_url('MENU'):
+        return '\n'.join(f'{command} — {label}' for command, label in menu_actions)
+    choices = '\n\n'.join(f'{label}\n{_chat_url(command)}' for command, label in menu_actions)
+    return f'Choose an option, then tap Send.\n\n{choices}'
+
+
+def _with_menu_link(reply):
+    menu_url = _chat_url('MENU')
+    return f'{reply}\n\nOpen menu\n{menu_url}' if menu_url else reply
+
+
 @whatsapp_members_bp.route('/api/account/whatsapp', methods=['GET', 'POST', 'DELETE'])
 def account_whatsapp():
     user, error = _require_login()
@@ -98,7 +121,12 @@ def account_whatsapp():
 
     if request.method == 'GET':
         link = db.session.get(WhatsAppMemberLink, user.id)
-        return jsonify(linked=bool(link and link.identity), available=bool(_bot_token()))
+        linked = bool(link and link.identity)
+        available = bool(_bot_token())
+        payload = {'linked': linked, 'available': available}
+        if linked and available and (menu_url := _chat_url('MENU')):
+            payload['menu_url'] = menu_url
+        return jsonify(payload)
 
     if request.method == 'DELETE':
         WhatsAppMemberLink.query.filter_by(user_id=user.id).update({
@@ -129,9 +157,7 @@ def account_whatsapp():
         return jsonify(error='Unlink your current WhatsApp account before linking a new one.'), 409
 
     message = f'LINK {code}'
-    number = os.environ.get('WHATSAPP_BOT_NUMBER', '').strip().removeprefix('+')
-    whatsapp_url = f'https://wa.me/{number}?{urlencode({"text": message})}' if re.fullmatch(r'[1-9][0-9]{6,14}', number) else None
-    return jsonify(message=message, whatsapp_url=whatsapp_url, expires_at=expires_at.isoformat() + 'Z')
+    return jsonify(message=message, whatsapp_url=_chat_url(message), expires_at=expires_at.isoformat() + 'Z')
 
 
 def _redeem(identity, code):
@@ -152,7 +178,7 @@ def _redeem(identity, code):
         return 'This WhatsApp account is already linked. Unlink it in Account settings first.'
     if not updated:
         return invalid_code
-    return 'WhatsApp linked. Send MENU to see what you can do.'
+    return f'WhatsApp linked.\n\n{_menu_reply()}'
 
 
 def _member_invoices(user):
@@ -229,18 +255,19 @@ def _reply(identity, text):
     if command == 'LINK':
         return _redeem(identity, parts[1] if len(parts) == 2 else '')
     if len(parts) != 1 or command not in {'MENU', 'BALANCE', 'INVOICE', 'NEXT'}:
-        return 'Send MENU for available commands.'
+        return _with_menu_link('Send MENU for available commands.')
 
     user = User.query.join(WhatsAppMemberLink, WhatsAppMemberLink.user_id == User.id).filter(
         WhatsAppMemberLink.identity == identity,
     ).first()
     if command == 'MENU':
-        return menu if user else f'{menu}\n{link_help}'
+        menu = _menu_reply()
+        return menu if user else f'{menu}\n\n{link_help}'
     if not user:
         return link_help
     if command == 'NEXT':
-        return _next_booking()
-    return _invoice_reply(user, command)
+        return _with_menu_link(_next_booking())
+    return _with_menu_link(_invoice_reply(user, command))
 
 
 @whatsapp_members_bp.post('/internal/whatsapp/member-message')

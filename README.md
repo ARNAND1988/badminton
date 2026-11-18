@@ -331,7 +331,10 @@ adapter uses the WhatsApp-issued sender LID. If WhatsApp cannot resolve the LID
 for a phone-addressed chat, the bot replies that it could not verify the sender. To switch
 providers or WhatsApp accounts, unlink on the website and generate a fresh code.
 
-Send `MENU`, `BALANCE`, `INVOICE` or `NEXT` in the same private chat. Balances
+Send `MENU`, `BALANCE`, `INVOICE` or `NEXT` in the same private chat. With
+the bot number configured, members can open the menu from Account settings or
+tap a link in the bot's reply to fill in a command. Tap **Send** in WhatsApp to
+run it. Balances
 include issued invoices and use the same monthly calculation as **My Invoices**,
 including partial payments. Group messages are ignored. PDFs, itemized charges
 and payment links are available through the signed-in website.

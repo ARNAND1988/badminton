@@ -13,6 +13,7 @@
         <a v-if="pending.whatsapp_url" class="btn-primary inline-flex" :href="pending.whatsapp_url" target="_blank" rel="noopener noreferrer">Open WhatsApp</a>
       </div>
       <div class="flex flex-wrap gap-2">
+        <a v-if="status?.linked && status.menu_url" class="btn-primary inline-flex" :href="status.menu_url" target="_blank" rel="noopener noreferrer">Open WhatsApp menu</a>
         <button v-if="status?.available && !status.linked" class="btn-primary" :disabled="busy" @click="update('POST')">
           {{ pending ? 'Generate new code' : 'Link WhatsApp' }}
         </button>
@@ -57,7 +58,7 @@ async function update(method = 'GET') {
       pending.value = data
       expiryTimer = setTimeout(clearPending, Math.max(0, Date.parse(data.expires_at) - Date.now()))
     } else {
-      status.value = { ...status.value, ...data }
+      status.value = method === 'GET' ? data : { ...status.value, ...data, menu_url: null }
       if (data.linked || method === 'DELETE') clearPending()
     }
   } catch (err) {

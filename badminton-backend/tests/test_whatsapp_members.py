@@ -234,7 +234,6 @@ def test_unresolved_web_sender_gets_deduplicated_feedback_without_consuming_code
     assert 'could not verify' in _reply(receive('BALANCE', sender='31600000003@c.us'))
 
 
-
 def test_link_confirmation_and_menu_include_tap_to_fill_actions(client, members, receive, monkeypatch):
     _, headers = members[0]
     linked_reply = _reply(receive(_issue(client, headers)['message']))
@@ -255,3 +254,68 @@ def test_link_confirmation_and_menu_include_tap_to_fill_actions(client, members,
     fallback = _reply(receive('MENU'))
     assert 'INVOICE — Latest invoice' in fallback
     assert 'wa.me' not in fallback
+
+
+def test_public_link_code_uses_saved_recipient_and_existing_account(client, members, receive, monkeypatch):
+    member, headers = members[0]
+    member.email = 'older@example.com'
+    member.whatsapp_number = '+31 6 00000003'
+    db.session.commit()
+    monkeypatch.setenv('WHATSAPP_BOT_URL', 'http://fixture-bot.invalid')
+    delivered = []
+
+    def send(message, recipient):
+        delivered.append((message, recipient))
+        return 'sent', ''
+
+    monkeypatch.setattr('app.whatsapp_members._send_whatsapp_bot_message', send)
+    endpoint = '/api/auth/whatsapp-link-code'
+    count_before = User.query.count()
+    unknown = client.post(endpoint, json={'identifier': 'no-such@example.com'})
+    assert unknown.status_code == 202
+    assert delivered == []
+
+    result = client.post(endpoint, json={'identifier': ' OLDER@example.com ', 'phone': '+31699999999'})
+    assert result.status_code == 202
+    assert result.get_json() == unknown.get_json()
+    message, recipient = delivered[0]
+    assert recipient == '31600000003'
+    code = message.split('send LINK ', 1)[1].split()[0]
+    assert f'https://wa.me/31600000001?text=LINK+{code}' in message
+    assert code not in result.get_data(as_text=True)
+    assert client.post(endpoint, json={'identifier': '+31 (6) 00000003'}).status_code == 202
+    assert len(delivered) == 1
+    assert 'WhatsApp linked' in _reply(receive(f'LINK {code}'))
+    assert User.query.count() == count_before
+    assert client.get(SETTINGS, headers=headers).get_json()['linked'] is True
+    assert 'invalid or expired' in _reply(receive(f'LINK {code}'))
+
+
+def test_public_link_code_preserves_pending_and_rejects_ambiguous_recipients(client, members, receive, monkeypatch):
+    member, headers = members[0]
+    member.email = 'older@example.com'
+    db.session.commit()
+    monkeypatch.setenv('WHATSAPP_BOT_URL', 'http://fixture-bot.invalid')
+    delivered = []
+
+    def send(message, recipient):
+        delivered.append(recipient)
+        return 'sent', ''
+
+    monkeypatch.setattr('app.whatsapp_members._send_whatsapp_bot_message', send)
+    endpoint = '/api/auth/whatsapp-link-code'
+    other, _ = members[1]
+    other.whatsapp_number = '+31 6 00000003'
+    db.session.commit()
+    assert client.post(endpoint, json={'identifier': member.email}).status_code == 202
+    assert delivered == []
+    assert client.get(SETTINGS, headers=headers).get_json()['linked'] is False
+    other.whatsapp_number = None
+    db.session.commit()
+
+    existing = _issue(client, headers)['message']
+    assert client.post(endpoint, json={'identifier': member.email}).status_code == 202
+    assert delivered == []
+    assert 'WhatsApp linked' in _reply(receive(existing))
+    assert client.post(endpoint, json={'identifier': member.email}).status_code == 202
+    assert delivered == []

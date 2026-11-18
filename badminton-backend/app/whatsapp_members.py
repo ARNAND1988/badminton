@@ -15,6 +15,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
 from . import db
+from .auth import _password_reset_recipient, _validate_email
 from .bookings import (
     AMSTERDAM_TZ,
     _apply_monthly_payment_status,
@@ -22,6 +23,7 @@ from .bookings import (
     _monthly_invoice_summary,
     _payment_family_user_ids,
     _require_login,
+    _send_whatsapp_bot_message,
     _upcoming_bookings_query,
 )
 from .models import (
@@ -143,21 +145,95 @@ def account_whatsapp():
         db.session.rollback()
         return jsonify(error='Too many codes requested. Try again in 10 minutes.'), 429
 
-    code = secrets.token_hex(8).upper()
-    expires_at = now + window
-    link = WhatsAppMemberLink
-    statement = _insert(link).values(user_id=user.id, code_digest=_digest(code), code_expires_at=expires_at)
-    result = db.session.execute(statement.on_conflict_do_update(
-        index_elements=[link.user_id],
-        set_={'code_digest': _digest(code), 'code_expires_at': expires_at},
-        where=link.identity.is_(None),
-    ))
+    code, expires_at = _issue_link_code(user.id, now, replace_pending=True)
     db.session.commit()
-    if result.rowcount != 1:
+    if not code:
         return jsonify(error='Unlink your current WhatsApp account before linking a new one.'), 409
 
     message = f'LINK {code}'
     return jsonify(message=message, whatsapp_url=_chat_url(message), expires_at=expires_at.isoformat() + 'Z')
+
+
+def _issue_link_code(user_id, now, *, replace_pending=False):
+    code = secrets.token_hex(8).upper()
+    expires_at = now + window
+    link = WhatsAppMemberLink
+    values = {'code_digest': _digest(code), 'code_expires_at': expires_at}
+    eligible = link.identity.is_(None)
+    if not replace_pending:
+        eligible &= db.or_(link.code_expires_at.is_(None), link.code_expires_at <= now)
+
+    statement = _insert(link).values(user_id=user_id, **values)
+    result = db.session.execute(statement.on_conflict_do_update(
+        index_elements=[link.user_id], set_=values, where=eligible,
+    ))
+    return (code, expires_at) if result.rowcount == 1 else (None, None)
+
+
+def _phone_digits(value):
+    return re.sub(r'[+ ().-]', '', value)
+
+
+def _matching_phone(digits):
+    phone, whatsapp = User.phone, User.whatsapp_number
+    for separator in '+ ().-':
+        phone = db.func.replace(phone, separator, '')
+        whatsapp = db.func.replace(whatsapp, separator, '')
+    return db.or_(phone == digits, whatsapp == digits)
+
+
+@whatsapp_members_bp.post('/api/auth/whatsapp-link-code')
+def request_whatsapp_link_code():
+    """Send a code to the WhatsApp number already on an existing account."""
+    response = jsonify(status='request_received'), 202
+    data = request.get_json(silent=True)
+    identifier = data.get('identifier') if isinstance(data, dict) else None
+    if not isinstance(identifier, str) or not 0 < len(identifier.strip()) <= 255:
+        return jsonify(error='identifier_required'), 400
+    identifier = identifier.strip().lower()
+    digits = _phone_digits(identifier)
+    if _validate_email(identifier):
+        account_filter = db.func.lower(User.email) == identifier
+    elif re.fullmatch(r'[1-9][0-9]{6,14}', digits):
+        account_filter = _matching_phone(digits)
+    else:
+        return jsonify(error='identifier_required'), 400
+    if not _bot_token() or not os.environ.get('WHATSAPP_BOT_URL'):
+        return jsonify(error='whatsapp_link_unavailable'), 503
+
+    now = _utcnow()
+    if not _allow_attempt(f'public-link-ip:{request.remote_addr}', now, 5):
+        db.session.rollback()
+        return jsonify(error='too_many_requests'), 429
+    accounts = User.query.filter(account_filter).limit(2).all()
+    if len(accounts) != 1:
+        db.session.commit()
+        return response
+    account = accounts[0]
+    recipient = _phone_digits(_password_reset_recipient(account) or '')
+    if (not re.fullmatch(r'[1-9][0-9]{6,14}', recipient)
+            or User.query.filter(User.id != account.id, _matching_phone(recipient)).first()
+            or not _allow_attempt(f'public-link-account:{account.id}', now, 2)):
+        db.session.commit()
+        return response
+
+    user_id = account.id
+    code, _ = _issue_link_code(user_id, now)
+    db.session.commit()
+    if code:
+        message = (
+            f'To link your Nieuwegein Badminton account, send LINK {code} in this chat within 10 minutes. '
+            'Only do this if you requested a link code on the club website.'
+        )
+        if link_url := _chat_url(f'LINK {code}'):
+            message += f'\n\nTap the link, then tap Send.\n{link_url}'
+        status, _ = _send_whatsapp_bot_message(message, recipient=recipient)
+        if status != 'sent':
+            WhatsAppMemberLink.query.filter_by(user_id=user_id, code_digest=_digest(code)).update({
+                'code_digest': None, 'code_expires_at': None,
+            })
+            db.session.commit()
+    return response
 
 
 def _redeem(identity, code):

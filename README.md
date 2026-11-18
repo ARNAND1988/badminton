@@ -331,6 +331,13 @@ adapter uses the WhatsApp-issued sender LID. If WhatsApp cannot resolve the LID
 for a phone-addressed chat, the bot replies that it could not verify the sender. To switch
 providers or WhatsApp accounts, unlink on the website and generate a fresh code.
 
+Existing members can also choose **Already a member? Link WhatsApp** on the
+public registration form. Enter the email or international WhatsApp number on
+the existing account. The bot sends a one-time link code to the saved WhatsApp
+number. Send the code back in that private chat within 10 minutes. This option
+requires a unique saved number. An already-linked account must be unlinked in
+Account settings before changing its chat identity.
+
 Send `MENU`, `BALANCE`, `INVOICE` or `NEXT` in the same private chat. With
 the bot number configured, members can open the menu from Account settings or
 tap a link in the bot's reply to fill in a command. Tap **Send** in WhatsApp to

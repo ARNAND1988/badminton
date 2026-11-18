@@ -25,16 +25,18 @@
       </div>
 
       <h2 class="mb-2 text-center text-2xl font-bold text-slate-900">
-        {{ mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : 'Reset your password' }}
+        {{ mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : mode === 'whatsapp-link' ? 'Link WhatsApp' : 'Reset your password' }}
       </h2>
       <p class="mb-6 text-center text-sm text-slate-600">
         {{ mode === 'login'
           ? 'Use your email and password to continue.'
           : mode === 'register'
             ? 'Add WhatsApp now if you want future updates there.'
-            : resetCodeSent
-              ? 'Enter the code sent to the WhatsApp number linked to your account.'
-              : 'We will send a reset code to the WhatsApp number linked to your account.' }}
+            : mode === 'whatsapp-link'
+              ? 'Enter the email or WhatsApp number already saved on your member account.'
+              : resetCodeSent
+                ? 'Enter the code sent to the WhatsApp number linked to your account.'
+                : 'We will send a reset code to the WhatsApp number linked to your account.' }}
       </p>
 
       <form class="space-y-4" @submit.prevent="submitAuth">
@@ -50,7 +52,7 @@
         </div>
 
         <div>
-          <label for="auth-email" class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'register' ? 'Email' : 'Name or email' }}</label>
+          <label for="auth-email" class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'register' ? 'Email' : mode === 'whatsapp-link' ? 'Email or WhatsApp number' : 'Name or email' }}</label>
           <input
             id="auth-email"
             v-model="email"
@@ -58,11 +60,11 @@
             autocomplete="email"
             required
             class="form-input"
-            :placeholder="mode === 'register' ? 'you@example.com' : 'Your name or you@example.com'"
+            :placeholder="mode === 'register' ? 'you@example.com' : mode === 'whatsapp-link' ? 'Email or international WhatsApp number' : 'Your name or you@example.com'"
           />
         </div>
 
-        <div v-if="mode !== 'forgot' || resetCodeSent">
+        <div v-if="mode === 'login' || mode === 'register' || (mode === 'forgot' && resetCodeSent)">
           <label for="auth-password" class="mb-1 block text-sm font-medium text-slate-700">{{ mode === 'forgot' ? 'New password' : 'Password' }}</label>
           <input
             id="auth-password"
@@ -103,7 +105,7 @@
           />
         </div>
 
-        <label v-if="mode !== 'forgot'" class="flex items-center">
+        <label v-if="mode === 'login' || mode === 'register'" class="flex items-center">
           <input v-model="rememberMe" type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
           <span class="ml-2 text-sm text-slate-600">Remember me</span>
         </label>
@@ -112,7 +114,7 @@
           class="btn-primary w-full"
           :disabled="isSubmitting"
         >
-          {{ isSubmitting ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'register' ? 'Create account' : resetCodeSent ? 'Set new password' : 'Send WhatsApp code' }}
+          {{ isSubmitting ? 'Please wait...' : mode === 'login' ? 'Login' : mode === 'register' ? 'Create account' : mode === 'whatsapp-link' ? 'Send link code' : resetCodeSent ? 'Set new password' : 'Send WhatsApp code' }}
         </button>
       </form>
 
@@ -138,14 +140,24 @@
         {{ msg }}
       </div>
 
-      <div v-if="mode !== 'forgot'" class="mt-6 text-center text-sm text-slate-600">
+      <button
+        v-if="mode === 'register'"
+        type="button"
+        class="mt-4 w-full text-center text-sm font-medium arena-auth-link"
+        :disabled="isSubmitting"
+        @click="openWhatsAppLink"
+      >
+        Already a member? Link WhatsApp
+      </button>
+
+      <div v-if="mode === 'login' || mode === 'register'" class="mt-6 text-center text-sm text-slate-600">
         {{ mode === 'login' ? 'Need a new account?' : 'Already registered?' }}
         <button type="button" class="font-medium arena-auth-link" @click="toggleMode">
           {{ mode === 'login' ? 'Register' : 'Login' }}
         </button>
       </div>
       <div v-else class="mt-6 text-center text-sm text-slate-600">
-        Remembered your password?
+        {{ mode === 'forgot' ? 'Remembered your password?' : 'Prefer to sign in?' }}
         <button type="button" class="font-medium arena-auth-link" @click="setMode('login')">Back to login</button>
       </div>
     </div>
@@ -168,6 +180,7 @@ export default {
     const whatsappNumber = ref('')
     const resetCode = ref('')
     const resetCodeSent = ref(false)
+    const registrationConflict = ref('')
     const msg = ref('')
     const hasError = ref(false)
     const isSubmitting = ref(false)
@@ -187,10 +200,17 @@ export default {
       hasError.value = false
       resetCode.value = ''
       resetCodeSent.value = false
+      registrationConflict.value = ''
     }
 
     function toggleMode() {
       setMode(mode.value === 'login' ? 'register' : 'login')
+    }
+
+    function openWhatsAppLink() {
+      if (registrationConflict.value === 'whatsapp_already_registered') email.value = whatsappNumber.value
+      password.value = ''
+      setMode('whatsapp-link')
     }
 
     function saveSession(data) {
@@ -212,6 +232,12 @@ export default {
         return
       }
 
+      if (mode.value === 'whatsapp-link') {
+        await requestWhatsAppLink()
+        return
+      }
+
+      registrationConflict.value = ''
       const isRegister = mode.value === 'register'
       const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login'
       const payload = isRegister
@@ -243,11 +269,35 @@ export default {
           await router.replace(redirect)
         } else {
           hasError.value = true
+          if (isRegister && res.status === 409) registrationConflict.value = data.error
           msg.value = readableError(data.error, isRegister)
         }
       } catch (err) {
         hasError.value = true
         msg.value = isRegister ? 'Error creating account.' : 'Error logging in.'
+      } finally {
+        isSubmitting.value = false
+      }
+    }
+
+    async function requestWhatsAppLink() {
+      try {
+        const response = await fetch('/api/auth/whatsapp-link-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: email.value })
+        })
+        if (response.ok) {
+          msg.value = 'If the account can be linked, a code will arrive on its saved WhatsApp number. Follow the instructions in the bot’s chat.'
+        } else {
+          hasError.value = true
+          msg.value = response.status === 429
+            ? 'Too many requests. Try again in 10 minutes.'
+            : response.status === 400 ? 'Enter your email or an international WhatsApp number.' : 'WhatsApp linking is unavailable right now.'
+        }
+      } catch {
+        hasError.value = true
+        msg.value = 'WhatsApp linking is unavailable right now.'
       } finally {
         isSubmitting.value = false
       }
@@ -324,6 +374,7 @@ export default {
       setMode,
       toggleMode,
       submitAuth,
+      openWhatsAppLink,
       requestAnotherCode
     }
   }

@@ -49,24 +49,40 @@ function createSession({ createClient, renderQr, backendUrl = '', botToken = '',
       state = 'disconnected'; qrImage = null; lastError = String(reason)
       scheduleReconnect()
     })
+    current.on('message_create', (message) => {
+      if (client !== current || message.body?.trim().toUpperCase() !== 'MENU') return
+      console.info('WhatsApp MENU trace:', message.fromMe ? 'created by paired account' : 'observed incoming event')
+    })
     current.on('message', async (message) => {
-      if (client !== current || state !== 'ready' || !forwardMemberMessage) return
-      if (message.fromMe || message.isStatus || message.author || message.type !== 'chat' || !message.body) return
-      if (!/^[0-9]{1,32}@(c\.us|lid)$/.test(message.from) || !message.id?._serialized) return
+      const trace = message.body?.trim().toUpperCase() === 'MENU'
+        ? (stage) => console.info('WhatsApp MENU trace:', stage)
+        : undefined
+      if (!forwardMemberMessage) return trace?.('callback not configured')
+      if (client !== current || state !== 'ready') return trace?.('session not ready')
+      if (message.fromMe || message.isStatus || message.author || message.type !== 'chat' || !message.body) return trace?.('filtered chat')
+      if (!/^[0-9]{1,32}@(c\.us|lid)$/.test(message.from) || !message.id?._serialized) return trace?.('unsupported chat address or missing message ID')
 
       let sender = message.from
       if (sender.endsWith('@c.us')) {
+        trace?.('resolving sender identity')
+        let timer
         try {
-          const [contact] = await current.getContactLidAndPhone([sender])
+          const [contact] = await Promise.race([
+            current.getContactLidAndPhone([sender]),
+            new Promise((resolve) => { timer = setTimeout(resolve, 5000, []) })
+          ])
           if (/^[0-9]{1,32}@lid$/.test(contact?.lid)) sender = contact.lid
         } catch {
           console.warn('WhatsApp sender identity lookup failed')
+        } finally {
+          clearTimeout(timer)
         }
       }
-      if (client !== current || state !== 'ready') return
+      if (client !== current || state !== 'ready') return trace?.('session changed during identity lookup')
       if (sender.endsWith('@c.us')) console.warn('WhatsApp verified sender identity unavailable')
+      trace?.('forwarding to Flask')
       await forwardMemberMessage({
-        id: message.id._serialized, sender, text: message.body,
+        id: message.id._serialized, sender, text: message.body, trace,
         sendReply: (reply) => current.sendMessage(message.from, reply, { linkPreview: false })
       })
     })

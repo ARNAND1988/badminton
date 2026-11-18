@@ -11,6 +11,12 @@ function clearProfileLocks(root) {
   }
 }
 
+function privateChatAddress(value) {
+  const match = typeof value === 'string' && value.match(/^([0-9]{1,32})(?::[0-9]{1,10})?@(c\.us|s\.whatsapp\.net|lid)$/)
+  if (!match) return null
+  return `${match[1]}@${match[2] === 'lid' ? 'lid' : 'c.us'}`
+}
+
 function createSession({ createClient, renderQr, backendUrl = '', botToken = '', sessionPath = process.env.WHATSAPP_SESSION_PATH || '/data/session', reconnectDelay = 5000 }) {
   let client, qrImage = null, state = 'starting', lastError = null, restarting = false, reconnectTimer, qrVersion = 0
   const settledClients = new WeakSet()
@@ -60,9 +66,20 @@ function createSession({ createClient, renderQr, backendUrl = '', botToken = '',
       if (!forwardMemberMessage) return trace?.('callback not configured')
       if (client !== current || state !== 'ready') return trace?.('session not ready')
       if (message.fromMe || message.isStatus || message.author || message.type !== 'chat' || !message.body) return trace?.('filtered chat')
-      if (!/^[0-9]{1,32}@(c\.us|lid)$/.test(message.from) || !message.id?._serialized) return trace?.('unsupported chat address or missing message ID')
+      // Use WhatsApp's message key to identify the conversation when present.
+      // Device-qualified addresses identify the same private account.
+      const remote = message.id?.remote?._serialized ?? message.id?.remote
+      const chat = privateChatAddress(remote ?? message.from)
+      if (!chat || /@(?:g\.us|broadcast|newsletter)$/.test(message.from)) return trace?.('unsupported private chat address')
 
-      let sender = message.from
+      const serialized = message.id?._serialized
+      const key = message.id?.id
+      const messageId = serialized || (typeof key === 'string' && /^[a-z0-9]+$/i.test(key)
+        ? `false_${remote ?? message.from}_${key}`
+        : null)
+      if (typeof messageId !== 'string' || messageId.length > 512) return trace?.('missing or invalid message ID')
+
+      let sender = chat
       if (sender.endsWith('@c.us')) {
         trace?.('resolving sender identity')
         let timer
@@ -71,7 +88,8 @@ function createSession({ createClient, renderQr, backendUrl = '', botToken = '',
             current.getContactLidAndPhone([sender]),
             new Promise((resolve) => { timer = setTimeout(resolve, 5000, []) })
           ])
-          if (/^[0-9]{1,32}@lid$/.test(contact?.lid)) sender = contact.lid
+          const lid = privateChatAddress(contact?.lid)
+          if (lid?.endsWith('@lid')) sender = lid
         } catch {
           console.warn('WhatsApp sender identity lookup failed')
         } finally {
@@ -82,8 +100,8 @@ function createSession({ createClient, renderQr, backendUrl = '', botToken = '',
       if (sender.endsWith('@c.us')) console.warn('WhatsApp verified sender identity unavailable')
       trace?.('forwarding to Flask')
       await forwardMemberMessage({
-        id: message.id._serialized, sender, text: message.body, trace,
-        sendReply: (reply) => current.sendMessage(message.from, reply, { linkPreview: false })
+        id: messageId, sender, text: message.body, trace,
+        sendReply: (reply) => current.sendMessage(chat, reply, { linkPreview: false })
       })
     })
     current.on('vote_update', async (vote) => {

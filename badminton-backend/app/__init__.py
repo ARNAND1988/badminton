@@ -79,10 +79,12 @@ def create_app():
     from app.bookings import bookings_bp
     from app import participation  # Register read-only report routes before blueprint setup.
     from app.docs import docs_bp
+    from app.whatsapp_members import whatsapp_members_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(bookings_bp, url_prefix='/api')
     app.register_blueprint(docs_bp, url_prefix='/api')
+    app.register_blueprint(whatsapp_members_bp)
 
     @app.route("/api/health")
     def health():

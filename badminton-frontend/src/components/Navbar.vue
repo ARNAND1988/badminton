@@ -30,6 +30,7 @@
             <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Signed in as</p>
             <p class="truncate text-sm font-semibold text-slate-900">{{ userDisplayName }}</p>
           </div>
+          <router-link to="/account/settings" class="mt-2 flex min-h-11 items-center rounded-lg px-3 py-2 text-sm font-semibold hover:bg-slate-100" @click="isAccountMenuOpen = false">Account settings</router-link>
           <button type="button" class="mt-2 flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition hover:bg-rose-50" @click="logout">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 4H4v16h5m4-12 4 4-4 4m-5-4h13" /></svg>Logout
           </button>

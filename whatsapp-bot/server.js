@@ -1,6 +1,6 @@
 const provider = process.env.WHATSAPP_PROVIDER || 'whatsapp_web'
 if (provider === 'meta_cloud_api') {
-  require('./meta-server')
+  require('./meta-server').listen(process.env.PORT || 3000, () => console.log('Meta WhatsApp Cloud API adapter listening'))
 } else if (provider === 'whatsapp_web') {
   const { Client, LocalAuth, Poll, MessageMedia } = require('whatsapp-web.js')
   const qrcode = require('qrcode')

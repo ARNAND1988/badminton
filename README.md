@@ -311,6 +311,31 @@ WhatsApp number. Group notifications need an enabled template and a valid group
 ID from the WhatsApp Management page. Failed scheduled reminders can retry;
 successful sends remain deduplicated. Do not delete Docker volumes to reconnect.
 
+### Private WhatsApp member commands
+
+Set a strong, shared `WHATSAPP_BOT_TOKEN` and a strong backend `JWT_SECRET` in
+`badminton-infra/.env` (see `.env.example`). Member commands are disabled with
+the checked-in development defaults. Changing `JWT_SECRET` requires existing
+website sessions to sign in again. The backend's host port binds to loopback.
+The bot calls the backend over the Compose network using `BACKEND_URL` and
+`X-Bot-Token`. The public frontend proxy returns 404 for internal callbacks.
+
+Set `WHATSAPP_BOT_NUMBER` to the bot's international phone number for an **Open
+WhatsApp** button. Set `WHATSAPP_MEMBER_SITE_URL` to your website origin for
+non-production environments. Alembic-managed installations use revision
+`0026_whatsapp_member_links`. The Compose app creates the new tables on startup.
+
+From the signed-in account menu, open **Account settings → WhatsApp** and send
+the displayed `LINK` message to the bot privately within 10 minutes. The QR
+adapter uses the WhatsApp-issued sender LID. If WhatsApp cannot resolve the LID
+for a phone-addressed chat, the adapter does not forward the message. To switch
+providers or WhatsApp accounts, unlink on the website and generate a fresh code.
+
+Send `MENU`, `BALANCE`, `INVOICE` or `NEXT` in the same private chat. Balances
+include issued invoices and use the same monthly calculation as **My Invoices**,
+including partial payments. Group messages are ignored. PDFs, itemized charges
+and payment links are available through the signed-in website.
+
 ## Optional Meta WhatsApp Cloud API
 
 To explicitly use the Meta adapter instead of QR linking, configure these values
@@ -328,7 +353,7 @@ WHATSAPP_APP_SECRET=meta-app-secret
 WHATSAPP_GRAPH_API_VERSION=v23.0
 ```
 
-Configure the Meta webhook URL as `https://nieuwegeinbadminton.nl/whatsapp/webhook` and subscribe it to WhatsApp message events. Frontend Nginx preserves Meta's signature header and forwards this path to the adapter.
+Configure the Meta webhook URL as `https://nieuwegeinbadminton.nl/whatsapp/webhook` and subscribe it to WhatsApp message events. Frontend Nginx preserves Meta's signature header and forwards this path to the adapter. Private member commands require `WHATSAPP_APP_SECRET` and a valid signature for the configured phone number ID.
 
 ## Tests
 

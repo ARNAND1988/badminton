@@ -1,5 +1,6 @@
 const fs = require('fs')
 const path = require('path')
+const { createMemberMessageForwarder } = require('./member-messages')
 
 function clearProfileLocks(root) {
   if (!fs.existsSync(root)) return
@@ -13,6 +14,7 @@ function clearProfileLocks(root) {
 function createSession({ createClient, renderQr, backendUrl = '', botToken = '', sessionPath = process.env.WHATSAPP_SESSION_PATH || '/data/session', reconnectDelay = 5000 }) {
   let client, qrImage = null, state = 'starting', lastError = null, restarting = false, reconnectTimer, qrVersion = 0
   const settledClients = new WeakSet()
+  const forwardMemberMessage = createMemberMessageForwarder({ backendUrl, botToken, provider: 'whatsapp_web' })
   const info = () => ({ ready: state === 'ready', state, provider: 'whatsapp_web', message: {
     starting: 'WhatsApp is starting.', qr_required: 'Scan the QR code in WhatsApp → Linked devices → Link a device.',
     authenticated: 'WhatsApp is linked and loading.', ready: 'WhatsApp is connected.',
@@ -46,6 +48,26 @@ function createSession({ createClient, renderQr, backendUrl = '', botToken = '',
       if (client !== current) return
       state = 'disconnected'; qrImage = null; lastError = String(reason)
       scheduleReconnect()
+    })
+    current.on('message', async (message) => {
+      if (client !== current || state !== 'ready' || !forwardMemberMessage) return
+      if (message.fromMe || message.isStatus || message.author || message.type !== 'chat' || !message.body) return
+      if (!/^[0-9]{1,32}@(c\.us|lid)$/.test(message.from) || !message.id?._serialized) return
+
+      try {
+        // Use one provider identity whether the inbound chat is addressed
+        // by a phone JID or a LID. Reply to the original chat address.
+        const sender = message.from.endsWith('@lid')
+          ? message.from
+          : (await current.getContactLidAndPhone([message.from]))[0]?.lid
+        if (!/^[0-9]{1,32}@lid$/.test(sender)) return
+        await forwardMemberMessage({
+          id: message.id._serialized, sender, text: message.body,
+          sendReply: (reply) => current.sendMessage(message.from, reply, { linkPreview: false })
+        })
+      } catch {
+        console.warn('WhatsApp sender identity lookup failed')
+      }
     })
     current.on('vote_update', async (vote) => {
       if (client !== current || !backendUrl) return

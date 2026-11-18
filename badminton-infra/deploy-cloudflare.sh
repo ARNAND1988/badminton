@@ -5,9 +5,11 @@ cd "$(dirname "$0")"
 
 TOKEN="${CLOUDFLARED_TOKEN:-${CLOUDFLARE_TUNNEL_TOKEN:-}}"
 
-if [ -z "$TOKEN" ] && [ -f .env ]; then
-  TOKEN="$(sed -n 's/^CLOUDFLARED_TOKEN=//p' .env | tail -n 1)"
+SAVED_TOKEN=""
+if [ -f .env ]; then
+  SAVED_TOKEN="$(sed -n 's/^CLOUDFLARED_TOKEN=//p' .env | tail -n 1)"
 fi
+TOKEN="${TOKEN:-$SAVED_TOKEN}"
 
 if [ -z "$TOKEN" ]; then
   printf '%s\n' "CLOUDFLARED_TOKEN is required."
@@ -16,7 +18,15 @@ if [ -z "$TOKEN" ]; then
   exit 1
 fi
 
-umask 077
-printf 'CLOUDFLARED_TOKEN=%s\n' "$TOKEN" > .env
+if [ "$TOKEN" != "$SAVED_TOKEN" ]; then
+  umask 077
+  ENV_TMP="$(mktemp .env.XXXXXX)"
+  trap 'rm -f "$ENV_TMP"' EXIT
+  if [ -f .env ]; then
+    sed '/^CLOUDFLARED_TOKEN=/d' .env > "$ENV_TMP"
+  fi
+  printf 'CLOUDFLARED_TOKEN=%s\n' "$TOKEN" >> "$ENV_TMP"
+  mv "$ENV_TMP" .env
+fi
 
 docker compose -f docker-compose.app.yml -f docker-compose.cloudflare.yml up --build -d --remove-orphans

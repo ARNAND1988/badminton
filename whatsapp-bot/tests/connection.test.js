@@ -170,3 +170,26 @@ test('private QR chat forwards verified sender metadata and replies only to the 
     await new Promise((resolve) => backend.close(resolve))
   }
 })
+
+test('MENU continues to the verification reply when WhatsApp identity lookup stalls', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const callbacks = []
+  t.mock.method(global, 'fetch', async (_url, options) => {
+    callbacks.push(JSON.parse(options.body))
+    return Response.json({ reply: 'Identity unavailable' })
+  })
+  const { clients } = fixture({ backendUrl: 'http://backend.invalid', botToken: 'fixture-token' })
+  const [client] = clients
+  const replies = []
+  client.getContactLidAndPhone = () => new Promise(() => {})
+  client.sendMessage = async (...args) => replies.push(args)
+  client.emit('ready')
+  const [receive] = client.listeners('message')
+  const from = '31600000000@c.us'
+  const handling = receive({ from, type: 'chat', body: 'MENU', id: { _serialized: 'menu-1' } })
+  assert.equal(callbacks.length, 0)
+  t.mock.timers.tick(5000)
+  await handling
+  assert.equal(callbacks[0].sender, from)
+  assert.deepEqual(replies, [[from, 'Identity unavailable', { linkPreview: false }]])
+})

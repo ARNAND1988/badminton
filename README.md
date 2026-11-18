@@ -328,7 +328,7 @@ non-production environments. Alembic-managed installations use revision
 From the signed-in account menu, open **Account settings → WhatsApp** and send
 the displayed `LINK` message to the bot privately within 10 minutes. The QR
 adapter uses the WhatsApp-issued sender LID. If WhatsApp cannot resolve the LID
-for a phone-addressed chat, the adapter does not forward the message. To switch
+for a phone-addressed chat, the bot replies that it could not verify the sender. To switch
 providers or WhatsApp accounts, unlink on the website and generate a fresh code.
 
 Send `MENU`, `BALANCE`, `INVOICE` or `NEXT` in the same private chat. Balances

@@ -162,6 +162,10 @@ test('private QR chat forwards verified sender metadata and replies only to the 
       body: { provider: 'whatsapp_web', message_id: 'message-1', sender: '12345@lid', text: '  balance  ', private: true }
     }))
     assert.deepEqual(replies, [['31600000000@c.us', 'Member reply', { linkPreview: false }]])
+    client.getContactLidAndPhone = async () => []
+    await receive({ ...message, body: 'MENU', id: { _serialized: 'unresolved' } })
+    assert.equal(callbacks[2].body.sender, message.from)
+    assert.deepEqual(replies[1], [message.from, 'Member reply', { linkPreview: false }])
   } finally {
     await new Promise((resolve) => backend.close(resolve))
   }

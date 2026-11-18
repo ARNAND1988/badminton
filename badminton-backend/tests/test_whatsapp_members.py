@@ -221,3 +221,14 @@ def test_default_bot_token_cannot_enable_member_self_service(client, members, re
     assert client.get(SETTINGS, headers=headers).get_json()['available'] is False
     assert client.post(SETTINGS, headers=headers).status_code == 503
     assert receive('MENU', token='dev-whatsapp-bot-token').status_code == 403
+
+
+def test_unresolved_web_sender_gets_deduplicated_feedback_without_consuming_code(client, members, receive):
+    _, headers = members[0]
+    code = _issue(client, headers)['message']
+    unresolved = {'sender': '31600000003@c.us', 'message_id': 'unresolved'}
+    assert 'could not verify' in _reply(receive(code, **unresolved))
+    assert receive(code, **unresolved).status_code == 204
+    assert client.get(SETTINGS, headers=headers).get_json()['linked'] is False
+    assert 'WhatsApp linked' in _reply(receive(code))
+    assert 'could not verify' in _reply(receive('BALANCE', sender='31600000003@c.us'))

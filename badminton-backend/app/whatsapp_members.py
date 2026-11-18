@@ -40,7 +40,7 @@ menu = 'MENU — show commands\nBALANCE — outstanding invoices\nINVOICE — la
 invalid_code = 'That code is invalid or expired. Generate a new code in Account settings.'
 window = timedelta(minutes=10)
 provider_senders = {
-    'whatsapp_web': re.compile(r'[0-9]{1,32}@lid'),
+    'whatsapp_web': re.compile(r'[0-9]{1,32}@(?:lid|c\.us)'),
     'meta_cloud_api': re.compile(r'[0-9]{1,32}'),
 }
 status_labels = {
@@ -269,7 +269,12 @@ def receive_member_message():
         db.session.rollback()
         return '', 204
 
-    reply = _reply(f'{provider}:{sender}', text)
+    if provider == 'whatsapp_web' and sender.endswith('@c.us'):
+        # This address can receive a diagnostic reply. Only a verified LID
+        # can resolve the member or redeem a link code.
+        reply = 'I could not verify your WhatsApp identity. Please try again or contact the club if this continues.'
+    else:
+        reply = _reply(f'{provider}:{sender}', text)
     db.session.commit()
     response = jsonify(reply=reply)
     response.headers['Cache-Control'] = 'no-store'

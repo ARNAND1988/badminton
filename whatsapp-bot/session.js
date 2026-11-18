@@ -54,20 +54,21 @@ function createSession({ createClient, renderQr, backendUrl = '', botToken = '',
       if (message.fromMe || message.isStatus || message.author || message.type !== 'chat' || !message.body) return
       if (!/^[0-9]{1,32}@(c\.us|lid)$/.test(message.from) || !message.id?._serialized) return
 
-      try {
-        // Use one provider identity whether the inbound chat is addressed
-        // by a phone JID or a LID. Reply to the original chat address.
-        const sender = message.from.endsWith('@lid')
-          ? message.from
-          : (await current.getContactLidAndPhone([message.from]))[0]?.lid
-        if (!/^[0-9]{1,32}@lid$/.test(sender)) return
-        await forwardMemberMessage({
-          id: message.id._serialized, sender, text: message.body,
-          sendReply: (reply) => current.sendMessage(message.from, reply, { linkPreview: false })
-        })
-      } catch {
-        console.warn('WhatsApp sender identity lookup failed')
+      let sender = message.from
+      if (sender.endsWith('@c.us')) {
+        try {
+          const [contact] = await current.getContactLidAndPhone([sender])
+          if (/^[0-9]{1,32}@lid$/.test(contact?.lid)) sender = contact.lid
+        } catch {
+          console.warn('WhatsApp sender identity lookup failed')
+        }
       }
+      if (client !== current || state !== 'ready') return
+      if (sender.endsWith('@c.us')) console.warn('WhatsApp verified sender identity unavailable')
+      await forwardMemberMessage({
+        id: message.id._serialized, sender, text: message.body,
+        sendReply: (reply) => current.sendMessage(message.from, reply, { linkPreview: false })
+      })
     })
     current.on('vote_update', async (vote) => {
       if (client !== current || !backendUrl) return

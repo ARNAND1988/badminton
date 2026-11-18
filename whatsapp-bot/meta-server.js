@@ -105,9 +105,12 @@ app.post('/webhook', async (req, res) => {
   for (const entry of req.body.entry || []) {
     for (const change of entry.changes || []) {
       for (const message of change.value?.messages || []) {
+        const button = message.interactive?.button_reply
+        const actionId = message.type === 'interactive' && message.interactive?.type === 'button_reply' &&
+          typeof button?.id === 'string' && button.id.startsWith('member:') ? button.id : null
         const selectedOption = message.interactive?.list_reply?.title || message.interactive?.button_reply?.title || message.text?.body || ''
         const pollMessageId = message.context?.id || ''
-        if (backendUrl && selectedOption && (pollMessageId || message.interactive)) {
+        if (!actionId && backendUrl && selectedOption && (pollMessageId || message.interactive)) {
           try {
             const response = await fetch(`${backendUrl}/api/whatsapp/poll-vote`, {
               method: 'POST',
@@ -127,12 +130,21 @@ app.post('/webhook', async (req, res) => {
         }
         if (!forwardMemberMessage || !phoneNumberId || change.field !== 'messages' ||
             change.value.metadata?.phone_number_id !== phoneNumberId ||
-            message.type !== 'text' || message.group_id || !/^\d{1,32}$/.test(message.from || '') ||
-            !message.id || !message.text?.body) continue
+            message.group_id || !/^\d{1,32}$/.test(message.from || '') ||
+            !message.id || (!actionId && (message.type !== 'text' || !message.text?.body))) continue
         await forwardMemberMessage({
-          id: message.id, sender: message.from, text: message.text.body,
-          sendReply: async (reply) => {
-            const result = await graphMessage({ to: message.from, type: 'text', text: { preview_url: false, body: reply } })
+          id: message.id, sender: message.from, text: actionId ? '' : message.text.body, actionId,
+          sendReply: async (reply, buttons) => {
+            const payload = buttons?.length
+              ? {
+                  type: 'interactive',
+                  interactive: {
+                    type: 'button', body: { text: reply },
+                    action: { buttons: buttons.map((button) => ({ type: 'reply', reply: button })) }
+                  }
+                }
+              : { type: 'text', text: { preview_url: false, body: reply } }
+            const result = await graphMessage({ to: message.from, ...payload })
             if (!result.ok) console.warn('WhatsApp member reply failed:', result.status)
           }
         })

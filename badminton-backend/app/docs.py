@@ -13,6 +13,7 @@ ENDPOINT_DOCS = {
     '/api/auth/forgot-password': ('Auth', 'Send a password reset code to the WhatsApp number on an account.'),
     '/api/auth/reset-password': ('Auth', 'Reset a password with a WhatsApp verification code.'),
     '/api/account/whatsapp': ('WhatsApp', 'View, create or revoke a private WhatsApp member link.'),
+    '/api/auth/whatsapp-link-code': ('Auth', 'Request a link code for the saved WhatsApp number on an existing account.'),
     '/api/auth/me': ('Auth', 'Return the current authenticated user.'),
     '/api/bookings/availability': ('Bookings', 'Check court availability for a date.'),
     '/api/bookings': ('Bookings', 'List or create bookings.'),
@@ -130,6 +131,7 @@ def build_openapi_spec():
                 '/api/auth/verify',
                 '/api/auth/forgot-password',
                 '/api/auth/reset-password',
+                '/api/auth/whatsapp-link-code',
             }
             if path.startswith('/api/') and path not in public_paths:
                 operation['security'] = [{'bearerAuth': []}]

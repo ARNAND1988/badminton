@@ -15,6 +15,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
 from . import db
+from .auth import _password_reset_recipient, _validate_email
 from .bookings import (
     AMSTERDAM_TZ,
     _apply_monthly_payment_status,
@@ -22,6 +23,7 @@ from .bookings import (
     _monthly_invoice_summary,
     _payment_family_user_ids,
     _require_login,
+    _send_whatsapp_bot_message,
     _upcoming_bookings_query,
 )
 from .models import (
@@ -36,7 +38,17 @@ from .models import (
 
 whatsapp_members_bp = Blueprint('whatsapp_members', __name__)
 link_help = 'Open Account settings on the club website to link WhatsApp.'
-menu = 'MENU — show commands\nBALANCE — outstanding invoices\nINVOICE — latest invoice\nNEXT — next booking'
+menu_actions = (
+    ('BALANCE', 'Check balance'),
+    ('INVOICE', 'Latest invoice'),
+    ('NEXT', 'Next booking'),
+)
+menu_button = ('MENU', 'Open member menu')
+link_button = ('LINK_ACCOUNT', 'Link my account')
+member_buttons = {
+    f'member:{command.lower()}': command
+    for command, _ in (*menu_actions, menu_button, link_button)
+}
 invalid_code = 'That code is invalid or expired. Generate a new code in Account settings.'
 window = timedelta(minutes=10)
 provider_senders = {
@@ -90,6 +102,25 @@ def _allow_attempt(key, now, limit):
     return db.session.execute(statement).rowcount == 1
 
 
+def _chat_url(message):
+    number = os.environ.get('WHATSAPP_BOT_NUMBER', '').strip().removeprefix('+')
+    if re.fullmatch(r'[1-9][0-9]{6,14}', number):
+        return f'https://wa.me/{number}?{urlencode({"text": message})}'
+    return None
+
+
+def _menu_reply():
+    if not _chat_url('MENU'):
+        return '\n'.join(f'{command} — {label}' for command, label in menu_actions)
+    choices = '\n\n'.join(f'{label}\n{_chat_url(command)}' for command, label in menu_actions)
+    return f'Choose an option, then tap Send.\n\n{choices}'
+
+
+def _with_menu_link(reply):
+    menu_url = _chat_url('MENU')
+    return f'{reply}\n\nOpen menu\n{menu_url}' if menu_url else reply
+
+
 @whatsapp_members_bp.route('/api/account/whatsapp', methods=['GET', 'POST', 'DELETE'])
 def account_whatsapp():
     user, error = _require_login()
@@ -98,7 +129,12 @@ def account_whatsapp():
 
     if request.method == 'GET':
         link = db.session.get(WhatsAppMemberLink, user.id)
-        return jsonify(linked=bool(link and link.identity), available=bool(_bot_token()))
+        linked = bool(link and link.identity)
+        available = bool(_bot_token())
+        payload = {'linked': linked, 'available': available}
+        if linked and available and (menu_url := _chat_url('MENU')):
+            payload['menu_url'] = menu_url
+        return jsonify(payload)
 
     if request.method == 'DELETE':
         WhatsAppMemberLink.query.filter_by(user_id=user.id).update({
@@ -115,23 +151,95 @@ def account_whatsapp():
         db.session.rollback()
         return jsonify(error='Too many codes requested. Try again in 10 minutes.'), 429
 
-    code = secrets.token_hex(8).upper()
-    expires_at = now + window
-    link = WhatsAppMemberLink
-    statement = _insert(link).values(user_id=user.id, code_digest=_digest(code), code_expires_at=expires_at)
-    result = db.session.execute(statement.on_conflict_do_update(
-        index_elements=[link.user_id],
-        set_={'code_digest': _digest(code), 'code_expires_at': expires_at},
-        where=link.identity.is_(None),
-    ))
+    code, expires_at = _issue_link_code(user.id, now, replace_pending=True)
     db.session.commit()
-    if result.rowcount != 1:
+    if not code:
         return jsonify(error='Unlink your current WhatsApp account before linking a new one.'), 409
 
     message = f'LINK {code}'
-    number = os.environ.get('WHATSAPP_BOT_NUMBER', '').strip().removeprefix('+')
-    whatsapp_url = f'https://wa.me/{number}?{urlencode({"text": message})}' if re.fullmatch(r'[1-9][0-9]{6,14}', number) else None
-    return jsonify(message=message, whatsapp_url=whatsapp_url, expires_at=expires_at.isoformat() + 'Z')
+    return jsonify(message=message, whatsapp_url=_chat_url(message), expires_at=expires_at.isoformat() + 'Z')
+
+
+def _issue_link_code(user_id, now, *, replace_pending=False):
+    code = secrets.token_hex(8).upper()
+    expires_at = now + window
+    link = WhatsAppMemberLink
+    values = {'code_digest': _digest(code), 'code_expires_at': expires_at}
+    eligible = link.identity.is_(None)
+    if not replace_pending:
+        eligible &= db.or_(link.code_expires_at.is_(None), link.code_expires_at <= now)
+
+    statement = _insert(link).values(user_id=user_id, **values)
+    result = db.session.execute(statement.on_conflict_do_update(
+        index_elements=[link.user_id], set_=values, where=eligible,
+    ))
+    return (code, expires_at) if result.rowcount == 1 else (None, None)
+
+
+def _phone_digits(value):
+    return re.sub(r'[+ ().-]', '', value)
+
+
+def _matching_phone(digits):
+    phone, whatsapp = User.phone, User.whatsapp_number
+    for separator in '+ ().-':
+        phone = db.func.replace(phone, separator, '')
+        whatsapp = db.func.replace(whatsapp, separator, '')
+    return db.or_(phone == digits, whatsapp == digits)
+
+
+@whatsapp_members_bp.post('/api/auth/whatsapp-link-code')
+def request_whatsapp_link_code():
+    """Send a code to the WhatsApp number already on an existing account."""
+    response = jsonify(status='request_received'), 202
+    data = request.get_json(silent=True)
+    identifier = data.get('identifier') if isinstance(data, dict) else None
+    if not isinstance(identifier, str) or not 0 < len(identifier.strip()) <= 255:
+        return jsonify(error='identifier_required'), 400
+    identifier = identifier.strip().lower()
+    digits = _phone_digits(identifier)
+    if _validate_email(identifier):
+        account_filter = db.func.lower(User.email) == identifier
+    elif re.fullmatch(r'[1-9][0-9]{6,14}', digits):
+        account_filter = _matching_phone(digits)
+    else:
+        return jsonify(error='identifier_required'), 400
+    if not _bot_token() or not os.environ.get('WHATSAPP_BOT_URL'):
+        return jsonify(error='whatsapp_link_unavailable'), 503
+
+    now = _utcnow()
+    if not _allow_attempt(f'public-link-ip:{request.remote_addr}', now, 5):
+        db.session.rollback()
+        return jsonify(error='too_many_requests'), 429
+    accounts = User.query.filter(account_filter).limit(2).all()
+    if len(accounts) != 1:
+        db.session.commit()
+        return response
+    account = accounts[0]
+    recipient = _phone_digits(_password_reset_recipient(account) or '')
+    if (not re.fullmatch(r'[1-9][0-9]{6,14}', recipient)
+            or User.query.filter(User.id != account.id, _matching_phone(recipient)).first()
+            or not _allow_attempt(f'public-link-account:{account.id}', now, 2)):
+        db.session.commit()
+        return response
+
+    user_id = account.id
+    code, _ = _issue_link_code(user_id, now)
+    db.session.commit()
+    if code:
+        message = (
+            f'To link your Nieuwegein Badminton account, send LINK {code} in this chat within 10 minutes. '
+            'Only do this if you requested a link code on the club website.'
+        )
+        if link_url := _chat_url(f'LINK {code}'):
+            message += f'\n\nTap the link, then tap Send.\n{link_url}'
+        status, _ = _send_whatsapp_bot_message(message, recipient=recipient)
+        if status != 'sent':
+            WhatsAppMemberLink.query.filter_by(user_id=user_id, code_digest=_digest(code)).update({
+                'code_digest': None, 'code_expires_at': None,
+            })
+            db.session.commit()
+    return response
 
 
 def _redeem(identity, code):
@@ -152,7 +260,7 @@ def _redeem(identity, code):
         return 'This WhatsApp account is already linked. Unlink it in Account settings first.'
     if not updated:
         return invalid_code
-    return 'WhatsApp linked. Send MENU to see what you can do.'
+    return None
 
 
 def _member_invoices(user):
@@ -221,26 +329,55 @@ def _next_booking():
     return f'Next booking: {date}, {booking.start_time}–{booking.end_time} (Europe/Amsterdam)\n{venue}'
 
 
-def _reply(identity, text):
+def _reply_payload(text, buttons=()):
+    payload = {'reply': text}
+    if buttons:
+        payload['buttons'] = [
+            {'id': f'member:{command.lower()}', 'title': title}
+            for command, title in buttons
+        ]
+    return payload
+
+
+def _reply(identity, text, *, native_menu=False):
     parts = text.strip().upper().split(maxsplit=1)
     if not parts:
-        return None
+        return _reply_payload(None)
     command = parts[0]
     if command == 'LINK':
-        return _redeem(identity, parts[1] if len(parts) == 2 else '')
+        error = _redeem(identity, parts[1] if len(parts) == 2 else '')
+        if error:
+            return _reply_payload(error)
+        if native_menu:
+            return _reply_payload('WhatsApp linked. Choose an option.', menu_actions)
+        return _reply_payload(f'WhatsApp linked.\n\n{_menu_reply()}')
+    if native_menu and parts == ['LINK_ACCOUNT']:
+        website = os.environ.get('WHATSAPP_MEMBER_SITE_URL', 'https://nieuwegeinbadminton.nl').rstrip('/')
+        return _reply_payload(
+            'To link your existing account, open Register on the club website and choose '
+            f'Already a member? Link WhatsApp.\n{website}/login',
+        )
     if len(parts) != 1 or command not in {'MENU', 'BALANCE', 'INVOICE', 'NEXT'}:
-        return 'Send MENU for available commands.'
+        if native_menu:
+            return _reply_payload('Open the member menu for available options.', (menu_button,))
+        return _reply_payload(_with_menu_link('Send MENU for available commands.'))
 
     user = User.query.join(WhatsAppMemberLink, WhatsAppMemberLink.user_id == User.id).filter(
         WhatsAppMemberLink.identity == identity,
     ).first()
+    if native_menu and not user:
+        return _reply_payload('Link your account to use the member menu.', (link_button,))
     if command == 'MENU':
-        return menu if user else f'{menu}\n{link_help}'
+        if native_menu:
+            return _reply_payload('Choose an option.', menu_actions)
+        menu = _menu_reply()
+        return _reply_payload(menu if user else f'{menu}\n\n{link_help}')
     if not user:
-        return link_help
-    if command == 'NEXT':
-        return _next_booking()
-    return _invoice_reply(user, command)
+        return _reply_payload(link_help)
+    reply = _next_booking() if command == 'NEXT' else _invoice_reply(user, command)
+    if native_menu:
+        return _reply_payload(reply, (menu_button,))
+    return _reply_payload(_with_menu_link(reply))
 
 
 @whatsapp_members_bp.post('/internal/whatsapp/member-message')
@@ -262,6 +399,12 @@ def receive_member_message():
     if not sender_pattern or not sender_pattern.fullmatch(sender) or not 0 < len(message_id) <= 512 or len(text) > 65536:
         return jsonify(error='invalid_message'), 400
 
+    action_id = data.get('action_id')
+    if action_id is not None:
+        if provider != 'meta_cloud_api' or not isinstance(action_id, str) or action_id not in member_buttons:
+            return '', 204
+        text = member_buttons[action_id]
+
     event = WhatsAppInboundEvent
     statement = _insert(event).values(event_digest=_digest(f'{provider}:{message_id}'))
     result = db.session.execute(statement.on_conflict_do_nothing(index_elements=[event.event_digest]))
@@ -272,10 +415,10 @@ def receive_member_message():
     if provider == 'whatsapp_web' and sender.endswith('@c.us'):
         # This address can receive a diagnostic reply. Only a verified LID
         # can resolve the member or redeem a link code.
-        reply = 'I could not verify your WhatsApp identity. Please try again or contact the club if this continues.'
+        payload = _reply_payload('I could not verify your WhatsApp identity. Please try again or contact the club if this continues.')
     else:
-        reply = _reply(f'{provider}:{sender}', text)
+        payload = _reply(f'{provider}:{sender}', text, native_menu=provider == 'meta_cloud_api')
     db.session.commit()
-    response = jsonify(reply=reply)
+    response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store'
     return response
